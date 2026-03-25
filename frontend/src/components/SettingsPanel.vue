@@ -1,45 +1,33 @@
 <template>
-  <div class="settings-page">
-    <div class="settings-grid">
-      <section class="settings-card">
-        <h2>Security</h2>
-        <TwoFactorSetup />
-        <ResetPassword />
-      </section>
+  <div>
+    <div class="hero">
+      <div class="hero-row">
+        <div class="hero-left">
+          <div class="hero-kicker">Account & Administration</div>
+          <h1 class="hero-title">Settings</h1>
+          <div class="hero-subtitle">
+            Manage your security settings and user administration.
+          </div>
+        </div>
+        <div class="hero-right">
+          <span class="chip chip--primary">Settings</span>
+        </div>
+      </div>
+    </div>
 
-      <section v-if="canSeeDevTools || canSeeAdminTools" class="settings-card">
-        <h2>Administration</h2>
-        <CreateUserAdmin />
-      </section>
+    <div class="grid">
+      <TwoFactorSetup />
+      <ResetPassword />
+      <CreateUserAdmin v-if="canSeeDevTools || canSeeAdminTools" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import TwoFactorSetup from "./TwoFactorSetup.vue";
+import TwoFactorSetup from "./TwoFactorSetUp.vue";
 import ResetPassword from "./ResetPassword.vue";
 import CreateUserAdmin from "./CreateUserAdmin.vue";
-import UploadDocumentAdmin from "./UploadDocumentAdmin.vue";
 import { useAccess } from "../composables/useAccess";
 
 const { canSeeDevTools, canSeeAdminTools } = useAccess();
 </script>
-
-<style scoped>
-.settings-page {
-  display: block;
-}
-
-.settings-grid {
-  display: grid;
-  gap: 20px;
-}
-
-.settings-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 20px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
-}
-</style>

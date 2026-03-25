@@ -6,16 +6,16 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { CallRecording } from './call-recording.entity';
+import { Interaction } from './interaction.entity';
 
-@Entity({ name: 'call_transcripts' })
-export class CallTranscript {
+@Entity({ name: 'interaction_transcripts', schema: 'app' })
+export class InteractionTranscript {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => CallRecording, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Interaction, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'recordingId' })
-  recording!: CallRecording;
+  recording!: Interaction;
 
   @Column({ type: 'uniqueidentifier' })
   recordingId!: string;

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: { alias: { "@": resolve(__dirname, "src") } },
   server: {
-    port: 8080, // change if 8080 is busy
+    port: 8082,
     proxy: {
       "^/uiapi/": {
         target: process.env.API_BASE_URL || "http://localhost:3007",

@@ -9,4 +9,7 @@ export const RecordingPath = {
   summary: `${ApiPath.Recordings}/summary`,
   batchTranscribe: `${ApiPath.Recordings}/batch/transcribe`,
   batchInsights: `${ApiPath.Recordings}/batch/insights`,
+  batchInsightsChats: `${ApiPath.Recordings}/batch/insights/chats`,
+  batchJobs: `${ApiPath.Recordings}/jobs`,
+  batchJob: (id: string) => `${ApiPath.Recordings}/jobs/${id}`,
 } as const;

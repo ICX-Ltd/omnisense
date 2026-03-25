@@ -19,6 +19,28 @@ export type NarrativeSummary = {
   notes_on_data_quality: string[];
 };
 
+// Lenient parser used for typed narrative prompts (operations, client_services etc.)
+// Only requires headline + period_summary; rest of schema is prompt-specific.
+export function parseAnyNarrativeJson(jsonText: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new BadRequestException('Narrative model did not return valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new BadRequestException('Narrative JSON was not an object');
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj['headline'] !== 'string') {
+    throw new BadRequestException('Narrative JSON missing string "headline"');
+  }
+  if (typeof obj['period_summary'] !== 'string') {
+    throw new BadRequestException('Narrative JSON missing string "period_summary"');
+  }
+  return obj;
+}
+
 export function parseNarrativeSummaryJson(jsonText: string): NarrativeSummary {
   let parsed: unknown;
 

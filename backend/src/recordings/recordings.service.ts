@@ -1,16 +1,18 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Or, IsNull, Equal, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
 
-import { CallRecording } from '../db/entities/call-recording.entity';
-import { CallTranscript } from '../db/entities/call-transcript.entity';
-import { CallInsight } from '../db/entities/call-insight.entity';
+import { Interaction } from '../db/entities/interaction.entity';
+import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
+import { InteractionInsight } from '../db/entities/interaction-insight.entity';
+import { BatchJob } from '../db/entities/batch-job.entity';
 
 import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
 import { InsightsService } from '../insights/insights.service';
@@ -66,15 +68,18 @@ function pickFilename(url: string, buf: Buffer) {
 
 @Injectable()
 export class RecordingsService {
+  private readonly logger = new Logger(RecordingsService.name);
   private client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   constructor(
-    @InjectRepository(CallRecording)
-    private recordingsRepo: Repository<CallRecording>,
-    @InjectRepository(CallTranscript)
-    private transcriptsRepo: Repository<CallTranscript>,
-    @InjectRepository(CallInsight)
-    private insightsRepo: Repository<CallInsight>,
+    @InjectRepository(Interaction)
+    private recordingsRepo: Repository<Interaction>,
+    @InjectRepository(InteractionTranscript)
+    private transcriptsRepo: Repository<InteractionTranscript>,
+    @InjectRepository(InteractionInsight)
+    private insightsRepo: Repository<InteractionInsight>,
+    @InjectRepository(BatchJob)
+    private batchJobRepo: Repository<BatchJob>,
     private readonly deepgram: TranscriptionDeepgramService,
     private readonly insights: InsightsService,
   ) {}
@@ -86,25 +91,47 @@ export class RecordingsService {
       .join('\n');
   }
 
-  async list(opts: { status?: string; limit: number }) {
+  async list(opts: {
+    status?: string;
+    limit: number;
+    interactionType?: string;
+    campaign?: string;
+    dateFrom?: Date;
+    dateTo?: Date;
+    order?: 'ASC' | 'DESC';
+  }) {
     let where: any = {};
 
     if (opts.status === 'incomplete') {
-      where = {
-        status: In([
-          'pending_transcription',
-          'transcribing',
-          'transcribed',
-          'error',
-        ] as any),
-      };
+      where.status = In([
+        'pending_transcription',
+        'transcribing',
+        'transcribed',
+        'error',
+      ] as any);
     } else if (opts.status) {
-      where = { status: opts.status };
+      where.status = opts.status;
+    }
+
+    if (opts.interactionType) {
+      where.interactionType = opts.interactionType;
+    }
+
+    if (opts.campaign) {
+      where.campaign = opts.campaign;
+    }
+
+    if (opts.dateFrom && opts.dateTo) {
+      where.interactionDateTime = Between(opts.dateFrom, opts.dateTo);
+    } else if (opts.dateFrom) {
+      where.interactionDateTime = MoreThanOrEqual(opts.dateFrom);
+    } else if (opts.dateTo) {
+      where.interactionDateTime = LessThanOrEqual(opts.dateTo);
     }
 
     return this.recordingsRepo.find({
       where,
-      order: { createdAt: 'ASC' },
+      order: { interactionDateTime: opts.order ?? 'DESC' },
       take: opts.limit,
     });
   }
@@ -182,6 +209,12 @@ export class RecordingsService {
     });
     if (!rec) throw new NotFoundException('Recording not found');
 
+    if (rec.interactionType === 'chat') {
+      throw new BadRequestException(
+        'Chat interactions do not require transcription',
+      );
+    }
+
     const provider = (rec.provider || 'openai').toLowerCase();
 
     await this.recordingsRepo.update(rec.id, {
@@ -256,12 +289,15 @@ export class RecordingsService {
     }
 
     try {
-      const result = await this.insights.extractInsightsV2(
+      const result = await this.insights.extractInsights(
         transcript.text,
+        rec.interactionType,
+        rec.campaign,
         provider,
       );
 
       const { rawJsonText, parsed, providerUsed, model } = result;
+      const cs = parsed.client_services;
 
       await this.insightsRepo.upsert(
         {
@@ -269,34 +305,51 @@ export class RecordingsService {
           providerUsed,
           model,
           json: rawJsonText,
-          extractorVersion: 'v2',
+          extractorVersion: 'v3',
 
+          // Shared scalars
+          contact_disposition: parsed.contact_disposition ?? null,
+          conversation_type: parsed.conversation_type ?? null,
           summary_short: parsed.summary_short ?? null,
           summary_detailed: parsed.summary_detailed ?? null,
-          primary_intent: parsed.primary_intent ?? null,
-          resolution_status: parsed.resolution_status ?? null,
           sentiment_overall:
             typeof parsed.sentiment_overall === 'number'
               ? parsed.sentiment_overall
               : null,
 
-          contact_disposition: parsed.contact_disposition ?? null,
-          conversation_type: parsed.conversation_type ?? null,
-          topics_json: JSON.stringify(parsed.topics ?? []),
-
+          // Customer signals
           interest_level: parsed.customer_signals?.interest_level ?? null,
-          objections_json: JSON.stringify(
-            parsed.customer_signals?.objections ?? [],
-          ),
+          decision_timeline: parsed.customer_signals?.decision_timeline ?? null,
+          next_step_agreed: parsed.customer_signals?.next_step_agreed ?? null,
+          objections_json: JSON.stringify(parsed.customer_signals?.objections ?? []),
 
-          dealer_contact_required:
-            parsed.dealer_related?.dealer_contact_required ?? null,
-          dealer_name_if_mentioned:
-            parsed.dealer_related?.dealer_name_if_mentioned ?? null,
+          // Operations
+          overall_score:
+            typeof parsed.operations?.overall_score === 'number'
+              ? parsed.operations.overall_score
+              : null,
+          operations_scores_json: JSON.stringify(parsed.operations?.scores ?? {}),
+          coaching_json: JSON.stringify(parsed.operations?.coaching ?? {}),
 
-          risk_flags_json: JSON.stringify(parsed.risk_flags ?? []),
+          // Call-specific
+          campaign_detected: parsed.campaign_detected ?? null,
+          campaign_compliance_json: parsed.campaign_compliance
+            ? JSON.stringify(parsed.campaign_compliance)
+            : null,
+
+          // Client services scalars
+          is_in_market_now: cs?.is_in_market_now ?? null,
+          has_purchased_elsewhere: cs?.has_purchased_elsewhere ?? null,
+          competitor_purchased: cs?.competitor_purchased ?? null,
+          lost_sale: cs?.lost_sale ?? null,
+          lead_generated_for_dealer: cs?.lead_generated_for_dealer ?? null,
+          dealer_name: cs?.dealer_name ?? null,
+          client_services_json: cs ? JSON.stringify(cs) : null,
+
+          // Shared JSON
           action_items_json: JSON.stringify(parsed.action_items ?? []),
-          agent_coaching_json: JSON.stringify(parsed.agent_coaching ?? {}),
+          key_entities_json: JSON.stringify(parsed.key_entities ?? []),
+          risk_flags_json: JSON.stringify(parsed.risk_flags ?? []),
           data_quality_json: JSON.stringify(parsed.data_quality ?? {}),
         } as any,
         ['recordingId'],
@@ -359,25 +412,46 @@ export class RecordingsService {
   }
 
   async summaryByStatus() {
-    const rows = await this.recordingsRepo
+    const callRows = await this.recordingsRepo
       .createQueryBuilder('r')
       .select('r.status', 'status')
       .addSelect('COUNT(1)', 'count')
+      .where("r.interactionType IS NULL OR r.interactionType = 'call'")
       .groupBy('r.status')
       .getRawMany<{ status: string; count: string }>();
 
-    const byStatus: Record<string, number> = {};
-    for (const r of rows) byStatus[r.status] = parseInt(r.count, 10);
+    const chatRows = await this.recordingsRepo
+      .createQueryBuilder('r')
+      .select('r.status', 'status')
+      .addSelect('COUNT(1)', 'count')
+      .where("r.interactionType = 'chat'")
+      .groupBy('r.status')
+      .getRawMany<{ status: string; count: string }>();
 
-    const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
-    return { total, byStatus };
+    const callsByStatus: Record<string, number> = {};
+    for (const r of callRows) callsByStatus[r.status] = parseInt(r.count, 10);
+
+    const chatsByStatus: Record<string, number> = {};
+    for (const r of chatRows) chatsByStatus[r.status] = parseInt(r.count, 10);
+
+    const callTotal = Object.values(callsByStatus).reduce((a, b) => a + b, 0);
+    const chatTotal = Object.values(chatsByStatus).reduce((a, b) => a + b, 0);
+
+    return {
+      totalRows: callTotal + chatTotal,
+      calls: { total: callTotal, byStatus: callsByStatus },
+      chats: { total: chatTotal, byStatus: chatsByStatus },
+    };
   }
 
   async batchTranscribe(limit: number) {
-    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 10;
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
     const items = await this.recordingsRepo.find({
-      where: { status: 'pending_transcription' as any },
+      where: {
+        status: 'pending_transcription' as any,
+        interactionType: Or(IsNull(), Equal('call')) as any,
+      },
       order: { createdAt: 'ASC' },
       take: n,
     });
@@ -408,7 +482,7 @@ export class RecordingsService {
   }
 
   async batchInsights(limit: number, provider?: InsightsProviderName) {
-    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 10;
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
     const selectedProvider =
       provider ??
@@ -416,7 +490,10 @@ export class RecordingsService {
       'openai';
 
     const items = await this.recordingsRepo.find({
-      where: { status: In(['transcribed'] as any) },
+      where: {
+        status: In(['transcribed'] as any),
+        interactionType: Or(IsNull(), Equal('call')) as any,
+      },
       order: { createdAt: 'ASC' },
       take: n,
     });
@@ -449,5 +526,232 @@ export class RecordingsService {
       providerUsed: selectedProvider,
       results,
     };
+  }
+
+  async batchInsightsChats(limit: number, provider?: InsightsProviderName) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
+
+    const selectedProvider =
+      provider ??
+      (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
+      'openai';
+
+    const items = await this.recordingsRepo.find({
+      where: {
+        status: In(['transcribed'] as any),
+        interactionType: Equal('chat') as any,
+      },
+      order: { createdAt: 'ASC' },
+      take: n,
+    });
+
+    const results: Array<{
+      id: string;
+      ok: boolean;
+      providerUsed?: string;
+      model?: string;
+      error?: string;
+    }> = [];
+
+    for (const r of items) {
+      try {
+        const result = await this.generateInsights(r.id, selectedProvider);
+        results.push({
+          id: r.id,
+          ok: true,
+          providerUsed: result.providerUsed,
+          model: result.model,
+        });
+      } catch (e: any) {
+        results.push({ id: r.id, ok: false, error: e?.message ?? String(e) });
+      }
+    }
+
+    return {
+      requested: n,
+      found: items.length,
+      providerUsed: selectedProvider,
+      results,
+    };
+  }
+
+  // ── Async / fire-and-forget batch methods ────────────────────────────────
+
+  async listJobs(limit = 20) {
+    const jobs = await this.batchJobRepo.find({
+      order: { startedAt: 'DESC' },
+      take: limit,
+    });
+    return jobs.map((j) => this.serializeJob(j));
+  }
+
+  async getJob(id: string) {
+    const job = await this.batchJobRepo.findOne({ where: { id } });
+    if (!job) throw new NotFoundException('Job not found');
+    return this.serializeJob(job);
+  }
+
+  private serializeJob(job: import('../db/entities/batch-job.entity').BatchJob) {
+    return {
+      ...job,
+      errors: job.errorsJson ? (JSON.parse(job.errorsJson) as Array<{ id: string; error: string }>) : [],
+      errorsJson: undefined, // don't expose the raw string
+    };
+  }
+
+  async startBatchTranscribe(limit: number) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
+
+    const items = await this.recordingsRepo.find({
+      where: {
+        status: 'pending_transcription' as any,
+        interactionType: Or(IsNull(), Equal('call')) as any,
+      },
+      order: { createdAt: 'ASC' },
+      take: n,
+    });
+
+    const job = await this.batchJobRepo.save(
+      this.batchJobRepo.create({
+        type: 'transcribe',
+        status: 'running',
+        total: items.length,
+        progress: 0,
+        errorCount: 0,
+        provider: null,
+        completedAt: null,
+      }),
+    );
+
+    setImmediate(() => {
+      this.runBatchBackground(
+        job.id,
+        items.map((r) => r.id),
+        (id) => this.transcribeRecordingById(id),
+      ).catch((err) => {
+        console.error('[BatchJob] transcribe background error:', err);
+        this.batchJobRepo
+          .update(job.id, { status: 'failed', completedAt: new Date() })
+          .catch(() => {});
+      });
+    });
+
+    return { jobId: job.id, type: 'transcribe', total: items.length };
+  }
+
+  async startBatchInsights(limit: number, provider?: InsightsProviderName) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
+
+    const selectedProvider =
+      provider ??
+      (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
+      'openai';
+
+    const items = await this.recordingsRepo.find({
+      where: {
+        status: In(['transcribed'] as any),
+        interactionType: Or(IsNull(), Equal('call')) as any,
+      },
+      order: { createdAt: 'ASC' },
+      take: n,
+    });
+
+    const job = await this.batchJobRepo.save(
+      this.batchJobRepo.create({
+        type: 'insights_calls',
+        status: 'running',
+        total: items.length,
+        progress: 0,
+        errorCount: 0,
+        provider: selectedProvider,
+        completedAt: null,
+      }),
+    );
+
+    setImmediate(() => {
+      this.runBatchBackground(
+        job.id,
+        items.map((r) => r.id),
+        (id) => this.generateInsights(id, selectedProvider),
+      ).catch((err) => {
+        console.error('[BatchJob] insights background error:', err);
+        this.batchJobRepo
+          .update(job.id, { status: 'failed', completedAt: new Date() })
+          .catch(() => {});
+      });
+    });
+
+    return { jobId: job.id, type: 'insights_calls', total: items.length, provider: selectedProvider };
+  }
+
+  async startBatchInsightsChats(limit: number, provider?: InsightsProviderName) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
+
+    const selectedProvider =
+      provider ??
+      (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
+      'openai';
+
+    const items = await this.recordingsRepo.find({
+      where: {
+        status: In(['transcribed'] as any),
+        interactionType: Equal('chat') as any,
+      },
+      order: { createdAt: 'ASC' },
+      take: n,
+    });
+
+    const job = await this.batchJobRepo.save(
+      this.batchJobRepo.create({
+        type: 'insights_chats',
+        status: 'running',
+        total: items.length,
+        progress: 0,
+        errorCount: 0,
+        provider: selectedProvider,
+        completedAt: null,
+      }),
+    );
+
+    setImmediate(() => {
+      this.runBatchBackground(
+        job.id,
+        items.map((r) => r.id),
+        (id) => this.generateInsights(id, selectedProvider),
+      ).catch((err) => {
+        console.error('[BatchJob] insights-chats background error:', err);
+        this.batchJobRepo
+          .update(job.id, { status: 'failed', completedAt: new Date() })
+          .catch(() => {});
+      });
+    });
+
+    return { jobId: job.id, type: 'insights_chats', total: items.length, provider: selectedProvider };
+  }
+
+  private async runBatchBackground(
+    jobId: string,
+    ids: string[],
+    processor: (id: string) => Promise<any>,
+  ) {
+    const errors: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      try {
+        await processor(id);
+      } catch (e: any) {
+        const msg: string = e?.message ?? String(e);
+        this.logger.error(`Batch job ${jobId} — item ${id} failed: ${msg}`);
+        errors.push({ id, error: msg });
+        await this.batchJobRepo.increment({ id: jobId }, 'errorCount', 1);
+      }
+      await this.batchJobRepo.increment({ id: jobId }, 'progress', 1);
+    }
+
+    await this.batchJobRepo.update(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+      errorsJson: errors.length ? JSON.stringify(errors.slice(-50)) : null,
+    });
   }
 }

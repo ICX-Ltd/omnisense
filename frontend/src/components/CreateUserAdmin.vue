@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { toast } from "vue3-toastify";
 import { createUser } from "@/services/user.service";
 
 const loading = ref(false);
+const error = ref("");
+const successMsg = ref("");
 
 const form = ref({
   email: "",
@@ -20,16 +21,18 @@ const canSubmit = computed(() => {
 });
 
 function resetForm() {
-  form.value = {
-    email: "",
-    displayName: "",
-    password: "",
-  };
+  form.value = { email: "", displayName: "", password: "" };
+  error.value = "";
+}
+
+function showSuccess(msg: string) {
+  successMsg.value = msg;
+  setTimeout(() => (successMsg.value = ""), 2500);
 }
 
 async function submit() {
   if (!canSubmit.value) return;
-
+  error.value = "";
   loading.value = true;
 
   try {
@@ -39,19 +42,10 @@ async function submit() {
       password: form.value.password,
     });
 
-    toast.success("User created", {
-      theme: "colored",
-      autoClose: 2500,
-      position: "top-right",
-    });
-
+    showSuccess("User created");
     resetForm();
   } catch (e: any) {
-    toast.error(e?.message ?? "Failed to create user", {
-      theme: "colored",
-      autoClose: 5000,
-      position: "top-right",
-    });
+    error.value = e?.message ?? "Failed to create user";
   } finally {
     loading.value = false;
   }
@@ -59,97 +53,101 @@ async function submit() {
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-header">
-      <div>
-        <h3 class="panel-title">Create user</h3>
-        <p class="panel-subtitle">
-          Create a new user account with email, display name, and password.
-        </p>
+  <div class="tile">
+    <div class="tile-head">
+      <div class="tile-icon">👤</div>
+      <div class="tile-text">
+        <div class="tile-title">Create User</div>
+        <div class="tile-desc">Add a new user account</div>
       </div>
     </div>
 
-    <div class="form-grid">
-      <v-text-field
-        v-model="form.email"
-        label="Email"
-        variant="outlined"
-        density="comfortable"
-        hide-details="auto"
-      />
+    <div class="tile-body">
+      <div class="field-stack">
+        <div class="field-row">
+          <label class="field-label">Email</label>
+          <input
+            v-model="form.email"
+            type="email"
+            class="input"
+            autocomplete="off"
+            :disabled="loading"
+          />
+        </div>
 
-      <v-text-field
-        v-model="form.displayName"
-        label="Display name"
-        variant="outlined"
-        density="comfortable"
-        hide-details="auto"
-      />
+        <div class="field-row">
+          <label class="field-label">Display name</label>
+          <input
+            v-model="form.displayName"
+            type="text"
+            class="input"
+            autocomplete="off"
+            :disabled="loading"
+          />
+        </div>
 
-      <v-text-field
-        v-model="form.password"
-        label="Password"
-        type="password"
-        variant="outlined"
-        density="comfortable"
-        hide-details="auto"
-      />
+        <div class="field-row">
+          <label class="field-label">Password</label>
+          <input
+            v-model="form.password"
+            type="password"
+            class="input"
+            autocomplete="new-password"
+            :disabled="loading"
+          />
+        </div>
+      </div>
+
+      <div class="actions-row" style="margin-top: 14px">
+        <button
+          class="btn btn--ghost"
+          :disabled="loading"
+          @click="resetForm"
+        >
+          Clear
+        </button>
+        <button
+          class="btn btn--primary"
+          :disabled="loading || !canSubmit"
+          @click="submit"
+        >
+          {{ loading ? "Creating…" : "Create user" }}
+        </button>
+      </div>
+
+      <div v-if="successMsg" class="muted" style="margin-top: 8px; color: var(--success)">
+        {{ successMsg }}
+      </div>
+
+      <div v-if="error" class="error-tile" style="margin-top: 10px">
+        <div class="error-title">Error</div>
+        <div class="error-text">{{ error }}</div>
+      </div>
     </div>
-
-    <div class="panel-actions">
-      <v-btn variant="text" :disabled="loading" @click="resetForm">
-        Clear
-      </v-btn>
-
-      <v-btn
-        color="primary"
-        variant="flat"
-        :loading="loading"
-        :disabled="!canSubmit"
-        @click="submit"
-      >
-        Create user
-      </v-btn>
-    </div>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.panel {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 20px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+.tile-text {
+  flex: 1;
+  min-width: 0;
 }
 
-.panel-header {
-  margin-bottom: 18px;
-}
-
-.panel-title {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #122033;
-}
-
-.panel-subtitle {
-  margin: 6px 0 0;
-  color: #5b6b80;
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-.form-grid {
-  display: grid;
-  gap: 14px;
-}
-
-.panel-actions {
+.field-stack {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted, #5b6b80);
 }
 </style>

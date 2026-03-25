@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git Cheatsheet</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1d23;
+    color: #e2e0d8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 11px;
+    margin-bottom: 24px;
+    letter-spacing: 0.5px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .card {
+    background: #22262e;
+    border: 1px solid #2e3340;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .card.full { grid-column: 1 / -1; }
+
+  .card-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid #2e3340;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-header span {
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  .green  { background: #1D9E75; }
+  .blue   { background: #378ADD; }
+  .amber  { background: #EF9F27; }
+  .coral  { background: #D85A30; }
+  .purple { background: #7F77DD; }
+  .teal   { background: #0ce3ff; }
+
+  .green-text  { color: #4ec9a0; }
+  .blue-text   { color: #7ab8f5; }
+  .amber-text  { color: #f5c07a; }
+  .coral-text  { color: #f08060; }
+  .purple-text { color: #b0a8f0; }
+  .teal-text   { color: #4dd9f0; }
+
+  .cmd-list { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .cmd-item { display: flex; flex-direction: column; gap: 3px; }
+
+  .cmd-label {
+    font-size: 10px;
+    color: #9a9890;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+
+  .cmd-block {
+    background: #13151a;
+    border: 1px solid #2e3340;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+
+  .cmd-block:hover { border-color: #4a5060; background: #1a1d23; }
+  .cmd-block:hover .copy-hint { opacity: 1; }
+
+  .copy-hint {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: #7ab8f5;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .prompt { color: #555e70; user-select: none; flex-shrink: 0; }
+  .cmd-text { color: #e8e6df; line-height: 1.6; flex: 1; }
+  .placeholder { color: #f5c07a; }
+  .dim { color: #9a9890; font-size: 11px; }
+  .warning-text { color: #f08060; font-size: 10px; margin-left: auto; }
+
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+
+  .badge {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  .badge-bb { background: #1a2535; color: #7ab8f5; }
+  .badge-gh { background: #1a1f2e; color: #b0a8f0; }
+
+  .copied-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #1D9E75;
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.2s;
+    pointer-events: none;
+  }
+
+  .copied-toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>Git Cheatsheet</h1>
+<p class="subtitle">CLICK ANY COMMAND TO COPY &nbsp;·&nbsp; AI-AGENT-ASSIST <span class="badge badge-bb">BITBUCKET</span> &nbsp;·&nbsp; INSIGHTS &amp; AUTOIGNITE <span class="badge badge-gh">GITHUB</span></p>
+
+<div class="grid">
+
+  <!-- Repo Info -->
+  <div class="card full">
+    <div class="card-header">
+      <div class="dot teal"></div>
+      <span class="teal-text">Repo &amp; User Info — check where you are and who you are</span>
+    </div>
+    <div class="cmd-list">
+      <div class="three-col">
+        <div class="cmd-item">
+          <div class="cmd-label">What repo am I connected to? (shows github / bitbucket URL)</div>
+          <div class="cmd-block" onclick="copy(this, 'git remote -v')">
+            <span class="prompt">$</span>
+            <div class="cmd-text">git remote -v</div>
+            <span class="copy-hint">copy</span>
+          </div>
+        </div>
+        <div class="cmd-item">
+          <div class="cmd-label">Which user is configured for commits?</div>
+          <div class="cmd-block" onclick="copy(this, 'git config user.name && git config user.email')" style="flex-direction:column; align-items:flex-start; gap:4px;">
+            <div style="display:flex;gap:8px;"><span class="prompt">$</span><span class="cmd-text">git config user.name</span></div>
+            <div style="display:flex;gap:8px;"><span class="prompt">$</span><span class="cmd-text">git config user.email</span></div>
+            <span class="copy-hint" style="top:10px;transform:none;">copy</span>
+          </div>
+        </div>
+        <div class="cmd-item">
+          <div class="cmd-label">What branch am I on and what has changed?</div>
+          <div class="cmd-block" onclick="copy(this, 'git status')">
+            <span class="prompt">$</span>
+            <div class="cmd-text">git status</div>
+            <span class="copy-hint">copy</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Branch from QA -->
+  <div class="card">
+    <div class="card-header">
+      <div class="dot green"></div>
+      <span class="green-text">New Branch from QA</span>
+    </div>
+    <div class="cmd-list">
+      <div class="cmd-item">
+        <div class="cmd-label">1. Fetch latest from remote</div>
+        <div class="cmd-block" onclick="copy(this, 'git fetch origin')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git fetch origin</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">2. Switch to QA</div>
+        <div class="cmd-block" onclick="copy(this, 'git switch qa')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git switch qa</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">3. Reset local QA to exactly match origin</div>
+        <div class="cmd-block" onclick="copy(this, 'git reset --hard origin/qa')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git reset --hard origin/qa</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">4. Create and switch to new branch</div>
+        <div class="cmd-block" onclick="copy(this, 'git switch -c feature/AI-XXXX')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git switch -c feature/<span class="placeholder">AI-XXXX</span></div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">5. Push and track remote branch</div>
+        <div class="cmd-block" onclick="copy(this, 'git push -u origin feature/AI-XXXX')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git push -u origin feature/<span class="placeholder">AI-XXXX</span></div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Commit & Push -->
+  <div class="card">
+    <div class="card-header">
+      <div class="dot blue"></div>
+      <span class="blue-text">Commit &amp; Push</span>
+    </div>
+    <div class="cmd-list">
+      <div class="cmd-item">
+        <div class="cmd-label">Check what has changed</div>
+        <div class="cmd-block" onclick="copy(this, 'git status')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git status</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Stage all changes</div>
+        <div class="cmd-block" onclick="copy(this, 'git add .')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git add .</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Stage a specific file</div>
+        <div class="cmd-block" onclick="copy(this, 'git add path/to/file')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git add <span class="placeholder">path/to/file</span></div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Commit with message</div>
+        <div class="cmd-block" onclick="copy(this, `git commit -m 'feat: your message here'`)">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git commit -m '<span class="placeholder">feat: your message</span>'</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Push current branch</div>
+        <div class="cmd-block" onclick="copy(this, 'git push')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git push</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Push new branch for the first time</div>
+        <div class="cmd-block" onclick="copy(this, 'git push -u origin HEAD')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git push -u origin HEAD</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Restore Files -->
+  <div class="card">
+    <div class="card-header">
+      <div class="dot amber"></div>
+      <span class="amber-text">Restore Files from origin/qa</span>
+    </div>
+    <div class="cmd-list">
+      <div class="cmd-item">
+        <div class="cmd-label">Restore any specific files</div>
+        <div class="cmd-block" onclick="copy(this, `git restore --source=origin/qa -- 'path/to/file1' 'path/to/file2'`)">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git restore --source=origin/qa -- '<span class="placeholder">file1</span>' '<span class="placeholder">file2</span>'</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Your common config files</div>
+        <div class="cmd-block" onclick="copy(this, `git restore --source=origin/qa -- 'ui/vite.config.mts' 'ui/components.d.ts'`)">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git restore --source=origin/qa -- '<span class="amber-text">ui/vite.config.mts</span>' '<span class="amber-text">ui/components.d.ts</span>'</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Discard ALL local changes — careful!</div>
+        <div class="cmd-block" onclick="copy(this, 'git restore .')">
+          <span class="prompt">$</span>
+          <div class="cmd-text coral-text">git restore .</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Branch Management -->
+  <div class="card">
+    <div class="card-header">
+      <div class="dot purple"></div>
+      <span class="purple-text">Branch Management</span>
+    </div>
+    <div class="cmd-list">
+      <div class="cmd-item">
+        <div class="cmd-label">List all branches (local and remote)</div>
+        <div class="cmd-block" onclick="copy(this, 'git branch -a')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git branch -a</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Switch to existing branch</div>
+        <div class="cmd-block" onclick="copy(this, 'git switch branch-name')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git switch <span class="placeholder">branch-name</span></div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">Delete local branch</div>
+        <div class="cmd-block" onclick="copy(this, 'git branch -d feature/AI-XXXX')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git branch -d feature/<span class="placeholder">AI-XXXX</span></div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+      <div class="cmd-item">
+        <div class="cmd-label">See last 10 commits</div>
+        <div class="cmd-block" onclick="copy(this, 'git log --oneline -10')">
+          <span class="prompt">$</span>
+          <div class="cmd-text">git log --oneline -10</div>
+          <span class="copy-hint">copy</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset & Sync -->
+  <div class="card full">
+    <div class="card-header">
+      <div class="dot coral"></div>
+      <span class="coral-text">Reset &amp; Sync</span>
+      <span class="warning-text">⚠ these overwrite local changes</span>
+    </div>
+    <div class="cmd-list">
+      <div class="three-col">
+        <div class="cmd-item">
+          <div class="cmd-label">Fetch and reset QA to match origin exactly</div>
+          <div class="cmd-block" onclick="copy(this, 'git fetch origin && git switch qa && git reset --hard origin/qa')" style="flex-direction:column; align-items:flex-start; gap:4px;">
+            <div style="display:flex;gap:8px;"><span class="prompt">$</span><span class="cmd-text">git fetch origin</span></div>
+            <div style="display:flex;gap:8px;"><span class="prompt">$</span><span class="cmd-text">git switch qa</span></div>
+            <div style="display:flex;gap:8px;"><span class="prompt">$</span><span class="cmd-text">git reset --hard origin/qa</span></div>
+            <span class="copy-hint" style="top:10px;transform:none;">copy all</span>
+          </div>
+        </div>
+        <div class="cmd-item">
+          <div class="cmd-label">Pull latest on current branch</div>
+          <div class="cmd-block" onclick="copy(this, 'git pull')">
+            <span class="prompt">$</span>
+            <div class="cmd-text">git pull</div>
+            <span class="copy-hint">copy</span>
+          </div>
+        </div>
+        <div class="cmd-item">
+          <div class="cmd-label">Stash changes and restore later</div>
+          <div class="cmd-block" onclick="copy(this, 'git stash')" style="margin-bottom:6px;">
+            <span class="prompt">$</span>
+            <div class="cmd-text">git stash <span class="dim">— save for later</span></div>
+            <span class="copy-hint">copy</span>
+          </div>
+          <div class="cmd-block" onclick="copy(this, 'git stash pop')">
+            <span class="prompt">$</span>
+            <div class="cmd-text">git stash pop <span class="dim">— restore</span></div>
+            <span class="copy-hint">copy</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="copied-toast" id="toast">Copied to clipboard ✓</div>
+
+<script>
+function copy(el, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1500);
+  });
+}
+</script>
+</body>
+</html>

@@ -6,8 +6,8 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-@Entity({ name: 'insight_summaries' })
-@Index(['fromUtc', 'toUtc', 'filterKey'], { unique: true })
+@Entity({ name: 'insight_summaries', schema: 'app' })
+@Index(['fromUtc', 'toUtc', 'filterKey', 'narrativeType'], { unique: true })
 export class InsightSummary {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -20,6 +20,9 @@ export class InsightSummary {
 
   @Column({ type: 'varchar', length: 200, default: 'all' })
   filterKey!: string;
+
+  @Column({ type: 'varchar', length: 50, default: 'generic' })
+  narrativeType!: string;
 
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   metricsJson!: string | null;

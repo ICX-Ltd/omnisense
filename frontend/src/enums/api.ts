@@ -4,6 +4,10 @@ export const ApiPath = {
 
   InsightsCall: "/uiapi/insights/call",
   InsightsSummary: "/uiapi/insights/summary",
+  InsightsSummaryOperations: "/uiapi/insights/summary/operations",
+  InsightsSummaryClientServices: "/uiapi/insights/summary/client-services",
+  InsightsSummaryObjections: "/uiapi/insights/summary/objections",
+  InsightsSummaryCompliance: "/uiapi/insights/summary/compliance",
   InsightsSummaryNarrative: "/uiapi/insights/summary/narrative",
   InsightsSummaryNarratives: "/uiapi/insights/summary/narratives",
 

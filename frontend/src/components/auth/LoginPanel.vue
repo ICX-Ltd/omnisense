@@ -4,7 +4,7 @@
       <div class="auth-brand">
         <img class="auth-logo" :src="logoUrl" alt="Auto Ignite" />
         <div>
-          <h1 class="auth-title">Insights</h1>
+          <h1 class="auth-title">Omni-Sense</h1>
           <p class="auth-subtitle">
             Sign in to access transcription, insights extraction, and batch
             processing.

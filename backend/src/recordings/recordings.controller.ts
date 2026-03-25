@@ -8,14 +8,19 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { IsOptional, IsString } from 'class-validator';
 import { RecordingsService } from './recordings.service';
 import { normalizeProvider } from '../insights/helpers/provider.helper';
 
 class RecordingInsightsDto {
+  @IsOptional()
+  @IsString()
   provider?: string;
 }
 
 class BatchInsightsDto {
+  @IsOptional()
+  @IsString()
   provider?: string;
 }
 
@@ -24,16 +29,36 @@ export class RecordingsController {
   constructor(private readonly svc: RecordingsService) {}
 
   @Get()
-  list(@Query('status') status?: string, @Query('limit') limit?: string) {
+  list(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('interactionType') interactionType?: string,
+    @Query('campaign') campaign?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('order') order?: string,
+  ) {
     const parsedLimit = parseInt(limit ?? '50', 10);
 
     if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
       throw new BadRequestException('limit must be a positive integer');
     }
 
+    // dateTo is treated as end-of-day inclusive
+    let parsedDateTo: Date | undefined;
+    if (dateTo) {
+      parsedDateTo = new Date(dateTo);
+      parsedDateTo.setHours(23, 59, 59, 999);
+    }
+
     return this.svc.list({
       status: status as any,
-      limit: Math.min(parsedLimit, 200),
+      limit: Math.min(parsedLimit, 1000),
+      interactionType,
+      campaign: campaign || undefined,
+      dateFrom: dateFrom ? new Date(dateFrom) : undefined,
+      dateTo: parsedDateTo,
+      order: order === 'ASC' ? 'ASC' : 'DESC',
     });
   }
 
@@ -50,6 +75,16 @@ export class RecordingsController {
     return this.svc.summaryByStatus();
   }
 
+  @Get('jobs')
+  listJobs() {
+    return this.svc.listJobs(20);
+  }
+
+  @Get('jobs/:jobId')
+  getJob(@Param('jobId') jobId: string) {
+    return this.svc.getJob(jobId);
+  }
+
   @Post('batch/transcribe')
   batchTranscribe(@Query('limit') limit?: string) {
     const parsedLimit = parseInt(limit ?? '10', 10);
@@ -58,7 +93,7 @@ export class RecordingsController {
       throw new BadRequestException('limit must be a positive integer');
     }
 
-    return this.svc.batchTranscribe(Math.min(parsedLimit, 200));
+    return this.svc.startBatchTranscribe(Math.min(parsedLimit, 1000));
   }
 
   @Post('batch/insights')
@@ -74,7 +109,23 @@ export class RecordingsController {
 
     const provider = normalizeProvider(body?.provider);
 
-    return this.svc.batchInsights(Math.min(parsedLimit, 200), provider);
+    return this.svc.startBatchInsights(Math.min(parsedLimit, 1000), provider);
+  }
+
+  @Post('batch/insights/chats')
+  batchInsightsChats(
+    @Query('limit') limit?: string,
+    @Body() body?: BatchInsightsDto,
+  ) {
+    const parsedLimit = parseInt(limit ?? '10', 10);
+
+    if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    const provider = normalizeProvider(body?.provider);
+
+    return this.svc.startBatchInsightsChats(Math.min(parsedLimit, 1000), provider);
   }
 
   @Post(':id/transcribe')

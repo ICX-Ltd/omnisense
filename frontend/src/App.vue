@@ -2,7 +2,7 @@
   <div v-if="booting" class="boot-screen">
     <div class="boot-card">
       <img class="boot-logo" :src="logoUrl" alt="Auto Ignite" />
-      <div class="boot-title">Loading Insights...</div>
+      <div class="boot-title">Loading Pulse...</div>
     </div>
   </div>
 
@@ -26,7 +26,7 @@
           <div class="app-brand">
             <img class="app-logo" :src="logoUrl" alt="Auto Ignite" />
             <div>
-              <h1 class="app-title">Insights</h1>
+              <h1 class="app-title">Omni-Sense</h1>
               <div class="app-subtitle">
                 Prototype for transcription, insights extraction, and batch
                 processing.
@@ -79,6 +79,14 @@
 
           <button
             class="tab"
+            :class="{ 'tab--active': tab === 'narratives' }"
+            @click="tab = 'narratives'"
+          >
+            Narratives
+          </button>
+
+          <button
+            class="tab"
             :class="{ 'tab--active': tab === 'settings' }"
             @click="tab = 'settings'"
           >
@@ -92,6 +100,7 @@
         <DataQueue v-else-if="tab === 'data'" />
         <BatchDashboard v-else-if="tab === 'batch'" />
         <SummaryDashboard v-else-if="tab === 'summary'" />
+        <NarrativesPage v-else-if="tab === 'narratives'" />
         <SettingsPanel v-else />
       </div>
     </div>
@@ -104,13 +113,14 @@ import TestLab from "./components/TestLab.vue";
 import DataQueue from "./components/DataQueue.vue";
 import BatchDashboard from "./components/BatchDashboard.vue";
 import SummaryDashboard from "./components/SummaryDashboard.vue";
+import NarrativesPage from "./components/NarrativesPage.vue";
 import LoginPanel from "./components/auth/LoginPanel.vue";
 import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { useAuth, type User } from "./composables/useAuth";
 import logoUrl from "./assets/ai-icon.png";
 
-const tab = ref<"test" | "data" | "batch" | "summary" | "settings">("test");
+const tab = ref<"test" | "data" | "batch" | "summary" | "narratives" | "settings">("test");
 const booting = ref(true);
 const authStep = ref<"login" | "2fa" | "app">("login");
 const pendingTwoFactorToken = ref("");

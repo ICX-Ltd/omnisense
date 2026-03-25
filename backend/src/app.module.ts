@@ -9,11 +9,12 @@ import { RecordingsModule } from './recordings/recordings.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 
-import { CallRecording } from './db/entities/call-recording.entity';
-import { CallTranscript } from './db/entities/call-transcript.entity';
-import { CallInsight } from './db/entities/call-insight.entity';
+import { Interaction } from './db/entities/interaction.entity';
+import { InteractionTranscript } from './db/entities/interaction-transcript.entity';
+import { InteractionInsight } from './db/entities/interaction-insight.entity';
 import { InsightSummary } from './db/entities/insight-summary.entity';
 import { UserAccount } from './db/entities/user-account.entity';
+import { BatchJob } from './db/entities/batch-job.entity';
 
 @Module({
   imports: [
@@ -30,11 +31,12 @@ import { UserAccount } from './db/entities/user-account.entity';
           password: cfg.get('DATABASE_PASSWORD'),
           database: cfg.get('DATABASE_NAME', 'ai_assist'),
           entities: [
-            CallRecording,
-            CallTranscript,
-            CallInsight,
+            Interaction,
+            InteractionTranscript,
+            InteractionInsight,
             InsightSummary,
             UserAccount,
+            BatchJob,
           ],
           synchronize: false,
           logging: false,

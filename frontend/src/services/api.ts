@@ -33,7 +33,7 @@ async function requestNewAccessToken(): Promise<string | null> {
   if (!refreshToken) return null;
 
   try {
-    const res = await fetch("/uiapi/users/refresh", {
+    const res = await fetch("/uiapi/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
@@ -72,15 +72,15 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (originalRequest.url?.includes("/uiapi/users/login")) {
+    if (originalRequest.url?.includes("/uiapi/auth/login")) {
       return Promise.reject(error);
     }
 
-    if (originalRequest.url?.includes("/uiapi/users/2fa/verify")) {
+    if (originalRequest.url?.includes("/uiapi/auth/2fa/verify")) {
       return Promise.reject(error);
     }
 
-    if (originalRequest.url?.includes("/uiapi/users/refresh")) {
+    if (originalRequest.url?.includes("/uiapi/auth/refresh")) {
       clearSession();
       return Promise.reject(error);
     }

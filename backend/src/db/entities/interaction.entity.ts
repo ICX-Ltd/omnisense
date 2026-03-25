@@ -14,8 +14,8 @@ export type RecordingStatus =
   | 'insights_done'
   | 'error';
 
-@Entity({ name: 'call_recordings' })
-export class CallRecording {
+@Entity({ name: 'interactions', schema: 'app' })
+export class Interaction {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
@@ -23,10 +23,10 @@ export class CallRecording {
   provider!: string; // telnyx | thirdparty | manual
 
   @Column({ type: 'varchar', length: 2048, nullable: true })
-  recordingUrl!: string | null; // if you store a URL (Telnyx/3rd party)
+  recordingUrl!: string | null;
 
   @Column({ type: 'varchar', length: 1024, nullable: true })
-  storageKey!: string | null; // if you store in S3/local and reference key
+  storageKey!: string | null;
 
   @Column({ type: 'varchar', length: 50, default: 'pending_transcription' })
   status!: RecordingStatus;
@@ -39,4 +39,22 @@ export class CallRecording {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  interactionSource!: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  interactionType!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  interactionId!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  interactionTpsId!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  campaign!: string | null;
+
+  @Column({ type: 'datetime2', nullable: true })
+  interactionDateTime!: Date | null;
 }

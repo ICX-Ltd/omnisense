@@ -11,15 +11,11 @@ const code = ref("");
 const enabled = ref(false);
 const confirmedAt = ref<string | null>(null);
 const error = ref("");
+const successMsg = ref("");
 const busy = ref(false);
 
-const snackbar = ref(false);
-const snackbarText = ref("");
-
-function showSnack(msg: string) {
-  snackbarText.value = msg;
-  snackbar.value = true;
-}
+const showToken = ref(false);
+const accessToken = computed(() => localStorage.getItem("accessToken") || "");
 
 const codeClean = computed(() =>
   String(code.value || "")
@@ -27,25 +23,17 @@ const codeClean = computed(() =>
     .slice(0, 6)
 );
 
-const statusText = computed(() =>
-  enabled.value ? "2FA enabled" : "2FA not enabled"
-);
-
-const statusColor = computed(() => (enabled.value ? "success" : "error"));
-
-const showToken = ref(false);
-const accessToken = computed(() => localStorage.getItem("accessToken") || "");
+function showSuccess(msg: string) {
+  successMsg.value = msg;
+  setTimeout(() => (successMsg.value = ""), 2500);
+}
 
 async function copyToken() {
   const token = localStorage.getItem("accessToken") || "";
-  if (!token) {
-    showSnack("No access token found");
-    return;
-  }
-
+  if (!token) return;
   try {
     await navigator.clipboard.writeText(token);
-    showSnack("Copied to clipboard");
+    showSuccess("Copied to clipboard");
   } catch {
     try {
       const ta = document.createElement("textarea");
@@ -56,21 +44,19 @@ async function copyToken() {
       ta.select();
       document.execCommand("copy");
       document.body.removeChild(ta);
-      showSnack("Copied to clipboard");
+      showSuccess("Copied to clipboard");
     } catch {
-      showSnack("Copy failed");
+      error.value = "Copy failed";
     }
   }
 }
 
 async function loadStatus() {
   error.value = "";
-
   try {
     const { data } = await api.get("/uiapi/auth/2fa/status");
     enabled.value = !!data.enabled;
     confirmedAt.value = data.confirmedAt ?? null;
-
     if (enabled.value) {
       qrDataUrl.value = null;
       manualKey.value = null;
@@ -84,10 +70,8 @@ async function loadStatus() {
 async function startSetup() {
   error.value = "";
   busy.value = true;
-
   try {
     const { data } = await api.post("/uiapi/auth/2fa/setup");
-
     qrDataUrl.value = data.qrDataUrl ?? null;
     manualKey.value = data.secret ?? null;
     enabled.value = false;
@@ -104,14 +88,11 @@ async function startSetup() {
 async function confirm() {
   error.value = "";
   busy.value = true;
-
   try {
-    await api.post("/uiapi/auth/2fa/confirm", {
-      code: codeClean.value,
-    });
-
+    await api.post("/uiapi/auth/2fa/confirm", { code: codeClean.value });
     await loadStatus();
     code.value = "";
+    showSuccess("2FA enabled successfully");
   } catch (e: any) {
     error.value =
       e?.response?.data?.message || e?.message || "Failed to confirm 2FA";
@@ -122,23 +103,18 @@ async function confirm() {
 
 async function disable2fa() {
   error.value = "";
-
   if (codeClean.value.length !== 6) {
     error.value = "Enter your 6-digit code to disable 2FA.";
     return;
   }
-
   busy.value = true;
-
   try {
-    await api.post("/uiapi/auth/2fa/disable", {
-      code: codeClean.value,
-    });
-
+    await api.post("/uiapi/auth/2fa/disable", { code: codeClean.value });
     qrDataUrl.value = null;
     manualKey.value = null;
     code.value = "";
     await loadStatus();
+    showSuccess("2FA disabled");
   } catch (e: any) {
     error.value =
       e?.response?.data?.message || e?.message || "Failed to disable 2FA";
@@ -149,19 +125,15 @@ async function disable2fa() {
 
 async function reset2fa() {
   error.value = "";
-
   if (codeClean.value.length !== 6) {
     error.value = "Enter your 6-digit code to reset 2FA.";
     return;
   }
-
   busy.value = true;
-
   try {
     const { data } = await api.post("/uiapi/auth/2fa/reset", {
       code: codeClean.value,
     });
-
     qrDataUrl.value = data.qrDataUrl ?? null;
     manualKey.value = data.secret ?? null;
     enabled.value = false;
@@ -179,173 +151,168 @@ onMounted(loadStatus);
 </script>
 
 <template>
-  <v-theme-provider theme="light" with-background>
-    <v-card
-      style="
-        margin: 12px 0;
-        padding: 12px;
-        border: 1px solid #ccd0de;
-        border-radius: 10px;
-      "
-    >
-      <v-card-title class="d-flex align-center justify-space-between">
-        <div class="d-flex align-center ga-2">
-          <span>Authenticator App (2FA)</span>
+  <div class="tile">
+    <div class="tile-head">
+      <div class="tile-icon">🔐</div>
+      <div class="tile-text">
+        <div class="tile-title">Two-Factor Authentication</div>
+        <div class="tile-desc">Secure your account with an authenticator app</div>
+      </div>
+      <span
+        class="chip"
+        :class="enabled ? 'chip--success' : 'chip--danger'"
+        style="margin-left: auto; flex-shrink: 0"
+      >
+        {{ enabled ? "2FA enabled" : "2FA disabled" }}
+      </span>
+    </div>
+
+    <div class="tile-body">
+      <div v-if="enabled && confirmedAt" class="muted" style="margin-bottom: 12px">
+        Enabled since {{ new Date(confirmedAt).toLocaleString() }}
+      </div>
+
+      <!-- QR setup panel -->
+      <div v-if="qrDataUrl" class="subcard" style="margin-bottom: 14px">
+        <div class="tile-title" style="font-size: 14px; margin-bottom: 6px">
+          Scan QR code
         </div>
-      </v-card-title>
-
-      <v-card-title class="d-flex align-center justify-space-between">
-        <div class="d-flex align-center ga-2">
-          <v-chip size="small" :color="statusColor" variant="tonal">
-            {{ statusText }}
-          </v-chip>
+        <div class="muted" style="margin-bottom: 12px">
+          Scan with Microsoft Authenticator or a compatible app, then enter the
+          6-digit code below to confirm.
         </div>
-
-        <div class="d-flex ga-2 flex-wrap justify-end">
-          <v-btn
-            v-if="!enabled"
-            color="primary"
-            variant="tonal"
-            :loading="busy"
-            @click="startSetup"
-          >
-            Enable 2FA
-          </v-btn>
-
-          <template v-else>
-            <v-btn
-              color="error"
-              variant="outlined"
-              :loading="busy"
-              @click="disable2fa"
-            >
-              Disable 2FA
-            </v-btn>
-
-            <v-btn
-              color="error"
-              variant="outlined"
-              :loading="busy"
-              @click="reset2fa"
-            >
-              Reset / Re-enrol
-            </v-btn>
-          </template>
-        </div>
-      </v-card-title>
-
-      <v-card-text class="pt-0">
-        <div
-          v-if="enabled && confirmedAt"
-          class="text-body-2 text-medium-emphasis mb-3"
-        >
-          Enabled since {{ new Date(confirmedAt).toLocaleString() }}
-        </div>
-
-        <v-text-field
-          v-model="code"
-          label="6-digit code"
-          placeholder="123456"
-          variant="outlined"
-          density="compact"
-          maxlength="6"
-          :disabled="busy"
-          inputmode="numeric"
-          autocomplete="one-time-code"
-          hide-details="auto"
-        />
-
-        <div v-if="qrDataUrl" class="mt-4">
-          <v-alert type="info" variant="tonal" class="mb-3">
-            Scan this QR code with Microsoft Authenticator (or similar).
-          </v-alert>
-
-          <div class="d-flex flex-column flex-sm-row ga-4 align-start">
-            <v-img
-              :src="qrDataUrl"
-              max-width="260"
-              aspect-ratio="1"
-              class="rounded-lg"
+        <div class="qr-row">
+          <img
+            :src="qrDataUrl"
+            class="qr-img"
+            alt="2FA QR code"
+          />
+          <div class="qr-detail">
+            <div class="muted" style="margin-bottom: 6px">Manual entry key</div>
+            <input
+              class="input"
+              :value="manualKey ?? ''"
+              readonly
+              style="width: 100%; font-family: monospace; font-size: 12px; letter-spacing: 1px"
             />
-
-            <div class="flex-grow-1">
-              <v-text-field
-                :model-value="manualKey ?? ''"
-                label="Manual key"
-                variant="outlined"
-                density="compact"
-                readonly
-              />
-
-              <v-btn
-                color="primary"
-                variant="tonal"
-                class="mt-2"
-                :loading="busy"
-                :disabled="codeClean.length !== 6"
-                @click="confirm"
-              >
-                Confirm
-              </v-btn>
-            </div>
           </div>
         </div>
+      </div>
 
-        <v-alert v-if="error" type="error" variant="tonal" class="mt-4">
-          {{ error }}
-        </v-alert>
-      </v-card-text>
-    </v-card>
+      <!-- Code input + action buttons -->
+      <div class="actions-row" style="margin-bottom: 10px">
+        <input
+          v-model="code"
+          class="input"
+          placeholder="000000"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="6"
+          :disabled="busy"
+          style="width: 130px; letter-spacing: 4px; font-size: 16px; text-align: center"
+        />
 
-    <v-card
-      v-if="canSeeDevTools"
-      style="
-        margin: 12px 0;
-        padding: 12px;
-        border: 1px solid #ccd0de;
-        border-radius: 10px;
-      "
-    >
-      <v-card-title class="d-flex align-center justify-space-between">
-        <span>Dev tools</span>
+        <button
+          v-if="!enabled && !qrDataUrl"
+          class="btn btn--primary"
+          :disabled="busy"
+          @click="startSetup"
+        >
+          {{ busy ? "Starting…" : "Enable 2FA" }}
+        </button>
 
-        <div class="d-flex ga-2">
-          <v-btn
-            variant="tonal"
-            :disabled="busy || !accessToken"
+        <button
+          v-if="qrDataUrl"
+          class="btn btn--primary"
+          :disabled="busy || codeClean.length !== 6"
+          @click="confirm"
+        >
+          {{ busy ? "Confirming…" : "Confirm setup" }}
+        </button>
+
+        <template v-if="enabled && !qrDataUrl">
+          <button
+            class="btn btn--ghost"
+            :disabled="busy || codeClean.length !== 6"
+            @click="disable2fa"
+          >
+            {{ busy ? "Working…" : "Disable 2FA" }}
+          </button>
+          <button
+            class="btn btn--secondary"
+            :disabled="busy || codeClean.length !== 6"
+            @click="reset2fa"
+          >
+            {{ busy ? "Working…" : "Reset / Re-enrol" }}
+          </button>
+        </template>
+      </div>
+
+      <div v-if="enabled && !qrDataUrl" class="hint">
+        Enter your 6-digit code to disable or reset 2FA.
+      </div>
+
+      <div v-if="successMsg" class="muted" style="margin-top: 8px; color: var(--success)">
+        {{ successMsg }}
+      </div>
+
+      <div v-if="error" class="error-tile" style="margin-top: 10px">
+        <div class="error-title">Error</div>
+        <div class="error-text">{{ error }}</div>
+      </div>
+
+      <!-- Dev tools -->
+      <div v-if="canSeeDevTools" class="subcard" style="margin-top: 16px">
+        <div class="tile-title" style="font-size: 14px; margin-bottom: 8px">
+          Dev tools
+        </div>
+        <div class="actions-row">
+          <button
+            class="btn btn--ghost btn--sm"
+            :disabled="!accessToken"
             @click="copyToken"
           >
             Copy access token
-          </v-btn>
-
-          <v-btn
-            color="primary"
-            variant="tonal"
-            :disabled="busy || !accessToken"
+          </button>
+          <button
+            class="btn btn--ghost btn--sm"
+            :disabled="!accessToken"
             @click="showToken = !showToken"
           >
             {{ showToken ? "Hide token" : "Show token" }}
-          </v-btn>
+          </button>
         </div>
-      </v-card-title>
-
-      <v-card-text v-if="showToken && accessToken">
-        <pre class="token-pre">{{ accessToken }}</pre>
-      </v-card-text>
-    </v-card>
-
-    <v-snackbar v-model="snackbar" :timeout="2000">
-      {{ snackbarText }}
-    </v-snackbar>
-  </v-theme-provider>
+        <div v-if="showToken && accessToken" class="prompt-box" style="margin-top: 10px">
+          <pre class="pre">{{ accessToken }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.token-pre {
-  margin: 0;
-  padding: 10px;
-  background: #f8f9ff;
-  border-radius: 8px;
-  overflow: auto;
+.tile-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.qr-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.qr-img {
+  width: 180px;
+  height: 180px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.qr-detail {
+  flex: 1;
+  min-width: 180px;
 }
 </style>
