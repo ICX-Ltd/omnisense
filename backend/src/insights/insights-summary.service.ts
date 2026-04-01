@@ -45,6 +45,56 @@ function safeParseJson(text: string): any {
   return JSON.parse(cleaned);
 }
 
+/**
+ * Simple word-overlap similarity between two strings (Jaccard on words).
+ * Returns 0..1 where 1 = identical word sets.
+ */
+function wordSimilarity(a: string, b: string): number {
+  const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
+  const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
+  if (wordsA.size === 0 && wordsB.size === 0) return 1;
+  let intersection = 0;
+  for (const w of wordsA) if (wordsB.has(w)) intersection++;
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Merge coaching needs that are near-duplicates (>60% word overlap).
+ * Keeps the label with the highest count, sums counts.
+ * Returns top 10 after merging.
+ */
+function mergeCoachingNeeds(
+  rows: Array<{ need: string; count: string }>,
+): Array<{ need: string; count: number }> {
+  const merged: Array<{ need: string; count: number }> = [];
+
+  for (const row of rows) {
+    const count = parseInt(row.count, 10);
+    let found = false;
+
+    for (const existing of merged) {
+      if (wordSimilarity(row.need, existing.need) > 0.6) {
+        existing.count += count;
+        // Keep the shorter/cleaner label if counts are close, or the more common one
+        if (row.need.length < existing.need.length) {
+          existing.need = row.need;
+        }
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      merged.push({ need: row.need, count });
+    }
+  }
+
+  return merged
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+}
+
 @Injectable()
 export class InsightsSummaryService {
   constructor(
@@ -346,9 +396,12 @@ export class InsightsSummaryService {
       [from, to, ...extraParams],
     );
 
-    // Top coaching needs via OPENJSON — exclude meaningless filler values the LLM sometimes emits
-    const topCoachingNeeds = await this.insightsRepo.manager.query<Array<{ need: string; count: string }>>(
-      `SELECT TOP 10 j.value AS need, COUNT(*) AS count
+    // Top coaching needs via OPENJSON — normalise text (lowercase, trim, strip trailing punctuation)
+    // then merge similar entries in TS
+    const rawCoachingNeeds = await this.insightsRepo.manager.query<Array<{ need: string; count: string }>>(
+      `SELECT TOP 30 LOWER(LTRIM(RTRIM(
+          REPLACE(REPLACE(REPLACE(j.value, '.', ''), '!', ''), ',', '')
+        ))) AS need, COUNT(*) AS count
       FROM app.interaction_insights ii
       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
       CROSS APPLY OPENJSON(ii.coaching_json, '$.needs_improvement') j
@@ -361,10 +414,14 @@ export class InsightsSummaryService {
           'none identified', 'not noted', 'none observed'
         )
         AND LEN(LTRIM(RTRIM(j.value))) > 3
-      GROUP BY j.value
+      GROUP BY LOWER(LTRIM(RTRIM(
+          REPLACE(REPLACE(REPLACE(j.value, '.', ''), '!', ''), ',', '')
+        )))
       ORDER BY COUNT(*) DESC`,
       [from, to, ...extraParams],
     );
+
+    const topCoachingNeeds = mergeCoachingNeeds(rawCoachingNeeds);
 
     const lowestScored = await this.applyFilters(baseQb(), filterKey, campaign, agent)
       .select([
@@ -395,10 +452,7 @@ export class InsightsSummaryService {
         count: parseInt(r.count, 10),
       })),
       dimension_averages: dimScores[0] ?? {},
-      top_coaching_needs: topCoachingNeeds.map((r) => ({
-        need: r.need,
-        count: parseInt(r.count, 10),
-      })),
+      top_coaching_needs: topCoachingNeeds,
       lowest_scored: lowestScored.map((r) => ({
         ...r,
         coaching_json: r.coaching_json ? safeParseJson(r.coaching_json as string) : null,

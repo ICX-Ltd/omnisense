@@ -76,17 +76,38 @@ function fmtScore(v: number | null | undefined) {
   return v.toFixed(1);
 }
 
-function scoreChip(v: number | null) {
-  if (typeof v !== "number") return "chip chip--secondary";
-  if (v >= 9) return "chip chip--success";
-  if (v >= 7) return "chip chip--info";
-  if (v >= 5) return "chip chip--warning";
-  return "chip chip--danger";
+// Consistent four-band scoring: red (<5), orange (5-7), blue (7-9), green (9+)
+const SCORE_RED = "#dc2626";
+const SCORE_ORANGE = "#ea580c";
+const SCORE_BLUE = "#0284c7";
+const SCORE_GREEN = "#059669";
+
+// Solid colour for chips
+function scoreColorSolid(v: number | null) {
+  if (typeof v !== "number") return "#ccc";
+  if (v >= 9) return SCORE_GREEN;
+  if (v >= 7) return SCORE_BLUE;
+  if (v >= 5) return SCORE_ORANGE;
+  return SCORE_RED;
 }
 
+// Gradient for bars — softens from a lighter tint to the full band colour
 function scoreColor(v: number | null) {
   if (typeof v !== "number") return "#ccc";
-  return `hsl(${Math.round(v * 12)}, 65%, 42%)`;
+  let light: string, full: string;
+  if (v >= 9) { light = "#a7f3d0"; full = SCORE_GREEN; }
+  else if (v >= 7) { light = "#bae6fd"; full = SCORE_BLUE; }
+  else if (v >= 5) { light = "#fed7aa"; full = SCORE_ORANGE; }
+  else { light = "#fecaca"; full = SCORE_RED; }
+  return `linear-gradient(90deg, ${light}, ${full})`;
+}
+
+function scoreChip(_v: number | null) {
+  if (typeof _v !== "number") return "chip chip--secondary";
+  if (_v >= 9) return "chip bucket-chip--9plus";
+  if (_v >= 7) return "chip bucket-chip--7to9";
+  if (_v >= 5) return "chip bucket-chip--5to7";
+  return "chip bucket-chip--below5";
 }
 
 function fmtDate(iso: string | null) {
@@ -132,10 +153,26 @@ function bucketLabel(b: string) {
 }
 
 function bucketChipClass(b: string) {
-  if (b === "below_5") return "chip chip--danger";
-  if (b === "5_to_7") return "chip chip--warning";
-  if (b === "7_to_9") return "chip chip--info";
-  return "chip chip--success";
+  if (b === "below_5") return "chip bucket-chip--below5";
+  if (b === "5_to_7") return "chip bucket-chip--5to7";
+  if (b === "7_to_9") return "chip bucket-chip--7to9";
+  return "chip bucket-chip--9plus";
+}
+
+// Slate gradient for overall bars when comparing
+function overallCompareColor(v: number | null) {
+  if (typeof v !== "number") return "#ccc";
+  const lightness = 75 - (v / 10) * 30;
+  const light = `hsl(215, 15%, ${lightness + 15}%)`;
+  const full = `hsl(215, 18%, ${lightness}%)`;
+  return `linear-gradient(90deg, ${light}, ${full})`;
+}
+
+// Solid slate for chips in compare mode
+function overallCompareColorSolid(v: number | null) {
+  if (typeof v !== "number") return "#ccc";
+  const lightness = 75 - (v / 10) * 30;
+  return `hsl(215, 18%, ${lightness}%)`;
 }
 
 const callDimensions = [
@@ -302,7 +339,7 @@ onMounted(async () => {
         </div>
       </div>
       <div class="tile-body">
-        <div class="filter-row">
+        <div class="filters-row">
           <div class="filter-group">
             <label class="label">From</label>
             <input type="date" v-model="fromDateStr" class="input input--date" />
@@ -446,7 +483,7 @@ onMounted(async () => {
                   class="dim-bar"
                   :style="{
                     width: d.overall !== null ? (d.overall / 10 * 100) + '%' : '0%',
-                    background: agent ? 'var(--overall-bar, #94a3b8)' : scoreColor(d.overall),
+                    background: agent ? overallCompareColor(d.overall) : scoreColor(d.overall),
                   }"
                 />
               </div>
@@ -454,14 +491,20 @@ onMounted(async () => {
               <div v-if="agent && d.agent !== null" class="dim-bar-track dim-bar-track--agent">
                 <div
                   class="dim-bar"
-                  :style="{ width: (d.agent / 10 * 100) + '%', background: 'var(--agent-bar, #6366f1)' }"
+                  :style="{ width: (d.agent / 10 * 100) + '%', background: scoreColor(d.agent) }"
                 />
               </div>
             </div>
             <div class="dim-scores">
-              <span class="dim-chip dim-chip--overall" style="font-size: 11px; min-width: 36px; text-align: center">{{ fmtScore(d.overall) }}</span>
+              <span
+                class="dim-chip"
+                :style="{ background: agent ? overallCompareColorSolid(d.overall) : scoreColorSolid(d.overall), color: '#fff', fontSize: '11px', minWidth: '36px', textAlign: 'center' }"
+              >{{ fmtScore(d.overall) }}</span>
               <template v-if="agent && d.agent !== null">
-                <span class="dim-chip dim-chip--agent" style="font-size: 11px; min-width: 36px; text-align: center">{{ fmtScore(d.agent) }}</span>
+                <span
+                  class="dim-chip"
+                  :style="{ background: scoreColorSolid(d.agent), color: '#fff', fontSize: '11px', minWidth: '36px', textAlign: 'center' }"
+                >{{ fmtScore(d.agent) }}</span>
                 <span
                   class="dim-delta"
                   :class="d.agent >= d.overall ? 'dim-delta--positive' : 'dim-delta--negative'"
@@ -679,7 +722,7 @@ onMounted(async () => {
                             <div class="dim-bar" :style="{ width: (dim?.score ?? 0) / 10 * 100 + '%', background: scoreColor(dim?.score ?? null) }" />
                           </div>
                         </div>
-                        <span :class="scoreChip(dim?.score ?? null)" style="font-size: 11px; min-width: 36px; text-align: center">{{ fmtScore(dim?.score ?? null) }}</span>
+                        <span class="dim-chip" :style="{ background: scoreColorSolid(dim?.score ?? null), color: '#fff', fontSize: '11px', minWidth: '36px', textAlign: 'center' }">{{ fmtScore(dim?.score ?? null) }}</span>
                       </div>
                     </div>
                   </div>
@@ -950,6 +993,31 @@ onMounted(async () => {
   border: 1px solid color-mix(in srgb, var(--agent-bar) 50%, transparent);
 }
 
+/* ── Score bucket chips ─────────────────────────────────────────────────────── */
+.bucket-chip--below5 {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #dc2626;
+  border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+}
+
+.bucket-chip--5to7 {
+  background: color-mix(in srgb, #f97316 12%, transparent);
+  color: #ea580c;
+  border: 1px solid color-mix(in srgb, #f97316 35%, transparent);
+}
+
+.bucket-chip--7to9 {
+  background: color-mix(in srgb, #0ea5e9 12%, transparent);
+  color: #0284c7;
+  border: 1px solid color-mix(in srgb, #0ea5e9 35%, transparent);
+}
+
+.bucket-chip--9plus {
+  background: color-mix(in srgb, #10b981 12%, transparent);
+  color: #059669;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+}
+
 .dim-legend {
   display: flex;
   gap: 16px;
@@ -974,11 +1042,12 @@ onMounted(async () => {
 }
 
 .dim-swatch--overall {
-  background: var(--overall-bar, #94a3b8);
+  background: hsl(215, 20%, 55%);
 }
 
 .dim-swatch--agent {
-  background: var(--agent-bar, #6366f1);
+  background: linear-gradient(90deg, hsl(0, 65%, 42%), hsl(60, 65%, 42%), hsl(120, 65%, 42%));
+  border-radius: 2px;
 }
 
 /* ── Clickable metric rows ─────────────────────────────────────────────────── */
