@@ -1,14 +1,16 @@
 import {
   Body,
   Controller,
+  Param,
   Query,
   Post,
   Get,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { IsOptional, IsString } from 'class-validator';
 import { InsightsService } from './insights.service';
-import { InsightsSummaryService, InteractionFilter, NarrativeType } from './insights-summary.service';
+import { InsightsSummaryService, InteractionFilter, NarrativeType, FilterOptions } from './insights-summary.service';
 import { normalizeProvider } from './helpers/provider.helper';
 
 class InsightsRequestDto {
@@ -46,6 +48,77 @@ export class InsightsController {
     const provider = normalizeProvider(body.provider);
 
     return this.svc.extractInsights(body.transcript, body.interactionType ?? null, body.campaign ?? null, provider);
+  }
+
+  @Get('summary/filters')
+  async summaryFilters(): Promise<FilterOptions> {
+    return this.svcSummary.getFilterOptions();
+  }
+
+  // ── Ops endpoints ──────────────────────────────────────────────────────────
+
+  @Get('ops/dimensions')
+  async opsDimensions(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getOpsDimensionComparison(fromDate, toDate, filter, campaign, agent);
+  }
+
+  @Get('ops/interactions-by-bucket')
+  async opsByBucket(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('bucket') bucket?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+  ) {
+    if (!bucket) throw new BadRequestException('bucket is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByScoreBucket(
+      fromDate, toDate, filter, bucket,
+      Math.min(parseInt(limit ?? '50', 10) || 50, 200),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent,
+    );
+  }
+
+  @Get('ops/interactions-by-coaching-need')
+  async opsByCoachingNeed(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('need') need?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+  ) {
+    if (!need) throw new BadRequestException('need is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByCoachingNeed(
+      fromDate, toDate, filter, need,
+      Math.min(parseInt(limit ?? '50', 10) || 50, 200),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent,
+    );
+  }
+
+  @Get('ops/interaction-detail/:id')
+  async opsInteractionDetail(@Param('id') id: string) {
+    const detail = await this.svcSummary.getInteractionDetail(id);
+    if (!detail) throw new NotFoundException('Interaction not found');
+    return detail;
   }
 
   @Get('summary')
@@ -137,8 +210,8 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('provider') providerRaw?: string,
     @Query('narrativeType') narrativeTypeRaw?: string,
-    @Query('campaign') campaign?: string,
-    @Query('agent') agent?: string,
+    @Query('createdFrom') createdFromRaw?: string,
+    @Query('createdTo') createdToRaw?: string,
   ) {
     const parsedLimit = parseInt(limit ?? '20', 10);
 
@@ -147,16 +220,32 @@ export class InsightsController {
     }
 
     const provider = normalizeProvider(providerRaw);
-    const filter = normalizeInteractionFilter(filterKey);
-    const narrativeType = normalizeNarrativeType(narrativeTypeRaw);
+    const filter = filterKey ? normalizeInteractionFilter(filterKey) : undefined;
+    const narrativeType = narrativeTypeRaw ? normalizeNarrativeType(narrativeTypeRaw) : undefined;
+
+    const createdFrom = createdFromRaw ? new Date(createdFromRaw) : undefined;
+    let createdTo = createdToRaw ? new Date(createdToRaw) : undefined;
+
+    // If the value is a date-only string (no time component), push to end-of-next-day
+    // so that records created on the selected date are included.
+    if (createdTo && createdToRaw && !createdToRaw.includes('T')) {
+      createdTo = new Date(createdTo.getTime() + 24 * 60 * 60 * 1000);
+    }
+
+    if (createdFrom && Number.isNaN(createdFrom.getTime())) {
+      throw new BadRequestException('createdFrom must be a valid ISO date/time');
+    }
+    if (createdTo && Number.isNaN(createdTo.getTime())) {
+      throw new BadRequestException('createdTo must be a valid ISO date/time');
+    }
 
     return this.svcSummary.listNarratives({
       limit: Math.min(parsedLimit, 200),
       filterKey: filter,
       provider,
       narrativeType,
-      campaign,
-      agent,
+      createdFrom,
+      createdTo,
     });
   }
 }

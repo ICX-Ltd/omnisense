@@ -42,6 +42,7 @@
           <button class="tab" :class="{ 'tab--active': tab === 'data' }" @click="tab = 'data'">Data Queue</button>
           <button class="tab" :class="{ 'tab--active': tab === 'batch' }" @click="tab = 'batch'">Batch Dashboard</button>
           <button class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Summary</button>
+          <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations</button>
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
           <button class="tab" :class="{ 'tab--active': tab === 'settings' }" @click="tab = 'settings'">Settings</button>
         </nav>
@@ -52,6 +53,7 @@
         <DataQueue v-else-if="tab === 'data'" />
         <BatchDashboard v-else-if="tab === 'batch'" />
         <SummaryDashboard v-else-if="tab === 'summary'" />
+        <OperationsDashboard v-else-if="tab === 'ops'" />
         <NarrativesPage v-else-if="tab === 'narratives'" />
         <SettingsPanel v-else />
       </div>
@@ -65,6 +67,7 @@ import TestLab from "./components/TestLab.vue";
 import DataQueue from "./components/DataQueue.vue";
 import BatchDashboard from "./components/BatchDashboard.vue";
 import SummaryDashboard from "./components/SummaryDashboard.vue";
+import OperationsDashboard from "./components/OperationsDashboard.vue";
 import NarrativesPage from "./components/NarrativesPage.vue";
 import LoginPanel from "./components/auth/LoginPanel.vue";
 import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
@@ -72,7 +75,7 @@ import SettingsPanel from "./components/SettingsPanel.vue";
 import { useAuth, type User } from "./composables/useAuth";
 import logoUrl from "./assets/ai-icon.png";
 
-const tab = ref<"test" | "data" | "batch" | "summary" | "narratives" | "settings">("test");
+const tab = ref<"test" | "data" | "batch" | "summary" | "ops" | "narratives" | "settings">("test");
 const booting = ref(true);
 const authStep = ref<"login" | "2fa" | "app">("login");
 const pendingTwoFactorToken = ref("");

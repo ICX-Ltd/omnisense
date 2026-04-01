@@ -50,6 +50,8 @@ const interactionFilter = ref<InteractionFilter>("calls");
 const narrativeType = ref<NarrativeType>("generic");
 const campaign = ref<string>("");
 const agent = ref<string>("");
+const campaignOptions = ref<string[]>([]);
+const agentOptions = ref<string[]>([]);
 
 const metrics = ref<any>(null);
 const operationsData = ref<any>(null);
@@ -308,7 +310,18 @@ async function generateNarrative() {
   }
 }
 
+async function loadFilterOptions() {
+  try {
+    const res = await axios.get(ApiPath.InsightsSummaryFilters);
+    campaignOptions.value = res.data.campaigns ?? [];
+    agentOptions.value = res.data.agents ?? [];
+  } catch {
+    // filter options are non-critical; dropdowns will just show "All"
+  }
+}
+
 onMounted(async () => {
+  await loadFilterOptions();
   await loadAll();
 });
 </script>
@@ -375,11 +388,17 @@ onMounted(async () => {
             </div>
             <div class="filter-group">
               <label class="label">Campaign</label>
-              <input type="text" v-model="campaign" class="input" placeholder="All" />
+              <select v-model="campaign" class="select select--sm">
+                <option value="">All</option>
+                <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
+              </select>
             </div>
             <div class="filter-group">
               <label class="label">Agent</label>
-              <input type="text" v-model="agent" class="input" placeholder="All" />
+              <select v-model="agent" class="select select--sm">
+                <option value="">All</option>
+                <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
+              </select>
             </div>
             <button
               class="btn btn--primary"
@@ -891,10 +910,10 @@ onMounted(async () => {
                   >
                     <div
                       v-for="o in c.top_objections"
-                      :key="o.bucket"
+                      :key="o.objection"
                       style="font-size: 12px; display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--text-muted, #888)"
                     >
-                      <span>{{ o.label }}</span>
+                      <span>{{ o.objection }}</span>
                       <span class="count-pill" style="font-size: 11px; margin-left: 8px">{{ o.count }}</span>
                     </div>
                   </div>

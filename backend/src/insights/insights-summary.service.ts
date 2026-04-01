@@ -4,6 +4,7 @@ import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 
 import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { Interaction } from '../db/entities/interaction.entity';
+import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
 import { InsightSummary } from '../db/entities/insight-summary.entity';
 
 import { createProvider } from './providers/provider.factory';
@@ -22,6 +23,11 @@ import {
 } from './helpers/validate-narrative-json';
 import { aggregateIntoBuckets } from './helpers/objection-normalizer';
 
+export interface FilterOptions {
+  campaigns: string[];
+  agents: string[];
+}
+
 export type InteractionFilter = 'all' | 'calls' | 'chats';
 export type NarrativeType =
   | 'generic'
@@ -30,6 +36,15 @@ export type NarrativeType =
   | 'chats_operations'
   | 'chats_client_services';
 
+function safeParseJson(text: string): any {
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
+    cleaned = cleaned.replace(/\s*```$/, '');
+  }
+  return JSON.parse(cleaned);
+}
+
 @Injectable()
 export class InsightsSummaryService {
   constructor(
@@ -37,9 +52,34 @@ export class InsightsSummaryService {
     private insightsRepo: Repository<InteractionInsight>,
     @InjectRepository(Interaction)
     private recordingsRepo: Repository<Interaction>,
+    @InjectRepository(InteractionTranscript)
+    private transcriptsRepo: Repository<InteractionTranscript>,
     @InjectRepository(InsightSummary)
     private summariesRepo: Repository<InsightSummary>,
   ) {}
+
+  async getFilterOptions(): Promise<FilterOptions> {
+    const campaigns = await this.recordingsRepo
+      .createQueryBuilder('ia')
+      .select('DISTINCT ia.campaign', 'campaign')
+      .where('ia.campaign IS NOT NULL')
+      .andWhere("ia.campaign != ''")
+      .orderBy('ia.campaign', 'ASC')
+      .getRawMany();
+
+    const agents = await this.recordingsRepo
+      .createQueryBuilder('ia')
+      .select('DISTINCT ia.agent', 'agent')
+      .where('ia.agent IS NOT NULL')
+      .andWhere("ia.agent != ''")
+      .orderBy('ia.agent', 'ASC')
+      .getRawMany();
+
+    return {
+      campaigns: campaigns.map((r) => r.campaign),
+      agents: agents.map((r) => r.agent),
+    };
+  }
 
   private applyFilters<T extends ObjectLiteral>(
     qb: SelectQueryBuilder<T>,
@@ -272,9 +312,10 @@ export class InsightsSummaryService {
       .groupBy(`CASE WHEN ii.overall_score < 5 THEN 'below_5' WHEN ii.overall_score < 7 THEN '5_to_7' WHEN ii.overall_score < 9 THEN '7_to_9' ELSE '9_plus' END`)
       .getRawMany<{ bucket: string; count: string }>();
 
-    // Per-dimension averages using JSON_VALUE
+    // Per-dimension averages using JSON_VALUE (calls + chats)
     const dimScores = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
       `SELECT
+        -- Call dimensions
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.intro.score') AS FLOAT)) AS intro,
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.data_protection.score') AS FLOAT)) AS data_protection,
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.campaign_focus.score') AS FLOAT)) AS campaign_focus,
@@ -287,7 +328,16 @@ export class InsightsSummaryService {
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.rapport.score') AS FLOAT)) AS rapport,
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.objection_handling.score') AS FLOAT)) AS objection_handling,
         AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.active_listening.score') AS FLOAT)) AS active_listening,
-        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.product_knowledge.score') AS FLOAT)) AS product_knowledge
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.product_knowledge.score') AS FLOAT)) AS product_knowledge,
+        -- Chat dimensions
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.response_time.score') AS FLOAT)) AS response_time,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.accept_time.score') AS FLOAT)) AS accept_time,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.product_process.score') AS FLOAT)) AS product_process,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.engagement.score') AS FLOAT)) AS engagement,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.tone.score') AS FLOAT)) AS tone,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.paraphrase_close.score') AS FLOAT)) AS paraphrase_close,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.language_accuracy.score') AS FLOAT)) AS language_accuracy,
+        AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.contact_details.score') AS FLOAT)) AS contact_details
       FROM app.interaction_insights ii
       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
       WHERE ii.operations_scores_json IS NOT NULL
@@ -351,7 +401,7 @@ export class InsightsSummaryService {
       })),
       lowest_scored: lowestScored.map((r) => ({
         ...r,
-        coaching_json: r.coaching_json ? JSON.parse(r.coaching_json as string) : null,
+        coaching_json: r.coaching_json ? safeParseJson(r.coaching_json as string) : null,
       })),
     };
   }
@@ -618,8 +668,8 @@ export class InsightsSummaryService {
         filterKey,
         narrativeType,
         providerUsed: selectedProvider,
-        narrative: cached.narrativeJson ? JSON.parse(cached.narrativeJson) : null,
-        metrics: cached.metricsJson ? JSON.parse(cached.metricsJson) : null,
+        narrative: cached.narrativeJson ? safeParseJson(cached.narrativeJson) : null,
+        metrics: cached.metricsJson ? safeParseJson(cached.metricsJson) : null,
         cached: true,
         createdAt: cached.createdAt,
         model: cached.model,
@@ -704,39 +754,253 @@ ${prompt}
     };
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: DIMENSION COMPARISON (overall vs agent)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private readonly dimensionAvgSql = `SELECT
+    -- Call dimensions
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.intro.score') AS FLOAT)) AS intro,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.data_protection.score') AS FLOAT)) AS data_protection,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.campaign_focus.score') AS FLOAT)) AS campaign_focus,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.disclaimer.score') AS FLOAT)) AS disclaimer,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.gdpr.score') AS FLOAT)) AS gdpr,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.correct_outcome.score') AS FLOAT)) AS correct_outcome,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.tone_pace.score') AS FLOAT)) AS tone_pace,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.delivery.score') AS FLOAT)) AS delivery,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.questioning.score') AS FLOAT)) AS questioning,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.rapport.score') AS FLOAT)) AS rapport,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.objection_handling.score') AS FLOAT)) AS objection_handling,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.active_listening.score') AS FLOAT)) AS active_listening,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.product_knowledge.score') AS FLOAT)) AS product_knowledge,
+    -- Chat dimensions
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.response_time.score') AS FLOAT)) AS response_time,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.accept_time.score') AS FLOAT)) AS accept_time,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.product_process.score') AS FLOAT)) AS product_process,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.engagement.score') AS FLOAT)) AS engagement,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.tone.score') AS FLOAT)) AS tone,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.paraphrase_close.score') AS FLOAT)) AS paraphrase_close,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.language_accuracy.score') AS FLOAT)) AS language_accuracy,
+    AVG(CAST(JSON_VALUE(ii.operations_scores_json, '$.contact_details.score') AS FLOAT)) AS contact_details,
+    -- Shared
+    AVG(ii.overall_score) AS overall_score,
+    COUNT(1) AS count
+  FROM app.interaction_insights ii
+  INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+  WHERE ii.operations_scores_json IS NOT NULL
+    AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1`;
+
+  async getOpsDimensionComparison(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string,
+  ) {
+    // Overall averages (no agent filter)
+    const { clause: overallClause, extraParams: overallParams } = this.buildRawFilters(filterKey, campaign);
+    const overall = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
+      `${this.dimensionAvgSql} ${overallClause}`,
+      [from, to, ...overallParams],
+    );
+
+    // Distinct agents with score count in the current dataset
+    const agentsInData = await this.insightsRepo.manager.query<Array<{ agent: string; count: string; avg_score: string }>>(
+      `SELECT ia.agent, COUNT(1) AS count, AVG(ii.overall_score) AS avg_score
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.operations_scores_json IS NOT NULL
+         AND ia.agent IS NOT NULL AND ia.agent != ''
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${overallClause}
+       GROUP BY ia.agent
+       ORDER BY ia.agent`,
+      [from, to, ...overallParams],
+    );
+
+    let agentData: Record<string, number | null> | null = null;
+    if (agent) {
+      const { clause: agentClause, extraParams: agentParams } = this.buildRawFilters(filterKey, campaign, agent);
+      const agentResult = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
+        `${this.dimensionAvgSql} ${agentClause}`,
+        [from, to, ...agentParams],
+      );
+      agentData = agentResult[0] ?? null;
+    }
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: filterKey,
+      overall: overall[0] ?? {},
+      agent: agentData,
+      agentName: agent ?? null,
+      agents_in_data: agentsInData.map((r) => ({
+        agent: r.agent,
+        count: parseInt(r.count, 10),
+        avg_score: r.avg_score !== null ? parseFloat(String(r.avg_score)) : null,
+      })),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: INTERACTIONS BY SCORE BUCKET
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionsByScoreBucket(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    bucket: string, limit = 50, offset = 0, campaign?: string, agent?: string,
+  ) {
+    const ranges: Record<string, [number, number]> = {
+      below_5: [0, 5],
+      '5_to_7': [5, 7],
+      '7_to_9': [7, 9],
+      '9_plus': [9, 10.01],
+    };
+    const range = ranges[bucket];
+    if (!range) return [];
+
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent);
+    const paramOffset = 2 + extraParams.length;
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
+              ia.agent, ia.interactionDateTime, ia.campaign
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.overall_score >= @${paramOffset} AND ii.overall_score < @${paramOffset + 1}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY ii.overall_score ASC
+       OFFSET @${paramOffset + 2} ROWS FETCH NEXT @${paramOffset + 3} ROWS ONLY`,
+      [from, to, ...extraParams, range[0], range[1], offset, limit],
+    );
+
+    return rows.map((r: any) => ({
+      ...r,
+      coaching_json: r.coaching_json ? safeParseJson(r.coaching_json) : null,
+    }));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: INTERACTIONS BY COACHING NEED
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionsByCoachingNeed(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    need: string, limit = 50, offset = 0, campaign?: string, agent?: string,
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent);
+    const paramOffset = 2 + extraParams.length;
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT DISTINCT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
+              ia.agent, ia.interactionDateTime, ia.campaign
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       CROSS APPLY OPENJSON(ii.coaching_json, '$.needs_improvement') j
+       WHERE j.value = @${paramOffset}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY ii.overall_score ASC
+       OFFSET @${paramOffset + 1} ROWS FETCH NEXT @${paramOffset + 2} ROWS ONLY`,
+      [from, to, ...extraParams, need, offset, limit],
+    );
+
+    return rows.map((r: any) => ({
+      ...r,
+      coaching_json: r.coaching_json ? safeParseJson(r.coaching_json) : null,
+    }));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: SINGLE INTERACTION DETAIL
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionDetail(recordingId: string) {
+    const interaction = await this.recordingsRepo.findOne({ where: { id: recordingId } });
+    if (!interaction) return null;
+
+    const insight = await this.insightsRepo.findOne({ where: { recordingId } });
+
+    const transcript = await this.transcriptsRepo.findOne({ where: { recordingId } });
+
+    return {
+      interaction: {
+        id: interaction.id,
+        agent: interaction.agent,
+        campaign: interaction.campaign,
+        interactionType: interaction.interactionType,
+        interactionDateTime: interaction.interactionDateTime?.toISOString() ?? null,
+        status: interaction.status,
+        interactionId: interaction.interactionId,
+        recordingUrl: interaction.recordingUrl,
+      },
+      transcript: transcript ? { text: transcript.text, model: transcript.model } : null,
+      insight: insight ? {
+        summary_short: insight.summary_short,
+        summary_detailed: insight.summary_detailed,
+        sentiment_overall: insight.sentiment_overall,
+        overall_score: insight.overall_score,
+        contact_disposition: insight.contact_disposition,
+        conversation_type: insight.conversation_type,
+        interest_level: insight.interest_level,
+        campaign_detected: insight.campaign_detected,
+        decision_timeline: insight.decision_timeline,
+        next_step_agreed: insight.next_step_agreed,
+        operations_scores: insight.operations_scores_json ? safeParseJson(insight.operations_scores_json) : null,
+        coaching: insight.coaching_json ? safeParseJson(insight.coaching_json) : null,
+        objections: insight.objections_json ? safeParseJson(insight.objections_json) : null,
+        action_items: insight.action_items_json ? safeParseJson(insight.action_items_json) : null,
+        risk_flags: insight.risk_flags_json ? safeParseJson(insight.risk_flags_json) : null,
+      } : null,
+    };
+  }
+
   async listNarratives(opts: {
     limit: number;
-    filterKey: InteractionFilter;
+    filterKey?: InteractionFilter;
     provider?: InsightsProviderName;
     narrativeType?: NarrativeType;
-    campaign?: string;
-    agent?: string;
+    createdFrom?: Date;
+    createdTo?: Date;
   }) {
-    const selectedProvider =
-      opts.provider ??
-      (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
-      'openai';
+    const qb = this.summariesRepo
+      .createQueryBuilder('s')
+      .orderBy('s.createdAt', 'DESC')
+      .take(opts.limit);
 
-    const storedKey = [opts.filterKey, selectedProvider, opts.campaign ?? 'all', opts.agent ?? 'all'].join('__');
-    const narrativeType = opts.narrativeType ?? 'generic';
+    if (opts.filterKey) {
+      qb.andWhere('s.filterKey LIKE :fk', { fk: `${opts.filterKey}%` });
+    }
+    if (opts.provider) {
+      qb.andWhere('s.filterKey LIKE :prov', { prov: `%__${opts.provider}__%` });
+    }
+    if (opts.narrativeType) {
+      qb.andWhere('s.narrativeType = :nt', { nt: opts.narrativeType });
+    }
+    if (opts.createdFrom) {
+      qb.andWhere('s.createdAt >= :createdFrom', { createdFrom: opts.createdFrom });
+    }
+    if (opts.createdTo) {
+      qb.andWhere('s.createdAt < :createdTo', { createdTo: opts.createdTo });
+    }
 
-    const rows = await this.summariesRepo.find({
-      where: { filterKey: storedKey, narrativeType },
-      order: { createdAt: 'DESC' },
-      take: opts.limit,
+    const rows = await qb.getMany();
+
+    return rows.map((r) => {
+      const parts = (r.filterKey ?? '').split('__');
+      return {
+        id: r.id,
+        from: r.fromUtc.toISOString(),
+        to: r.toUtc.toISOString(),
+        filterKey: parts[0] || 'all',
+        narrativeType: r.narrativeType,
+        providerUsed: parts[1] || null,
+        campaign: parts[2] && parts[2] !== 'all' ? parts[2] : null,
+        agent: parts[3] && parts[3] !== 'all' ? parts[3] : null,
+        createdAt: r.createdAt.toISOString(),
+        model: r.model,
+        narrative: r.narrativeJson ? safeParseJson(r.narrativeJson) : null,
+        metrics: r.metricsJson ? safeParseJson(r.metricsJson) : null,
+      };
     });
-
-    return rows.map((r) => ({
-      id: r.id,
-      from: r.fromUtc.toISOString(),
-      to: r.toUtc.toISOString(),
-      filterKey: opts.filterKey,
-      narrativeType: r.narrativeType,
-      providerUsed: selectedProvider,
-      createdAt: r.createdAt.toISOString(),
-      model: r.model,
-      narrative: r.narrativeJson ? JSON.parse(r.narrativeJson) : null,
-      metrics: r.metricsJson ? JSON.parse(r.metricsJson) : null,
-    }));
   }
 }

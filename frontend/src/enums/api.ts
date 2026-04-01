@@ -10,6 +10,12 @@ export const ApiPath = {
   InsightsSummaryCompliance: "/uiapi/insights/summary/compliance",
   InsightsSummaryNarrative: "/uiapi/insights/summary/narrative",
   InsightsSummaryNarratives: "/uiapi/insights/summary/narratives",
+  InsightsSummaryFilters: "/uiapi/insights/summary/filters",
+
+  OpsDimensions: "/uiapi/insights/ops/dimensions",
+  OpsInteractionsByBucket: "/uiapi/insights/ops/interactions-by-bucket",
+  OpsInteractionsByCoachingNeed: "/uiapi/insights/ops/interactions-by-coaching-need",
+  OpsInteractionDetail: "/uiapi/insights/ops/interaction-detail",
 
   Recordings: "/uiapi/recordings",
 } as const;

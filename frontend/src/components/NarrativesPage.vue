@@ -1,27 +1,17 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
-import { ApiPath, InsightsProvider } from "@/enums/api";
-
-type InteractionFilter = "all" | "calls" | "chats";
-type NarrativeType =
-  | "generic"
-  | "calls_operations"
-  | "calls_client_services"
-  | "chats_operations"
-  | "chats_client_services";
+import { ApiPath } from "@/enums/api";
 
 const filterKey = ref<string>("");
 const narrativeType = ref<string>("");
 const provider = ref<string>("");
-const campaign = ref<string>("");
-const agent = ref<string>("");
+const _today = new Date();
+const _thirtyDaysAgo = new Date(_today.getTime() - 30 * 24 * 60 * 60 * 1000);
+const createdFrom = ref(_thirtyDaysAgo.toISOString().slice(0, 10));
+const createdTo = ref(_today.toISOString().slice(0, 10));
 const loading = ref(false);
 const error = ref("");
-const _today = new Date();
-const _sevenDaysAgo = new Date(_today.getTime() - 6 * 24 * 60 * 60 * 1000);
-const dateFrom = ref(_sevenDaysAgo.toISOString().slice(0, 10));
-const dateTo = ref(_today.toISOString().slice(0, 10));
 const narratives = ref<Array<any>>([]);
 const selectedId = ref<string | null>(null);
 
@@ -32,11 +22,25 @@ const selected = computed(
 const narrative = computed(() => selected.value?.narrative ?? null);
 
 function labelForEntry(entry: any): string {
+  const parts: string[] = [];
+
   const headline = entry?.narrative?.headline;
-  if (headline) return headline;
-  const from = entry.from ? fmtDate(entry.from) : "?";
-  const to = entry.to ? fmtDate(entry.to) : "?";
-  return `${from} → ${to}`;
+  if (headline) {
+    parts.push(headline);
+  } else {
+    const from = entry.from ? fmtDate(entry.from) : "?";
+    const to = entry.to ? fmtDate(entry.to) : "?";
+    parts.push(`${from} → ${to}`);
+  }
+
+  const tags: string[] = [];
+  if (entry.filterKey) tags.push(entry.filterKey);
+  if (entry.narrativeType && entry.narrativeType !== "generic") tags.push(entry.narrativeType.replace(/_/g, " "));
+  if (entry.campaign) tags.push(`campaign: ${entry.campaign}`);
+  if (entry.agent) tags.push(`agent: ${entry.agent}`);
+  if (tags.length) parts.push(`[${tags.join(" | ")}]`);
+
+  return parts.join(" ");
 }
 
 function fmtDate(iso: string) {
@@ -111,10 +115,8 @@ async function load() {
         ...(filterKey.value && { filterKey: filterKey.value }),
         ...(provider.value && { provider: provider.value }),
         ...(narrativeType.value && { narrativeType: narrativeType.value }),
-        ...(dateFrom.value && { from: dateFrom.value }),
-        ...(dateTo.value && { to: dateTo.value }),
-        ...(campaign.value && { campaign: campaign.value }),
-        ...(agent.value && { agent: agent.value }),
+        ...(createdFrom.value && { createdFrom: createdFrom.value }),
+        ...(createdTo.value && { createdTo: createdTo.value }),
       },
     });
     narratives.value = Array.isArray(res.data) ? res.data : [];
@@ -148,7 +150,7 @@ onMounted(load);
           <div class="tile-icon">⚙</div>
           <div class="tile-text">
             <div class="tile-title">Filters</div>
-            <div class="tile-desc">Filter narratives by channel, type, provider and date</div>
+            <div class="tile-desc">Filter narratives by channel, type and provider</div>
           </div>
         </div>
         <div class="tile-body">
@@ -187,23 +189,13 @@ onMounted(load);
             </div>
 
             <div class="control-group">
-              <label class="control-label">Campaign</label>
-              <input type="text" v-model="campaign" class="input" placeholder="All" />
-            </div>
-
-            <div class="control-group">
-              <label class="control-label">Agent</label>
-              <input type="text" v-model="agent" class="input" placeholder="All" />
-            </div>
-
-            <div class="control-group">
               <label class="control-label">Created From</label>
-              <input type="date" v-model="dateFrom" class="input input--date" />
+              <input type="date" v-model="createdFrom" class="input input--date" />
             </div>
 
             <div class="control-group">
               <label class="control-label">Created To</label>
-              <input type="date" v-model="dateTo" class="input input--date" />
+              <input type="date" v-model="createdTo" class="input input--date" />
             </div>
 
             <button class="btn btn--primary" :disabled="loading" @click="load" style="margin-top: 18px">
@@ -239,6 +231,8 @@ onMounted(load);
           <span class="chip chip--primary">{{ selected.narrativeType || "generic" }}</span>
           <span :class="providerChip(selected.providerUsed)">{{ selected.providerUsed }}</span>
           <span v-if="selected.model" class="chip chip--secondary">{{ selected.model }}</span>
+          <span v-if="selected.campaign" class="chip chip--secondary">Campaign: {{ selected.campaign }}</span>
+          <span v-if="selected.agent" class="chip chip--secondary">Agent: {{ selected.agent }}</span>
           <span class="chip chip--info">{{ fmtDate(selected.from) }} → {{ fmtDate(selected.to) }}</span>
           <span class="chip chip--secondary">Generated {{ fmtDateTime(selected.createdAt) }}</span>
         </div>
