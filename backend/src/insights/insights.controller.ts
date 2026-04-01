@@ -51,8 +51,11 @@ export class InsightsController {
   }
 
   @Get('summary/filters')
-  async summaryFilters(): Promise<FilterOptions> {
-    return this.svcSummary.getFilterOptions();
+  async summaryFilters(
+    @Query('filterKey') filterKey?: string,
+  ): Promise<FilterOptions> {
+    const filter = filterKey ? normalizeInteractionFilter(filterKey) : undefined;
+    return this.svcSummary.getFilterOptions(filter);
   }
 
   // ── Ops endpoints ──────────────────────────────────────────────────────────
@@ -64,10 +67,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getOpsDimensionComparison(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getOpsDimensionComparison(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('ops/interactions-by-bucket')
@@ -80,15 +84,16 @@ export class InsightsController {
     @Query('offset') offset?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     if (!bucket) throw new BadRequestException('bucket is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getInteractionsByScoreBucket(
       fromDate, toDate, filter, bucket,
-      Math.min(parseInt(limit ?? '50', 10) || 50, 200),
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
-      campaign, agent,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
     );
   }
 
@@ -102,15 +107,39 @@ export class InsightsController {
     @Query('offset') offset?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     if (!need) throw new BadRequestException('need is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getInteractionsByCoachingNeed(
       fromDate, toDate, filter, need,
-      Math.min(parseInt(limit ?? '50', 10) || 50, 200),
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
-      campaign, agent,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
+  @Get('ops/interactions-by-outcome')
+  async opsByOutcome(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('outcome') outcome?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    if (!outcome) throw new BadRequestException('outcome is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByOutcome(
+      fromDate, toDate, filter, outcome,
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
     );
   }
 
@@ -128,10 +157,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getMetricsSummary(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getMetricsSummary(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('summary/operations')
@@ -141,10 +171,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getOperationsMetrics(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getOperationsMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('summary/client-services')
@@ -154,10 +185,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('summary/objections')
@@ -167,10 +199,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getObjectionsMetrics(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getObjectionsMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('summary/compliance')
@@ -180,10 +213,11 @@ export class InsightsController {
     @Query('filterKey') filterKey?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getCampaignComplianceMetrics(fromDate, toDate, filter, campaign, agent);
+    return this.svcSummary.getCampaignComplianceMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Post('summary/narrative')
@@ -195,13 +229,14 @@ export class InsightsController {
     @Query('narrativeType') narrativeTypeRaw?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const provider = normalizeProvider(providerRaw);
     const filter = normalizeInteractionFilter(filterKey);
     const narrativeType = normalizeNarrativeType(narrativeTypeRaw);
 
-    return this.svcSummary.getNarrativeSummary(fromDate, toDate, filter, provider, narrativeType, campaign, agent);
+    return this.svcSummary.getNarrativeSummary(fromDate, toDate, filter, provider, narrativeType, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
   @Get('summary/narratives')
@@ -271,6 +306,12 @@ function normalizeInteractionFilter(raw?: string): InteractionFilter {
   if (raw === 'chats') return 'chats';
   if (raw === 'all') return 'all';
   return 'calls';
+}
+
+function parseExcludeOutcomes(raw?: string): string[] | undefined {
+  if (!raw) return undefined;
+  const items = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return items.length ? items : undefined;
 }
 
 function normalizeNarrativeType(raw?: string): NarrativeType {

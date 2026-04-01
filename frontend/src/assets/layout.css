@@ -59,6 +59,9 @@
   .grid-2 {
     grid-template-columns: 1fr 1fr;
   }
+  .grid-3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
   .grid-full {
     grid-column: 1 / -1;
   }

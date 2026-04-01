@@ -15,6 +15,7 @@ export const ApiPath = {
   OpsDimensions: "/uiapi/insights/ops/dimensions",
   OpsInteractionsByBucket: "/uiapi/insights/ops/interactions-by-bucket",
   OpsInteractionsByCoachingNeed: "/uiapi/insights/ops/interactions-by-coaching-need",
+  OpsInteractionsByOutcome: "/uiapi/insights/ops/interactions-by-outcome",
   OpsInteractionDetail: "/uiapi/insights/ops/interaction-detail",
 
   Recordings: "/uiapi/recordings",

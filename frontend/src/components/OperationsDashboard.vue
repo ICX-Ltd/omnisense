@@ -1,11 +1,42 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
 const agentOptions = ref<string[]>([]);
+const outcomeOptions = ref<string[]>([]);
+const excludeOutcomes = ref<string[]>([]);
+
+const COMMON_EXCLUSIONS = [
+  "npcb", "noanswer", "agam", "test chat", "test chat - client",
+  "customer end chat", "customer ended chat", "customer ended chat - no interaction",
+];
+
+const commonExclusionsAvailable = computed(() =>
+  outcomeOptions.value.filter((o) =>
+    COMMON_EXCLUSIONS.some((ce) => o.toLowerCase() === ce),
+  ),
+);
+
+const allCommonExcluded = computed(() =>
+  commonExclusionsAvailable.value.length > 0 &&
+  commonExclusionsAvailable.value.every((o) => excludeOutcomes.value.includes(o)),
+);
+
+function toggleCommonExclusions() {
+  if (allCommonExcluded.value) {
+    excludeOutcomes.value = excludeOutcomes.value.filter(
+      (o) => !commonExclusionsAvailable.value.includes(o),
+    );
+  } else {
+    const toAdd = commonExclusionsAvailable.value.filter(
+      (o) => !excludeOutcomes.value.includes(o),
+    );
+    excludeOutcomes.value = [...excludeOutcomes.value, ...toAdd];
+  }
+}
 
 function isoStartOfDay(d: Date) {
   const x = new Date(d);
@@ -47,6 +78,7 @@ const sharedParams = computed(() => ({
   filterKey: interactionFilter.value,
   ...(campaign.value && { campaign: campaign.value }),
   ...(agent.value && { agent: agent.value }),
+  ...(excludeOutcomes.value.length && { excludeOutcomes: excludeOutcomes.value.join(',') }),
 }));
 
 // ── Data state ───────────────────────────────────────────────────────────────
@@ -64,6 +96,10 @@ const loadingBucket = ref(false);
 const expandedNeed = ref<string | null>(null);
 const needInteractions = ref<any[]>([]);
 const loadingNeed = ref(false);
+
+const expandedOutcome = ref<string | null>(null);
+const outcomeInteractions = ref<any[]>([]);
+const loadingOutcome = ref(false);
 
 // Detail drawer
 const detailId = ref<string | null>(null);
@@ -221,7 +257,11 @@ const overallScore = computed(() => dimData.value?.overall?.overall_score ?? nul
 const agentScore = computed(() => dimData.value?.agent?.overall_score ?? null);
 const overallCount = computed(() => dimData.value?.overall?.count ?? 0);
 const agentCount = computed(() => dimData.value?.agent?.count ?? 0);
-const agentsInData = computed(() => dimData.value?.agents_in_data ?? []);
+const agentsInData = computed(() =>
+  [...(dimData.value?.agents_in_data ?? [])].sort(
+    (a: any, b: any) => (b.avg_score ?? 0) - (a.avg_score ?? 0),
+  ),
+);
 
 function selectAgent(agentName: string) {
   agent.value = agentName;
@@ -236,17 +276,27 @@ function clearAgent() {
 // ── API calls ────────────────────────────────────────────────────────────────
 async function loadFilterOptions() {
   try {
-    const res = await axios.get(ApiPath.InsightsSummaryFilters);
+    const res = await axios.get(ApiPath.InsightsSummaryFilters, {
+      params: { filterKey: interactionFilter.value },
+    });
     campaignOptions.value = res.data.campaigns ?? [];
     agentOptions.value = res.data.agents ?? [];
+    outcomeOptions.value = res.data.outcomes ?? [];
+    // Clear selections that are no longer valid for this channel
+    if (campaign.value && !campaignOptions.value.includes(campaign.value)) campaign.value = "";
+    if (agent.value && !agentOptions.value.includes(agent.value)) agent.value = "";
+    excludeOutcomes.value = excludeOutcomes.value.filter((o) => outcomeOptions.value.includes(o));
   } catch { /* non-critical */ }
 }
+
+watch(interactionFilter, () => { loadFilterOptions(); });
 
 async function loadAll() {
   loading.value = true;
   error.value = "";
   expandedBucket.value = null;
   expandedNeed.value = null;
+  expandedOutcome.value = null;
   detailId.value = null;
 
   try {
@@ -272,7 +322,7 @@ async function toggleBucket(bucket: string) {
   loadingBucket.value = true;
   try {
     const res = await axios.get(ApiPath.OpsInteractionsByBucket, {
-      params: { ...sharedParams.value, bucket, limit: 50 },
+      params: { ...sharedParams.value, bucket, limit: 200 },
     });
     bucketInteractions.value = res.data;
   } catch { bucketInteractions.value = []; }
@@ -288,11 +338,27 @@ async function toggleNeed(need: string) {
   loadingNeed.value = true;
   try {
     const res = await axios.get(ApiPath.OpsInteractionsByCoachingNeed, {
-      params: { ...sharedParams.value, need, limit: 50 },
+      params: { ...sharedParams.value, need, limit: 200 },
     });
     needInteractions.value = res.data;
   } catch { needInteractions.value = []; }
   finally { loadingNeed.value = false; }
+}
+
+async function toggleOutcome(outcome: string) {
+  if (expandedOutcome.value === outcome) {
+    expandedOutcome.value = null;
+    return;
+  }
+  expandedOutcome.value = outcome;
+  loadingOutcome.value = true;
+  try {
+    const res = await axios.get(ApiPath.OpsInteractionsByOutcome, {
+      params: { ...sharedParams.value, outcome, limit: 200 },
+    });
+    outcomeInteractions.value = res.data;
+  } catch { outcomeInteractions.value = []; }
+  finally { loadingOutcome.value = false; }
 }
 
 async function openDetail(recordingId: string) {
@@ -370,6 +436,27 @@ onMounted(async () => {
               <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
             </select>
           </div>
+          <div v-if="outcomeOptions.length" class="filter-group">
+            <label class="label">Exclude Outcomes</label>
+            <div class="exclude-outcomes-wrap">
+              <button
+                v-if="commonExclusionsAvailable.length"
+                class="btn-quick-exclude"
+                :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
+                @click="toggleCommonExclusions"
+              >
+                {{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}
+              </button>
+              <select v-model="excludeOutcomes" multiple class="select select--sm select--multi">
+                <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
+                  <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
+                </optgroup>
+                <optgroup label="All outcomes">
+                  <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
           <button class="btn btn--primary" style="margin-top: 18px" :disabled="loading" @click="loadAll">
             {{ loading ? "Loading..." : "Load" }}
           </button>
@@ -433,12 +520,12 @@ onMounted(async () => {
         <div class="tile-body">
           <div class="agents-grid">
             <div
-              v-for="a in agentsInData"
+              v-for="(a, idx) in agentsInData"
               :key="a.agent"
               class="agent-card"
               @click="selectAgent(a.agent)"
             >
-              <div class="agent-card-name">{{ a.agent }}</div>
+              <div class="agent-card-name"><span class="agent-rank">#{{ idx + 1 }}</span> {{ a.agent }}</div>
               <div class="agent-card-stats">
                 <span :class="scoreChip(a.avg_score)" style="font-size: 11px">{{ fmtScore(a.avg_score) }}</span>
                 <span class="agent-card-count">{{ a.count }} interactions</span>
@@ -517,7 +604,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="grid grid-2" style="margin-top: 14px">
+      <div class="grid grid-3" style="margin-top: 14px">
         <!-- Score Distribution -->
         <div class="tile">
           <div class="tile-head">
@@ -558,6 +645,7 @@ onMounted(async () => {
                     <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign_detected" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign_detected }}</span>
+                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -599,6 +687,56 @@ onMounted(async () => {
                 <div
                   v-else
                   v-for="ix in needInteractions"
+                  :key="ix.recordingId"
+                  class="drill-row"
+                  @click="openDetail(ix.recordingId)"
+                >
+                  <div class="drill-row-top">
+                    <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
+                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                    <span v-if="ix.campaign_detected" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign_detected }}</span>
+                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  </div>
+                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Outcome Distribution -->
+        <div class="tile" v-if="opsData.outcome_distribution?.length">
+          <div class="tile-head">
+            <div class="tile-icon">&#128203;</div>
+            <div class="tile-text">
+              <div class="tile-title">Outcome Distribution</div>
+              <div class="tile-desc">Click an outcome to see individual interactions</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div
+              v-for="o in opsData.outcome_distribution"
+              :key="o.outcome"
+            >
+              <div class="metric-row metric-row--clickable" @click="toggleOutcome(o.outcome)">
+                <div class="metric-left">
+                  <span class="chip chip--secondary">{{ o.outcome }}</span>
+                </div>
+                <div class="metric-right">
+                  <span v-if="o.avg_score !== null" :class="scoreChip(o.avg_score)" style="font-size: 10px; margin-right: 6px">avg {{ fmtScore(o.avg_score) }}</span>
+                  <span class="count-pill">{{ o.count }}</span>
+                  <span class="expand-icon">{{ expandedOutcome === o.outcome ? '&#9650;' : '&#9660;' }}</span>
+                </div>
+              </div>
+
+              <!-- Expanded interaction list -->
+              <div v-if="expandedOutcome === o.outcome" class="drill-panel">
+                <div v-if="loadingOutcome" class="hint">Loading interactions...</div>
+                <div v-else-if="!outcomeInteractions.length" class="hint">No interactions found.</div>
+                <div
+                  v-else
+                  v-for="ix in outcomeInteractions"
                   :key="ix.recordingId"
                   class="drill-row"
                   @click="openDetail(ix.recordingId)"
@@ -680,6 +818,7 @@ onMounted(async () => {
                       <div><span class="drawer-label">Type</span><span>{{ detailData.interaction.interactionType || "n/a" }}</span></div>
                       <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
                       <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
+                      <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span>{{ detailData.interaction.outcome }}</span></div>
                       <div v-if="detailData.interaction.interactionId"><span class="drawer-label">Interaction ID</span><span class="mono" style="font-size: 12px">{{ detailData.interaction.interactionId }}</span></div>
                     </div>
                     <div v-if="detailData.interaction.recordingUrl && !isChat" class="audio-player">
@@ -856,6 +995,13 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 
+.agent-rank {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
 .agent-card-stats {
   display: flex;
   align-items: center;
@@ -897,6 +1043,37 @@ onMounted(async () => {
 
 .btn--sm:hover {
   background: var(--surface-soft, #f0f0f0);
+}
+
+.exclude-outcomes-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.btn-quick-exclude {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px dashed var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-quick-exclude:hover {
+  border-color: var(--brand, #6366f1);
+  color: var(--brand, #6366f1);
+}
+
+.btn-quick-exclude--active {
+  border-style: solid;
+  border-color: var(--brand, #6366f1);
+  background: color-mix(in srgb, var(--brand, #6366f1) 10%, var(--surface));
+  color: var(--brand, #6366f1);
 }
 
 /* ── Stats strip ───────────────────────────────────────────────────────────── */

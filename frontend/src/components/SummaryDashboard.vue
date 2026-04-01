@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 
@@ -52,6 +52,8 @@ const campaign = ref<string>("");
 const agent = ref<string>("");
 const campaignOptions = ref<string[]>([]);
 const agentOptions = ref<string[]>([]);
+const outcomeOptions = ref<string[]>([]);
+const excludeOutcomes = ref<string[]>([]);
 
 const metrics = ref<any>(null);
 const operationsData = ref<any>(null);
@@ -169,6 +171,7 @@ const sharedParams = computed(() => ({
   filterKey: interactionFilter.value,
   ...(campaign.value && { campaign: campaign.value }),
   ...(agent.value && { agent: agent.value }),
+  ...(excludeOutcomes.value.length && { excludeOutcomes: excludeOutcomes.value.join(',') }),
 }));
 
 async function loadMetrics() {
@@ -312,13 +315,22 @@ async function generateNarrative() {
 
 async function loadFilterOptions() {
   try {
-    const res = await axios.get(ApiPath.InsightsSummaryFilters);
+    const res = await axios.get(ApiPath.InsightsSummaryFilters, {
+      params: { filterKey: interactionFilter.value },
+    });
     campaignOptions.value = res.data.campaigns ?? [];
     agentOptions.value = res.data.agents ?? [];
+    outcomeOptions.value = res.data.outcomes ?? [];
+    // Clear selections that are no longer valid for this channel
+    if (campaign.value && !campaignOptions.value.includes(campaign.value)) campaign.value = "";
+    if (agent.value && !agentOptions.value.includes(agent.value)) agent.value = "";
+    excludeOutcomes.value = excludeOutcomes.value.filter((o) => outcomeOptions.value.includes(o));
   } catch {
     // filter options are non-critical; dropdowns will just show "All"
   }
 }
+
+watch(interactionFilter, () => { loadFilterOptions(); });
 
 onMounted(async () => {
   await loadFilterOptions();
@@ -398,6 +410,12 @@ onMounted(async () => {
               <select v-model="agent" class="select select--sm">
                 <option value="">All</option>
                 <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
+              </select>
+            </div>
+            <div v-if="outcomeOptions.length" class="filter-group">
+              <label class="label">Exclude Outcomes</label>
+              <select v-model="excludeOutcomes" multiple class="select select--sm select--multi">
+                <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
               </select>
             </div>
             <button

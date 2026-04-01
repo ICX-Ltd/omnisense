@@ -1,3 +1,7 @@
+we need to add the outcome to the interactions table and add a filter to the page to exclude multiple outcomes when doing summaries and narratives
+
+
+
 -- currently hooked up to github personal repository
 
 cd "C:/DATA/ICX/ICX Applications/JakartaGit/auto-ignite-insights"

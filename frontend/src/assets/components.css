@@ -628,6 +628,13 @@
   font-size: 13px;
 }
 
+/* Multi-select */
+.select--multi {
+  min-height: 60px;
+  max-height: 120px;
+  min-width: 160px;
+}
+
 /* ── Status chips (stepped: gray → slate → blue → teal → green, red for error) ── */
 .chip--st-incomplete {
   background: #e5e7eb;
