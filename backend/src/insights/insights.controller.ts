@@ -143,6 +143,89 @@ export class InsightsController {
     );
   }
 
+  @Get('ops/interactions-by-interest-level')
+  async opsByInterestLevel(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('interestLevel') interestLevel?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    if (!interestLevel) throw new BadRequestException('interestLevel is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByInterestLevel(
+      fromDate, toDate, filter, interestLevel,
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
+  @Get('ops/interactions-by-competitor')
+  async opsByCompetitor(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('competitor') competitor?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    if (!competitor) throw new BadRequestException('competitor is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByCompetitor(
+      fromDate, toDate, filter, competitor,
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
+  @Get('ops/opportunity')
+  async opsOpportunity(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
+  }
+
+  @Get('ops/interactions-by-opportunity-reason')
+  async opsByOpportunityReason(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('reason') reason?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    if (!reason) throw new BadRequestException('reason is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByOpportunityReason(
+      fromDate, toDate, filter, reason,
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
   @Get('ops/interaction-detail/:id')
   async opsInteractionDetail(@Param('id') id: string) {
     const detail = await this.svcSummary.getInteractionDetail(id);
@@ -321,6 +404,7 @@ function normalizeNarrativeType(raw?: string): NarrativeType {
     'calls_client_services',
     'chats_operations',
     'chats_client_services',
+    'survey_analytics',
   ];
   if (raw && valid.includes(raw as NarrativeType)) return raw as NarrativeType;
   return 'generic';

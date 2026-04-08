@@ -114,6 +114,48 @@ ${JSON.stringify(metrics, null, 2)}
   `.trim();
 }
 
+export function buildSurveyAnalyticsNarrativePrompt(metrics: unknown, freeTextSamples: unknown): string {
+  return `
+You are writing an executive narrative for a client services manager at a UK automotive manufacturer.
+You have structured survey data from outbound follow-up calls to customers who enquired about vehicles.
+
+You have TWO data sources:
+1. AGGREGATED METRICS — counts, percentages, cross-tabulations from survey answers
+2. FREE-TEXT SAMPLES — verbatim customer and agent comments from the same dataset
+
+Your job is to find actionable insights: competitor threats, dealership issues, pricing concerns,
+test drive barriers, and any patterns in why customers are not converting.
+
+Return ONLY valid JSON with this schema:
+{
+  "headline": string,
+  "period_summary": string,
+  "key_findings": Array<{ "finding": string, "evidence": string, "impact": "high"|"medium"|"low" }>,
+  "competitor_threats": Array<{ "competitor": string, "insight": string, "evidence": string }>,
+  "dealership_issues": Array<{ "issue": string, "dealers_affected": string[], "evidence": string, "suggested_action": string }>,
+  "conversion_barriers": Array<{ "barrier": string, "frequency_signal": string, "suggested_action": string }>,
+  "positive_signals": Array<{ "signal": string, "evidence": string }>,
+  "free_text_themes": Array<{ "theme": string, "sample_quotes": string[], "frequency_hint": string }>,
+  "recommended_actions": Array<{ "action": string, "priority": "high"|"medium"|"low", "owner": "client_services"|"dealer_network"|"product"|"marketing"|"pricing" }>,
+  "notes_on_data_quality": string[]
+}
+
+Rules:
+- Use ONLY the provided data; do not invent numbers or quotes.
+- For free_text_themes, cluster similar comments into themes and include 2-3 verbatim sample quotes per theme.
+- Highlight any competitor that appears in 3+ lost sales as a threat.
+- Flag any dealer with a rating below 3 or negative feedback patterns.
+- Keep concise and actionable.
+- Return JSON only. No markdown. No explanation.
+
+AGGREGATED METRICS (JSON):
+${JSON.stringify(metrics, null, 2)}
+
+FREE-TEXT SAMPLES (JSON):
+${JSON.stringify(freeTextSamples, null, 2)}
+  `.trim();
+}
+
 export function buildNarrativeSummaryPrompt(metrics: unknown): string {
   return `
   You are writing an exec narrative for a contact-centre manager in UK automotive finance.

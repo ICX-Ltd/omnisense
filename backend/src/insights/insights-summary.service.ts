@@ -6,6 +6,7 @@ import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { Interaction } from '../db/entities/interaction.entity';
 import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
 import { InsightSummary } from '../db/entities/insight-summary.entity';
+import { SurveyResponse } from '../db/entities/survey-response.entity';
 
 import { createProvider } from './providers/provider.factory';
 import { InsightsProviderName } from './types/insights-provider.type';
@@ -15,6 +16,7 @@ import {
   buildCallsClientServicesNarrativePrompt,
   buildChatsOperationsNarrativePrompt,
   buildChatsClientServicesNarrativePrompt,
+  buildSurveyAnalyticsNarrativePrompt,
 } from './prompt/build-narrative-summary-prompt';
 import {
   parseNarrativeSummaryJson,
@@ -35,7 +37,8 @@ export type NarrativeType =
   | 'calls_operations'
   | 'calls_client_services'
   | 'chats_operations'
-  | 'chats_client_services';
+  | 'chats_client_services'
+  | 'survey_analytics';
 
 function safeParseJson(text: string): any {
   let cleaned = text.trim();
@@ -107,6 +110,8 @@ export class InsightsSummaryService {
     private transcriptsRepo: Repository<InteractionTranscript>,
     @InjectRepository(InsightSummary)
     private summariesRepo: Repository<InsightSummary>,
+    @InjectRepository(SurveyResponse)
+    private surveyRepo: Repository<SurveyResponse>,
   ) {}
 
   async getFilterOptions(filterKey?: InteractionFilter): Promise<FilterOptions> {
@@ -792,6 +797,10 @@ export class InsightsSummaryService {
     } else if (narrativeType === 'chats_client_services') {
       metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes);
       prompt = buildChatsClientServicesNarrativePrompt(metrics);
+    } else if (narrativeType === 'survey_analytics') {
+      const surveyMetrics = await this.gatherSurveyMetricsForNarrative(from, to, campaign);
+      metrics = surveyMetrics.aggregated;
+      prompt = buildSurveyAnalyticsNarrativePrompt(surveyMetrics.aggregated, surveyMetrics.freeText);
     } else {
       metrics = await this.getMetricsSummary(from, to, filterKey, campaign, agent, excludeOutcomes);
       prompt = buildNarrativeSummaryPrompt(metrics);
@@ -855,6 +864,104 @@ ${prompt}
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // SURVEY: GATHER METRICS + FREE-TEXT FOR NARRATIVE
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async gatherSurveyMetricsForNarrative(from: Date, to: Date, campaign?: string) {
+    const parts: string[] = ['s.allocation_date >= @0', 's.allocation_date < @1'];
+    const params: any[] = [from, to];
+    if (campaign) {
+      parts.push(`s.campaign = @${params.length}`);
+      params.push(campaign);
+    }
+    const where = 'WHERE ' + parts.join(' AND ');
+
+    // Aggregated counts
+    const totals = await this.surveyRepo.manager.query(
+      `SELECT COUNT(1) AS total,
+        SUM(CASE WHEN s.survey_flow_status = 'Survey Taken' THEN 1 ELSE 0 END) AS survey_taken,
+        SUM(CASE WHEN s.positive_outcome = 1 THEN 1 ELSE 0 END) AS positive,
+        SUM(CASE WHEN s.neutral_outcome = 1 THEN 1 ELSE 0 END) AS neutral,
+        SUM(CASE WHEN s.negative_outcome = 1 THEN 1 ELSE 0 END) AS negative
+      FROM app.survey_responses s ${where}`, params,
+    );
+
+    const categories = await this.surveyRepo.manager.query(
+      `SELECT COALESCE(s.result_code_desc, 'Unknown') AS category, COUNT(1) AS count
+       FROM app.survey_responses s ${where} GROUP BY s.result_code_desc ORDER BY COUNT(1) DESC`, params,
+    );
+
+    const interestFactors = await this.surveyRepo.manager.query(
+      `SELECT
+        SUM(CAST(ISNULL(s.initial_interest_styling, 0) AS INT)) AS styling,
+        SUM(CAST(ISNULL(s.initial_interest_brand, 0) AS INT)) AS brand,
+        SUM(CAST(ISNULL(s.initial_interest_features, 0) AS INT)) AS features,
+        SUM(CAST(ISNULL(s.initial_interest_size, 0) AS INT)) AS size,
+        SUM(CAST(ISNULL(s.initial_interest_performance, 0) AS INT)) AS performance,
+        SUM(CAST(ISNULL(s.initial_interest_price, 0) AS INT)) AS price
+      FROM app.survey_responses s ${where} AND s.survey_flow_status = 'Survey Taken'`, params,
+    );
+
+    const notPurchaseReasons = await this.surveyRepo.manager.query(
+      `SELECT
+        SUM(CAST(ISNULL(s.not_purchased_price, 0) AS INT)) AS price,
+        SUM(CAST(ISNULL(s.not_purchased_expectations, 0) AS INT)) AS expectations,
+        SUM(CAST(ISNULL(s.not_purchased_different_brand, 0) AS INT)) AS different_brand,
+        SUM(CAST(ISNULL(s.not_purchased_different_model, 0) AS INT)) AS different_model,
+        SUM(CAST(ISNULL(s.not_purchased_financing, 0) AS INT)) AS financing,
+        SUM(CAST(ISNULL(s.not_purchased_dealership, 0) AS INT)) AS dealership
+      FROM app.survey_responses s ${where} AND s.survey_flow_status = 'Survey Taken'`, params,
+    );
+
+    const competitorPurchases = await this.surveyRepo.manager.query(
+      `SELECT s.purchased_make AS make, COUNT(1) AS count
+       FROM app.survey_responses s ${where} AND s.purchased_make IS NOT NULL AND s.purchased_make != ''
+       GROUP BY s.purchased_make ORDER BY COUNT(1) DESC`, params,
+    );
+
+    const dealerRatings = await this.surveyRepo.manager.query(
+      `SELECT s.dealer, AVG(CAST(s.dealership_rating AS FLOAT)) AS avg_rating, COUNT(1) AS count
+       FROM app.survey_responses s ${where} AND s.dealership_rating IS NOT NULL AND s.dealer IS NOT NULL
+       GROUP BY s.dealer HAVING COUNT(1) >= 2 ORDER BY AVG(CAST(s.dealership_rating AS FLOAT)) ASC`, params,
+    );
+
+    const modelPerformance = await this.surveyRepo.manager.query(
+      `SELECT s.model, COUNT(1) AS total,
+        SUM(CASE WHEN s.p2_still_considering = 'Yes' THEN 1 ELSE 0 END) AS still_considering,
+        SUM(CASE WHEN s.purchased_make IS NOT NULL AND s.purchased_make != '' THEN 1 ELSE 0 END) AS purchased_elsewhere
+      FROM app.survey_responses s ${where} AND s.model IS NOT NULL
+      GROUP BY s.model HAVING COUNT(1) >= 2 ORDER BY COUNT(1) DESC`, params,
+    );
+
+    // Free-text samples (up to 100 records with any text content)
+    const freeText = await this.surveyRepo.manager.query(
+      `SELECT TOP 100
+        s.id_opportunity, s.model, s.dealer, s.result_code_desc,
+        s.agent_notes, s.dealership_rating_feedback, s.why_no_test_drive,
+        s.not_purchased_price_feedback, s.purchase_influence, s.purchase_reason,
+        s.improve_anything, s.vehicle_impression, s.purchased_make, s.purchased_model
+      FROM app.survey_responses s ${where}
+        AND (s.agent_notes IS NOT NULL OR s.dealership_rating_feedback IS NOT NULL
+             OR s.why_no_test_drive IS NOT NULL OR s.not_purchased_price_feedback IS NOT NULL
+             OR s.purchase_influence IS NOT NULL OR s.improve_anything IS NOT NULL)
+      ORDER BY s.allocation_date DESC`, params,
+    );
+
+    return {
+      aggregated: {
+        totals: totals[0] ?? {},
+        categories,
+        interest_factors: interestFactors[0] ?? {},
+        not_purchase_reasons: notPurchaseReasons[0] ?? {},
+        competitor_purchases: competitorPurchases,
+        dealer_ratings: dealerRatings.slice(0, 15),
+        model_performance: modelPerformance.slice(0, 15),
+      },
+      freeText,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // OPS: DIMENSION COMPARISON (overall vs agent)
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -890,6 +997,52 @@ ${prompt}
   WHERE ii.operations_scores_json IS NOT NULL
     AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1`;
 
+  // RAC QA dimension averages: percentage of "yes" answers per question, plus section scores
+  private readonly qaAvgSql = `SELECT
+    -- Correct Process (Q1-Q4)
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q1_polite_friendly.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q1_polite_friendly.answer') = 'no' THEN 0.0 END) AS q1_polite_friendly,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q2_clear_understandable.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q2_clear_understandable.answer') = 'no' THEN 0.0 END) AS q2_clear_understandable,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q3_accurate_info.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q3_accurate_info.answer') = 'no' THEN 0.0 END) AS q3_accurate_info,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q4_next_steps_clear.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.q4_next_steps_clear.answer') = 'no' THEN 0.0 END) AS q4_next_steps_clear,
+    AVG(CAST(JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.section_score') AS FLOAT)) AS correct_process_score,
+    -- Service Standard (Q5-Q8)
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q5_polite_friendly.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q5_polite_friendly.answer') = 'no' THEN 0.0 END) AS q5_polite_friendly,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q6_services_clear.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q6_services_clear.answer') = 'no' THEN 0.0 END) AS q6_services_clear,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q7_next_steps_clear.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q7_next_steps_clear.answer') = 'no' THEN 0.0 END) AS q7_next_steps_clear,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q8_accurate_info.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.q8_accurate_info.answer') = 'no' THEN 0.0 END) AS q8_accurate_info,
+    AVG(CAST(JSON_VALUE(ii.qa_scores_json, '$.scores.service_standard.section_score') AS FLOAT)) AS service_standard_score,
+    -- Right Outcome (Q9-Q15)
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q9_id_verification.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q9_id_verification.answer') = 'no' THEN 0.0 END) AS q9_id_verification,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q10_fair_not_misleading.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q10_fair_not_misleading.answer') = 'no' THEN 0.0 END) AS q10_fair_not_misleading,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q11_needs_established.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q11_needs_established.answer') = 'no' THEN 0.0 END) AS q11_needs_established,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q12_best_interest.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q12_best_interest.answer') = 'no' THEN 0.0 END) AS q12_best_interest,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q13_vulnerability.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q13_vulnerability.answer') = 'no' THEN 0.0 END) AS q13_vulnerability,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q14_brand_representation.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q14_brand_representation.answer') = 'no' THEN 0.0 END) AS q14_brand_representation,
+    AVG(CASE WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q15_eligible_products.answer') = 'yes' THEN 10.0
+              WHEN JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q15_eligible_products.answer') = 'no' THEN 0.0 END) AS q15_eligible_products,
+    AVG(CAST(JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.section_score') AS FLOAT)) AS right_outcome_score,
+    -- Overall
+    AVG(ii.overall_score) AS overall_score,
+    COUNT(1) AS count
+  FROM app.interaction_insights ii
+  INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+  WHERE JSON_VALUE(ii.qa_scores_json, '$.scores.correct_process.section_score') IS NOT NULL
+    AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1`;
+
   async getOpsDimensionComparison(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[],
   ) {
@@ -897,6 +1050,12 @@ ${prompt}
     const { clause: overallClause, extraParams: overallParams } = this.buildRawFilters(filterKey, campaign, undefined, excludeOutcomes);
     const overall = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
       `${this.dimensionAvgSql} ${overallClause}`,
+      [from, to, ...overallParams],
+    );
+
+    // RAC QA averages (overall, no agent filter)
+    const qaOverall = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
+      `${this.qaAvgSql} ${overallClause}`,
       [from, to, ...overallParams],
     );
 
@@ -915,6 +1074,7 @@ ${prompt}
     );
 
     let agentData: Record<string, number | null> | null = null;
+    let qaAgentData: Record<string, number | null> | null = null;
     if (agent) {
       const { clause: agentClause, extraParams: agentParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
       const agentResult = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
@@ -922,6 +1082,12 @@ ${prompt}
         [from, to, ...agentParams],
       );
       agentData = agentResult[0] ?? null;
+
+      const qaAgentResult = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
+        `${this.qaAvgSql} ${agentClause}`,
+        [from, to, ...agentParams],
+      );
+      qaAgentData = qaAgentResult[0] ?? null;
     }
 
     return {
@@ -930,6 +1096,8 @@ ${prompt}
       overall: overall[0] ?? {},
       agent: agentData,
       agentName: agent ?? null,
+      qa_overall: qaOverall[0] ?? null,
+      qa_agent: qaAgentData,
       agents_in_data: agentsInData.map((r) => ({
         agent: r.agent,
         count: parseInt(r.count, 10),
@@ -1047,6 +1215,160 @@ ${prompt}
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // CLIENT SERVICES: INTERACTIONS BY INTEREST LEVEL
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionsByInterestLevel(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    interestLevel: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+    const paramOffset = 2 + extraParams.length;
+
+    const isUnknown = interestLevel === 'unknown';
+    const condition = isUnknown
+      ? `(ii.interest_level IS NULL OR ii.interest_level = '' OR ii.interest_level = 'unknown')`
+      : `ii.interest_level = @${paramOffset}`;
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.interest_level,
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ${condition}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY ia.interactionDateTime DESC
+       OFFSET @${isUnknown ? paramOffset : paramOffset + 1} ROWS FETCH NEXT @${isUnknown ? paramOffset + 1 : paramOffset + 2} ROWS ONLY`,
+      [from, to, ...extraParams, ...(isUnknown ? [offset, limit] : [interestLevel, offset, limit])],
+    );
+
+    return rows;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CLIENT SERVICES: INTERACTIONS BY COMPETITOR
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionsByCompetitor(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    competitor: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+    const paramOffset = 2 + extraParams.length;
+
+    const isUnknown = competitor === 'unknown';
+    const condition = isUnknown
+      ? `(ii.competitor_purchased IS NULL OR ii.competitor_purchased = '' OR ii.competitor_purchased = 'unknown')`
+      : `ii.competitor_purchased = @${paramOffset}`;
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.competitor_purchased,
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.has_purchased_elsewhere = 1
+         AND ${condition}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY ia.interactionDateTime DESC
+       OFFSET @${isUnknown ? paramOffset : paramOffset + 1} ROWS FETCH NEXT @${isUnknown ? paramOffset + 1 : paramOffset + 2} ROWS ONLY`,
+      [from, to, ...extraParams, ...(isUnknown ? [offset, limit] : [competitor, offset, limit])],
+    );
+
+    return rows;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: OPPORTUNITY METRICS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getOpportunityMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[]) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+
+    const rows = await this.insightsRepo.manager.query<Array<{
+      total: string;
+      opportunities: string;
+      not_opportunities: string;
+      classified: string;
+    }>>(
+      `SELECT
+        COUNT(1) AS total,
+        SUM(CASE WHEN ii.is_opportunity = 1 THEN 1 ELSE 0 END) AS opportunities,
+        SUM(CASE WHEN ii.is_opportunity = 0 THEN 1 ELSE 0 END) AS not_opportunities,
+        SUM(CASE WHEN ii.is_opportunity IS NOT NULL THEN 1 ELSE 0 END) AS classified
+      FROM app.interaction_insights ii
+      INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+      WHERE ii.is_opportunity IS NOT NULL
+        AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+        ${filterClause}`,
+      [from, to, ...extraParams],
+    );
+
+    const reasonBreakdown = await this.insightsRepo.manager.query<Array<{ reason: string; count: string }>>(
+      `SELECT ii.not_opportunity_reason AS reason, COUNT(1) AS count
+      FROM app.interaction_insights ii
+      INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+      WHERE ii.is_opportunity = 0
+        AND ii.not_opportunity_reason IS NOT NULL
+        AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+        ${filterClause}
+      GROUP BY ii.not_opportunity_reason
+      ORDER BY COUNT(1) DESC`,
+      [from, to, ...extraParams],
+    );
+
+    const stats = rows[0];
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: filterKey,
+      total: parseInt(stats?.total ?? '0', 10),
+      opportunities: parseInt(stats?.opportunities ?? '0', 10),
+      not_opportunities: parseInt(stats?.not_opportunities ?? '0', 10),
+      classified: parseInt(stats?.classified ?? '0', 10),
+      reason_breakdown: reasonBreakdown.map((r) => ({
+        reason: r.reason,
+        count: parseInt(r.count, 10),
+      })),
+    };
+  }
+
+  async getInteractionsByOpportunityReason(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    reason: string, limit = 50, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+    const paramOffset = 2 + extraParams.length;
+
+    const isOpportunityFilter = reason === '__opportunity'
+      ? `ii.is_opportunity = 1`
+      : `ii.is_opportunity = 0 AND ii.not_opportunity_reason = @${paramOffset}`;
+    const extraQueryParams = reason === '__opportunity' ? [] : [reason];
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.is_opportunity,
+              ii.not_opportunity_reason, ii.opportunity_json,
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ${isOpportunityFilter}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY ia.interactionDateTime DESC
+       OFFSET @${paramOffset + extraQueryParams.length} ROWS FETCH NEXT @${paramOffset + extraQueryParams.length + 1} ROWS ONLY`,
+      [from, to, ...extraParams, ...extraQueryParams, offset, limit],
+    );
+
+    return rows.map((r: any) => ({
+      ...r,
+      opportunity_json: r.opportunity_json ? safeParseJson(r.opportunity_json) : null,
+    }));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // OPS: SINGLE INTERACTION DETAIL
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1083,10 +1405,16 @@ ${prompt}
         decision_timeline: insight.decision_timeline,
         next_step_agreed: insight.next_step_agreed,
         operations_scores: insight.operations_scores_json ? safeParseJson(insight.operations_scores_json) : null,
+        qa_scores: insight.qa_scores_json ? safeParseJson(insight.qa_scores_json) : null,
         coaching: insight.coaching_json ? safeParseJson(insight.coaching_json) : null,
         objections: insight.objections_json ? safeParseJson(insight.objections_json) : null,
         action_items: insight.action_items_json ? safeParseJson(insight.action_items_json) : null,
         risk_flags: insight.risk_flags_json ? safeParseJson(insight.risk_flags_json) : null,
+        opportunity: {
+          is_opportunity: insight.is_opportunity,
+          not_opportunity_reason: insight.not_opportunity_reason,
+          detail: insight.opportunity_json ? safeParseJson(insight.opportunity_json) : null,
+        },
       } : null,
     };
   }

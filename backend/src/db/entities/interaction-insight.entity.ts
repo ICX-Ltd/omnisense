@@ -115,6 +115,24 @@ export class InteractionInsight {
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   client_services_json!: string | null;
 
+  // ── QA assessment (campaign-specific Q&A scoring) ────────────────────────
+
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  qa_scores_json!: string | null;
+
+  // ── Opportunity classification ───────────────────────────────────────────
+
+  @Index()
+  @Column({ type: 'bit', nullable: true })
+  is_opportunity!: boolean | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  not_opportunity_reason!: string | null;
+
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  opportunity_json!: string | null;
+
   // ── Shared JSON fields ───────────────────────────────────────────────────
 
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })

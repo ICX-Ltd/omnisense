@@ -174,6 +174,7 @@ onMounted(load);
                 <option value="calls_client_services">Calls — Client Services</option>
                 <option value="chats_operations">Chats — Operations</option>
                 <option value="chats_client_services">Chats — Client Services</option>
+                <option value="survey_analytics">Survey Analytics</option>
               </select>
             </div>
 

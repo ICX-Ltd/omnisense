@@ -15,6 +15,7 @@ import { InteractionInsight } from './db/entities/interaction-insight.entity';
 import { InsightSummary } from './db/entities/insight-summary.entity';
 import { UserAccount } from './db/entities/user-account.entity';
 import { BatchJob } from './db/entities/batch-job.entity';
+import { SurveyResponse } from './db/entities/survey-response.entity';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { BatchJob } from './db/entities/batch-job.entity';
             InsightSummary,
             UserAccount,
             BatchJob,
+            SurveyResponse,
           ],
           synchronize: false,
           logging: false,

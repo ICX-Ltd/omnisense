@@ -70,6 +70,12 @@ type CampaignCompliance = {
   contacted_by_dealership: boolean | null;
 };
 
+type SalesOpportunity = {
+  is_opportunity: boolean | null;
+  not_opportunity_reason: string | null;
+  reason_detail: string | null;
+};
+
 export type ExtractedInsights = {
   contact_disposition: string;
   conversation_type: string;
@@ -77,6 +83,7 @@ export type ExtractedInsights = {
   summary_short: string;
   summary_detailed: string;
   sentiment_overall: number;
+  opportunity?: SalesOpportunity;       // campaign-specific opportunity classification
   customer_signals: CustomerSignals;
   campaign_compliance?: CampaignCompliance; // calls only
   operations: {
@@ -84,6 +91,7 @@ export type ExtractedInsights = {
     overall_score: number;
     coaching: Coaching;
   };
+  qa_assessment?: any;                  // campaign-specific QA scoring (e.g. RAC Q1-Q15)
   client_services: ClientServices;
   action_items: ActionItem[];
   key_entities: Array<{ type: string; value: string }>;

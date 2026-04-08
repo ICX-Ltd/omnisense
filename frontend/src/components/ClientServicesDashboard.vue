@@ -69,7 +69,7 @@ const toDateStr = computed({
 });
 
 type InteractionFilter = "all" | "calls" | "chats";
-const interactionFilter = ref<InteractionFilter>("calls");
+const interactionFilter = ref<InteractionFilter>("chats");
 const campaign = ref("");
 const agent = ref("");
 
@@ -86,24 +86,20 @@ const sharedParams = computed(() => ({
 const loading = ref(false);
 const error = ref("");
 
-const opsData = ref<any>(null);
-const dimData = ref<any>(null);
-
-// Drill-down state
-const expandedBucket = ref<string | null>(null);
-const bucketInteractions = ref<any[]>([]);
-const loadingBucket = ref(false);
-
-const expandedNeed = ref<string | null>(null);
-const needInteractions = ref<any[]>([]);
-const loadingNeed = ref(false);
-
-const expandedOutcome = ref<string | null>(null);
-const outcomeInteractions = ref<any[]>([]);
-const loadingOutcome = ref(false);
-
-// Opportunity state
+const csData = ref<any>(null);
 const opportunityData = ref<any>(null);
+
+// Interest level drill-down
+const expandedInterest = ref<string | null>(null);
+const interestInteractions = ref<any[]>([]);
+const loadingInterest = ref(false);
+
+// Competitor drill-down
+const expandedCompetitor = ref<string | null>(null);
+const competitorInteractions = ref<any[]>([]);
+const loadingCompetitor = ref(false);
+
+// Opportunity drill-down
 const expandedOpportunityReason = ref<string | null>(null);
 const opportunityInteractions = ref<any[]>([]);
 const loadingOpportunityReason = ref(false);
@@ -114,18 +110,30 @@ const detailData = ref<any>(null);
 const loadingDetail = ref(false);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+function fmtDate(iso: string | null) {
+  if (!iso) return "n/a";
+  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 function fmtScore(v: number | null | undefined) {
   if (typeof v !== "number" || v === null) return "n/a";
   return v.toFixed(1);
 }
 
-// Consistent four-band scoring: red (<5), orange (5-7), blue (7-9), green (9+)
-const SCORE_RED = "#dc2626";
-const SCORE_ORANGE = "#ea580c";
-const SCORE_BLUE = "#0284c7";
-const SCORE_GREEN = "#059669";
+function fmtQaScore(v: number | null | undefined) {
+  if (typeof v !== "number" || v === null) return "n/a";
+  return v.toFixed(2);
+}
 
-// Solid colour for chips
+const SCORE_GREEN = "#059669";
+const SCORE_BLUE = "#0284c7";
+const SCORE_ORANGE = "#ea580c";
+const SCORE_RED = "#dc2626";
+
 function scoreColorSolid(v: number | null) {
   if (typeof v !== "number") return "#ccc";
   if (v >= 9) return SCORE_GREEN;
@@ -134,7 +142,6 @@ function scoreColorSolid(v: number | null) {
   return SCORE_RED;
 }
 
-// Gradient for bars — softens from a lighter tint to the full band colour
 function scoreColor(v: number | null) {
   if (typeof v !== "number") return "#ccc";
   let light: string, full: string;
@@ -153,14 +160,46 @@ function scoreChip(_v: number | null) {
   return "chip bucket-chip--below5";
 }
 
-function fmtDate(iso: string | null) {
-  if (!iso) return "n/a";
-  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+function badgeClass(level: string) {
+  if (level === "high") return "chip chip--success";
+  if (level === "medium") return "chip chip--info";
+  if (level === "low") return "chip chip--warning";
+  return "chip chip--secondary";
 }
 
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+function opportunityReasonLabel(r: string) {
+  const labels: Record<string, string> = {
+    existing_policy: "Existing Policy",
+    recent_policy_lapse: "Recent Policy (60 days)",
+    renewal_enquiry: "Renewal Enquiry",
+    cancellation_enquiry: "Cancellation Enquiry",
+    policy_update: "Policy/Account Update",
+    opt_out: "Opt Out Request",
+    breakdown_report: "Breakdown Report",
+    phone_line_complaint: "Phone Line Complaint",
+    myrac_enquiry: "MyRAC Enquiry",
+  };
+  return labels[r] || r.replace(/_/g, " ");
 }
+
+// QA labels for detail drawer
+const qaQuestionLabels: Record<string, string> = {
+  q1_polite_friendly: "Q1 Polite & Friendly",
+  q2_clear_understandable: "Q2 Clear & Understandable",
+  q3_accurate_info: "Q3 Accurate Info",
+  q4_next_steps_clear: "Q4 Next Steps Clear",
+  q5_polite_friendly: "Q5 Polite & Friendly",
+  q6_services_clear: "Q6 Services Clear",
+  q7_next_steps_clear: "Q7 Next Steps Clear",
+  q8_accurate_info: "Q8 Accurate Info",
+  q9_id_verification: "Q9 ID Verification",
+  q10_fair_not_misleading: "Q10 Fair & Not Misleading",
+  q11_needs_established: "Q11 Needs Established",
+  q12_best_interest: "Q12 Best Interest",
+  q13_vulnerability: "Q13 Vulnerability",
+  q14_brand_representation: "Q14 Brand Representation",
+  q15_eligible_products: "Q15 Eligible Products",
+};
 
 const isChat = computed(() => detailData.value?.interaction?.interactionType === "chat");
 
@@ -185,151 +224,11 @@ const chatMessages = computed<ChatMessage[]>(() => {
   }
 });
 
-function opportunityReasonLabel(r: string) {
-  const labels: Record<string, string> = {
-    existing_policy: "Existing Policy",
-    recent_policy_lapse: "Recent Policy (60 days)",
-    renewal_enquiry: "Renewal Enquiry",
-    cancellation_enquiry: "Cancellation Enquiry",
-    policy_update: "Policy/Account Update",
-    opt_out: "Opt Out Request",
-    breakdown_report: "Breakdown Report",
-    phone_line_complaint: "Phone Line Complaint",
-    myrac_enquiry: "MyRAC Enquiry",
-  };
-  return labels[r] || r.replace(/_/g, " ");
-}
-
-// RAC QA dimension definitions grouped by section
-const qaQuestionLabels: Record<string, string> = {
-  q1_polite_friendly: "Q1 Polite & Friendly",
-  q2_clear_understandable: "Q2 Clear & Understandable",
-  q3_accurate_info: "Q3 Accurate Info",
-  q4_next_steps_clear: "Q4 Next Steps Clear",
-  q5_polite_friendly: "Q5 Polite & Friendly",
-  q6_services_clear: "Q6 Services Clear",
-  q7_next_steps_clear: "Q7 Next Steps Clear",
-  q8_accurate_info: "Q8 Accurate Info",
-  q9_id_verification: "Q9 ID Verification",
-  q10_fair_not_misleading: "Q10 Fair & Not Misleading",
-  q11_needs_established: "Q11 Needs Established",
-  q12_best_interest: "Q12 Best Interest",
-  q13_vulnerability: "Q13 Vulnerability",
-  q14_brand_representation: "Q14 Brand Representation",
-  q15_eligible_products: "Q15 Eligible Products",
-};
-
-const qaSections = [
-  { key: "correct_process", label: "Correct Process", scoreKey: "correct_process_score", questions: ["q1_polite_friendly", "q2_clear_understandable", "q3_accurate_info", "q4_next_steps_clear"] },
-  { key: "service_standard", label: "Service Standard", scoreKey: "service_standard_score", questions: ["q5_polite_friendly", "q6_services_clear", "q7_next_steps_clear", "q8_accurate_info"] },
-  { key: "right_outcome", label: "Right Outcome", scoreKey: "right_outcome_score", questions: ["q9_id_verification", "q10_fair_not_misleading", "q11_needs_established", "q12_best_interest", "q13_vulnerability", "q14_brand_representation", "q15_eligible_products"] },
-];
-
-const hasQaData = computed(() => {
-  const qa = dimData.value?.qa_overall;
-  return qa && typeof qa.correct_process_score === "number";
+// Campaigns in dataset
+const campaignsInData = computed(() => {
+  if (!csData.value) return [];
+  return csData.value.campaigns_in_data ?? [];
 });
-
-// Format QA scores (0-10 with 2dp)
-function fmtQaScore(v: number | null | undefined) {
-  if (typeof v !== "number" || v === null) return "n/a";
-  return v.toFixed(2);
-}
-
-function bucketLabel(b: string) {
-  const labels: Record<string, string> = {
-    below_5: "Below 5",
-    "5_to_7": "5 to 7",
-    "7_to_9": "7 to 9",
-    "9_plus": "9+",
-  };
-  return labels[b] || b;
-}
-
-function bucketChipClass(b: string) {
-  if (b === "below_5") return "chip bucket-chip--below5";
-  if (b === "5_to_7") return "chip bucket-chip--5to7";
-  if (b === "7_to_9") return "chip bucket-chip--7to9";
-  return "chip bucket-chip--9plus";
-}
-
-// Slate gradient for overall bars when comparing
-function overallCompareColor(v: number | null) {
-  if (typeof v !== "number") return "#ccc";
-  const lightness = 75 - (v / 10) * 30;
-  const light = `hsl(215, 15%, ${lightness + 15}%)`;
-  const full = `hsl(215, 18%, ${lightness}%)`;
-  return `linear-gradient(90deg, ${light}, ${full})`;
-}
-
-// Solid slate for chips in compare mode
-function overallCompareColorSolid(v: number | null) {
-  if (typeof v !== "number") return "#ccc";
-  const lightness = 75 - (v / 10) * 30;
-  return `hsl(215, 18%, ${lightness}%)`;
-}
-
-const callDimensions = [
-  "intro", "data_protection", "campaign_focus", "disclaimer", "gdpr",
-  "correct_outcome", "tone_pace", "delivery", "questioning", "rapport",
-  "objection_handling", "active_listening", "product_knowledge",
-];
-
-const chatDimensions = [
-  "response_time", "accept_time", "questioning", "product_process",
-  "engagement", "tone", "paraphrase_close", "language_accuracy",
-  "contact_details", "correct_outcome",
-];
-
-const dimensions = computed(() => {
-  if (!dimData.value) return [];
-  const overall = dimData.value.overall ?? {};
-  const ag = dimData.value.agent;
-
-  let allowedKeys: string[];
-  if (interactionFilter.value === "calls") {
-    allowedKeys = callDimensions;
-  } else if (interactionFilter.value === "chats") {
-    allowedKeys = chatDimensions;
-  } else {
-    // "all" — show union of both, deduplicated, in a sensible order
-    allowedKeys = [...callDimensions, ...chatDimensions.filter((k) => !callDimensions.includes(k))];
-  }
-
-  return allowedKeys
-    .filter((k) => {
-      // Only show dimensions that have data (non-null in overall or agent)
-      const ov = typeof overall[k] === "number" ? overall[k] : null;
-      const av = ag && typeof ag[k] === "number" ? ag[k] : null;
-      return ov !== null || av !== null;
-    })
-    .map((k) => ({
-      key: k,
-      label: k.replace(/_/g, " "),
-      overall: typeof overall[k] === "number" ? overall[k] : null,
-      agent: ag && typeof ag[k] === "number" ? ag[k] : null,
-    }));
-});
-
-const overallScore = computed(() => dimData.value?.overall?.overall_score ?? null);
-const agentScore = computed(() => dimData.value?.agent?.overall_score ?? null);
-const overallCount = computed(() => dimData.value?.overall?.count ?? 0);
-const agentCount = computed(() => dimData.value?.agent?.count ?? 0);
-const agentsInData = computed(() =>
-  [...(dimData.value?.agents_in_data ?? [])].sort(
-    (a: any, b: any) => (b.avg_score ?? 0) - (a.avg_score ?? 0),
-  ),
-);
-
-function selectAgent(agentName: string) {
-  agent.value = agentName;
-  loadAll();
-}
-
-function clearAgent() {
-  agent.value = "";
-  loadAll();
-}
 
 // ── API calls ────────────────────────────────────────────────────────────────
 async function loadFilterOptions() {
@@ -340,7 +239,6 @@ async function loadFilterOptions() {
     campaignOptions.value = res.data.campaigns ?? [];
     agentOptions.value = res.data.agents ?? [];
     outcomeOptions.value = res.data.outcomes ?? [];
-    // Clear selections that are no longer valid for this channel
     if (campaign.value && !campaignOptions.value.includes(campaign.value)) campaign.value = "";
     if (agent.value && !agentOptions.value.includes(agent.value)) agent.value = "";
     excludeOutcomes.value = excludeOutcomes.value.filter((o) => outcomeOptions.value.includes(o));
@@ -352,20 +250,17 @@ watch(interactionFilter, () => { loadFilterOptions(); });
 async function loadAll() {
   loading.value = true;
   error.value = "";
-  expandedBucket.value = null;
-  expandedNeed.value = null;
-  expandedOutcome.value = null;
+  expandedInterest.value = null;
+  expandedCompetitor.value = null;
   expandedOpportunityReason.value = null;
   detailId.value = null;
 
   try {
-    const [opsRes, dimRes, oppRes] = await Promise.all([
-      axios.get(ApiPath.InsightsSummaryOperations, { params: sharedParams.value }),
-      axios.get(ApiPath.OpsDimensions, { params: sharedParams.value }),
+    const [csRes, oppRes] = await Promise.all([
+      axios.get(ApiPath.InsightsSummaryClientServices, { params: sharedParams.value }),
       axios.get(ApiPath.OpsOpportunity, { params: sharedParams.value }).catch(() => ({ data: null })),
     ]);
-    opsData.value = opsRes.data;
-    dimData.value = dimRes.data;
+    csData.value = csRes.data;
     opportunityData.value = oppRes.data;
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
@@ -374,52 +269,36 @@ async function loadAll() {
   }
 }
 
-async function toggleBucket(bucket: string) {
-  if (expandedBucket.value === bucket) {
-    expandedBucket.value = null;
+async function toggleInterest(level: string) {
+  if (expandedInterest.value === level) {
+    expandedInterest.value = null;
     return;
   }
-  expandedBucket.value = bucket;
-  loadingBucket.value = true;
+  expandedInterest.value = level;
+  loadingInterest.value = true;
   try {
-    const res = await axios.get(ApiPath.OpsInteractionsByBucket, {
-      params: { ...sharedParams.value, bucket, limit: 200 },
+    const res = await axios.get(ApiPath.OpsInteractionsByInterestLevel, {
+      params: { ...sharedParams.value, interestLevel: level, limit: 200 },
     });
-    bucketInteractions.value = res.data;
-  } catch { bucketInteractions.value = []; }
-  finally { loadingBucket.value = false; }
+    interestInteractions.value = res.data;
+  } catch { interestInteractions.value = []; }
+  finally { loadingInterest.value = false; }
 }
 
-async function toggleNeed(need: string) {
-  if (expandedNeed.value === need) {
-    expandedNeed.value = null;
+async function toggleCompetitor(competitor: string) {
+  if (expandedCompetitor.value === competitor) {
+    expandedCompetitor.value = null;
     return;
   }
-  expandedNeed.value = need;
-  loadingNeed.value = true;
+  expandedCompetitor.value = competitor;
+  loadingCompetitor.value = true;
   try {
-    const res = await axios.get(ApiPath.OpsInteractionsByCoachingNeed, {
-      params: { ...sharedParams.value, need, limit: 200 },
+    const res = await axios.get(ApiPath.OpsInteractionsByCompetitor, {
+      params: { ...sharedParams.value, competitor, limit: 200 },
     });
-    needInteractions.value = res.data;
-  } catch { needInteractions.value = []; }
-  finally { loadingNeed.value = false; }
-}
-
-async function toggleOutcome(outcome: string) {
-  if (expandedOutcome.value === outcome) {
-    expandedOutcome.value = null;
-    return;
-  }
-  expandedOutcome.value = outcome;
-  loadingOutcome.value = true;
-  try {
-    const res = await axios.get(ApiPath.OpsInteractionsByOutcome, {
-      params: { ...sharedParams.value, outcome, limit: 200 },
-    });
-    outcomeInteractions.value = res.data;
-  } catch { outcomeInteractions.value = []; }
-  finally { loadingOutcome.value = false; }
+    competitorInteractions.value = res.data;
+  } catch { competitorInteractions.value = []; }
+  finally { loadingCompetitor.value = false; }
 }
 
 async function toggleOpportunityReason(reason: string) {
@@ -454,6 +333,16 @@ function closeDetail() {
   detailData.value = null;
 }
 
+function selectCampaign(campaignName: string) {
+  campaign.value = campaignName;
+  loadAll();
+}
+
+function clearCampaign() {
+  campaign.value = "";
+  loadAll();
+}
+
 // ── Narrative generation ─────────────────────────────────────────────────────
 const narrativeProvider = ref("openai");
 const loadingNarrative = ref(false);
@@ -464,7 +353,7 @@ async function generateNarrative() {
   loadingNarrative.value = true;
   narrativeError.value = "";
   narrativeResult.value = "";
-  const narrativeType = interactionFilter.value === "chats" ? "chats_operations" : "calls_operations";
+  const narrativeType = interactionFilter.value === "chats" ? "chats_client_services" : "calls_client_services";
   try {
     const res = await axios.post(ApiPath.InsightsSummaryNarrative, null, {
       params: {
@@ -488,13 +377,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="ops-root">
+  <div class="cs-root">
     <!-- Hero -->
     <div class="hero">
       <div class="hero-row">
         <div class="hero-left">
-          <h1 class="hero-title">Operations Dashboard</h1>
-          <div class="hero-subtitle">Agent performance, score distribution, coaching needs and drill-down.</div>
+          <h1 class="hero-title">Client Services Dashboard</h1>
+          <div class="hero-subtitle">Lead generation, market intelligence, competitor activity and sales opportunity classification.</div>
         </div>
       </div>
     </div>
@@ -573,371 +462,69 @@ onMounted(async () => {
       <div class="error-text">{{ error }}</div>
     </div>
 
-    <template v-if="opsData && dimData">
-      <!-- Score overview strip -->
+    <template v-if="csData">
+      <!-- Overview strip -->
       <div class="stats-strip">
         <div class="stat">
-          <div class="stat-label">Interactions</div>
-          <div class="stat-value">{{ overallCount }}</div>
+          <div class="stat-label">Total Interactions</div>
+          <div class="stat-value">{{ csData.totals.total }}</div>
         </div>
         <div class="stat">
-          <div class="stat-label">Overall Avg Score</div>
-          <div class="stat-value" :class="scoreChip(overallScore)">{{ fmtScore(overallScore) }}</div>
+          <div class="stat-label">Dealer Leads</div>
+          <div class="stat-value chip chip--success">{{ csData.totals.leads }}</div>
         </div>
-        <template v-if="agent && agentScore !== null">
+        <div class="stat">
+          <div class="stat-label">In-Market</div>
+          <div class="stat-value chip chip--info">{{ csData.totals.in_market }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Lost Sales</div>
+          <div class="stat-value chip chip--danger">{{ csData.totals.lost_sales }}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Bought Elsewhere</div>
+          <div class="stat-value chip chip--warning">{{ csData.totals.purchased_elsewhere }}</div>
+        </div>
+        <template v-if="opportunityData && opportunityData.classified > 0">
           <div class="stat">
-            <div class="stat-label">{{ agent }} Avg Score</div>
-            <div class="stat-value" :class="scoreChip(agentScore)">{{ fmtScore(agentScore) }}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">{{ agent }} Count</div>
-            <div class="stat-value">{{ agentCount }}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Delta</div>
-            <div class="stat-value" :class="agentScore >= overallScore ? 'chip chip--success' : 'chip chip--danger'">
-              {{ agentScore >= overallScore ? '+' : '' }}{{ fmtScore(agentScore - overallScore) }}
-            </div>
-          </div>
-        </template>
-        <template v-else-if="!agent">
-          <div class="stat">
-            <div class="stat-label">Min</div>
-            <div class="stat-value">{{ fmtScore(opsData.score_stats.min_score) }}</div>
-          </div>
-          <div class="stat">
-            <div class="stat-label">Max</div>
-            <div class="stat-value">{{ fmtScore(opsData.score_stats.max_score) }}</div>
+            <div class="stat-label">Opportunity Rate</div>
+            <div class="stat-value chip chip--success">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div>
           </div>
         </template>
       </div>
 
-      <!-- Agents in dataset -->
-      <div v-if="agentsInData.length && !agent" class="tile" style="margin-top: 14px">
+      <!-- Campaign comparison banner -->
+      <div v-if="campaign" class="campaign-banner" style="margin-top: 14px">
+        <div class="campaign-banner-text">
+          Filtering by campaign: <strong>{{ campaign }}</strong>
+        </div>
+        <button class="btn btn--sm" @click="clearCampaign">Clear campaign filter</button>
+      </div>
+
+      <!-- Campaigns in Dataset -->
+      <div v-if="campaignOptions.length && !campaign" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128101;</div>
+          <div class="tile-icon">&#128203;</div>
           <div class="tile-text">
-            <div class="tile-title">Agents in Dataset</div>
-            <div class="tile-desc">Click an agent to compare their scores against the overall average</div>
+            <div class="tile-title">Campaigns in Dataset</div>
+            <div class="tile-desc">Click a campaign to filter the dashboard</div>
           </div>
         </div>
         <div class="tile-body">
-          <div class="agents-grid">
+          <div class="campaigns-grid">
             <div
-              v-for="(a, idx) in agentsInData"
-              :key="a.agent"
-              class="agent-card"
-              @click="selectAgent(a.agent)"
+              v-for="c in campaignOptions"
+              :key="c"
+              class="campaign-card"
+              @click="selectCampaign(c)"
             >
-              <div class="agent-card-name"><span class="agent-rank">#{{ idx + 1 }}</span> {{ a.agent }}</div>
-              <div class="agent-card-stats">
-                <span :class="scoreChip(a.avg_score)" style="font-size: 11px">{{ fmtScore(a.avg_score) }}</span>
-                <span class="agent-card-count">{{ a.count }} interactions</span>
-              </div>
+              <div class="campaign-card-name">{{ c }}</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Agent comparison banner -->
-      <div v-if="agent" class="agent-banner" style="margin-top: 14px">
-        <div class="agent-banner-text">
-          Comparing <strong>{{ agent }}</strong> ({{ agentCount }} interactions) against overall average ({{ overallCount }} interactions)
-        </div>
-        <button class="btn btn--sm" @click="clearAgent">Clear agent filter</button>
-      </div>
-
-      <!-- Dimension Averages -->
-      <div class="tile" style="margin-top: 14px">
-        <div class="tile-head">
-          <div class="tile-icon">&#128202;</div>
-          <div class="tile-text">
-            <div class="tile-title">Dimension Averages</div>
-            <div class="tile-desc">
-              {{ agent ? `Comparing ${agent} against overall average` : "Overall dimension scores across all agents" }}
-            </div>
-          </div>
-        </div>
-        <div class="tile-body">
-          <!-- Legend at the top when comparing -->
-          <div v-if="agent" class="dim-legend" style="margin-bottom: 14px">
-            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--overall" /> Overall average</span>
-            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
-          </div>
-
-          <div v-for="d in dimensions" :key="d.key" class="dim-row">
-            <div class="dim-label">{{ d.label }}</div>
-            <div class="dim-bars">
-              <!-- Overall bar (always shown, blue-grey when comparing) -->
-              <div class="dim-bar-track">
-                <div
-                  class="dim-bar"
-                  :style="{
-                    width: d.overall !== null ? (d.overall / 10 * 100) + '%' : '0%',
-                    background: agent ? overallCompareColor(d.overall) : scoreColor(d.overall),
-                  }"
-                />
-              </div>
-              <!-- Agent bar (distinct colour) -->
-              <div v-if="agent && d.agent !== null" class="dim-bar-track dim-bar-track--agent">
-                <div
-                  class="dim-bar"
-                  :style="{ width: (d.agent / 10 * 100) + '%', background: scoreColor(d.agent) }"
-                />
-              </div>
-            </div>
-            <div class="dim-scores">
-              <span
-                class="dim-chip"
-                :style="{ background: agent ? overallCompareColorSolid(d.overall) : scoreColorSolid(d.overall), color: '#fff', fontSize: '11px', minWidth: '36px', textAlign: 'center' }"
-              >{{ fmtScore(d.overall) }}</span>
-              <template v-if="agent && d.agent !== null">
-                <span
-                  class="dim-chip"
-                  :style="{ background: scoreColorSolid(d.agent), color: '#fff', fontSize: '11px', minWidth: '36px', textAlign: 'center' }"
-                >{{ fmtScore(d.agent) }}</span>
-                <span
-                  class="dim-delta"
-                  :class="d.agent >= (d.overall ?? 0) ? 'dim-delta--positive' : 'dim-delta--negative'"
-                >
-                  {{ d.agent >= (d.overall ?? 0) ? "+" : "" }}{{ fmtScore(d.agent - (d.overall ?? 0)) }}
-                </span>
-              </template>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- QA Dimension Averages (RAC-style campaigns) -->
-      <div v-if="hasQaData" class="tile" style="margin-top: 14px">
-        <div class="tile-head">
-          <div class="tile-icon">&#9989;</div>
-          <div class="tile-text">
-            <div class="tile-title">QA Assessment Averages</div>
-            <div class="tile-desc">
-              {{ agent ? `Comparing ${agent} against overall average` : "Percentage of 'yes' answers across all assessed interactions" }}
-            </div>
-          </div>
-        </div>
-        <div class="tile-body">
-          <div v-if="agent" class="dim-legend" style="margin-bottom: 14px">
-            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--overall" /> Overall average</span>
-            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
-          </div>
-
-          <template v-for="section in qaSections" :key="section.key">
-            <!-- Section header with section_score -->
-            <div class="qa-dim-section-header">
-              <span class="qa-dim-section-title">{{ section.label }}</span>
-              <div style="display: flex; gap: 4px; align-items: center">
-                <span
-                  class="dim-chip"
-                  :style="{ background: agent ? overallCompareColorSolid(dimData.qa_overall?.[section.scoreKey]) : scoreColorSolid(dimData.qa_overall?.[section.scoreKey]), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                >{{ fmtQaScore(dimData.qa_overall?.[section.scoreKey]) }}</span>
-                <template v-if="agent && dimData.qa_agent?.[section.scoreKey] != null">
-                  <span
-                    class="dim-chip"
-                    :style="{ background: scoreColorSolid(dimData.qa_agent[section.scoreKey]), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                  >{{ fmtQaScore(dimData.qa_agent[section.scoreKey]) }}</span>
-                </template>
-              </div>
-            </div>
-
-            <!-- Individual questions -->
-            <div v-for="qKey in section.questions" :key="qKey" class="dim-row" style="margin-bottom: 6px">
-              <div class="dim-label">{{ qaQuestionLabels[qKey] || qKey }}</div>
-              <div class="dim-bars">
-                <div class="dim-bar-track">
-                  <div
-                    class="dim-bar"
-                    :style="{
-                      width: ((dimData.qa_overall?.[qKey] ?? 0) / 10 * 100) + '%',
-                      background: agent ? overallCompareColor(dimData.qa_overall?.[qKey]) : scoreColor(dimData.qa_overall?.[qKey]),
-                    }"
-                  />
-                </div>
-                <div v-if="agent && dimData.qa_agent?.[qKey] != null" class="dim-bar-track dim-bar-track--agent">
-                  <div
-                    class="dim-bar"
-                    :style="{ width: (dimData.qa_agent[qKey] / 10 * 100) + '%', background: scoreColor(dimData.qa_agent[qKey]) }"
-                  />
-                </div>
-              </div>
-              <div class="dim-scores">
-                <span
-                  class="dim-chip"
-                  :style="{ background: agent ? overallCompareColorSolid(dimData.qa_overall?.[qKey]) : scoreColorSolid(dimData.qa_overall?.[qKey]), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                >{{ fmtQaScore(dimData.qa_overall?.[qKey]) }}</span>
-                <template v-if="agent && dimData.qa_agent?.[qKey] != null">
-                  <span
-                    class="dim-chip"
-                    :style="{ background: scoreColorSolid(dimData.qa_agent[qKey]), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                  >{{ fmtQaScore(dimData.qa_agent[qKey]) }}</span>
-                  <span
-                    class="dim-delta"
-                    :class="dimData.qa_agent[qKey] >= (dimData.qa_overall?.[qKey] ?? 0) ? 'dim-delta--positive' : 'dim-delta--negative'"
-                  >
-                    {{ dimData.qa_agent[qKey] >= (dimData.qa_overall?.[qKey] ?? 0) ? "+" : "" }}{{ fmtQaScore(dimData.qa_agent[qKey] - (dimData.qa_overall?.[qKey] ?? 0)) }}
-                  </span>
-                </template>
-              </div>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <div class="grid grid-3" style="margin-top: 14px">
-        <!-- Score Distribution -->
-        <div class="tile">
-          <div class="tile-head">
-            <div class="tile-icon">&#128200;</div>
-            <div class="tile-text">
-              <div class="tile-title">Score Distribution</div>
-              <div class="tile-desc">Click a bucket to see individual interactions</div>
-            </div>
-          </div>
-          <div class="tile-body">
-            <div class="hint" v-if="!opsData.score_distribution.length">No data.</div>
-            <div
-              v-for="b in opsData.score_distribution"
-              :key="b.bucket"
-            >
-              <div class="metric-row metric-row--clickable" @click="toggleBucket(b.bucket)">
-                <div class="metric-left">
-                  <span :class="bucketChipClass(b.bucket)">{{ bucketLabel(b.bucket) }}</span>
-                </div>
-                <div class="metric-right">
-                  <span class="count-pill">{{ b.count }}</span>
-                  <span class="expand-icon">{{ expandedBucket === b.bucket ? '&#9650;' : '&#9660;' }}</span>
-                </div>
-              </div>
-
-              <!-- Expanded interaction list -->
-              <div v-if="expandedBucket === b.bucket" class="drill-panel">
-                <div v-if="loadingBucket" class="hint">Loading interactions...</div>
-                <div v-else-if="!bucketInteractions.length" class="hint">No interactions found.</div>
-                <div
-                  v-else
-                  v-for="ix in bucketInteractions"
-                  :key="ix.recordingId"
-                  class="drill-row"
-                  @click="openDetail(ix.recordingId)"
-                >
-                  <div class="drill-row-top">
-                    <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
-                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                    <span v-if="ix.campaign_detected" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign_detected }}</span>
-                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                  </div>
-                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Coaching Needs -->
-        <div class="tile">
-          <div class="tile-head">
-            <div class="tile-icon">&#127891;</div>
-            <div class="tile-text">
-              <div class="tile-title">Top Coaching Needs</div>
-              <div class="tile-desc">Click a need to see affected interactions</div>
-            </div>
-          </div>
-          <div class="tile-body">
-            <div class="hint" v-if="!opsData.top_coaching_needs.length">No data.</div>
-            <div
-              v-for="n in opsData.top_coaching_needs"
-              :key="n.need"
-            >
-              <div class="metric-row metric-row--clickable" @click="toggleNeed(n.need)">
-                <div class="metric-left">
-                  <div class="metric-title" style="font-size: 13px">{{ n.need }}</div>
-                </div>
-                <div class="metric-right">
-                  <span class="count-pill">{{ n.count }}</span>
-                  <span class="expand-icon">{{ expandedNeed === n.need ? '&#9650;' : '&#9660;' }}</span>
-                </div>
-              </div>
-
-              <!-- Expanded interaction list -->
-              <div v-if="expandedNeed === n.need" class="drill-panel">
-                <div v-if="loadingNeed" class="hint">Loading interactions...</div>
-                <div v-else-if="!needInteractions.length" class="hint">No interactions found.</div>
-                <div
-                  v-else
-                  v-for="ix in needInteractions"
-                  :key="ix.recordingId"
-                  class="drill-row"
-                  @click="openDetail(ix.recordingId)"
-                >
-                  <div class="drill-row-top">
-                    <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
-                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                    <span v-if="ix.campaign_detected" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign_detected }}</span>
-                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                  </div>
-                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Outcome Distribution -->
-        <div class="tile" v-if="opsData.outcome_distribution?.length">
-          <div class="tile-head">
-            <div class="tile-icon">&#128203;</div>
-            <div class="tile-text">
-              <div class="tile-title">Outcome Distribution</div>
-              <div class="tile-desc">Click an outcome to see individual interactions</div>
-            </div>
-          </div>
-          <div class="tile-body">
-            <div
-              v-for="o in opsData.outcome_distribution"
-              :key="o.outcome"
-            >
-              <div class="metric-row metric-row--clickable" @click="toggleOutcome(o.outcome)">
-                <div class="metric-left">
-                  <span class="chip chip--secondary">{{ o.outcome }}</span>
-                </div>
-                <div class="metric-right">
-                  <span v-if="o.avg_score !== null" :class="scoreChip(o.avg_score)" style="font-size: 10px; margin-right: 6px">avg {{ fmtScore(o.avg_score) }}</span>
-                  <span class="count-pill">{{ o.count }}</span>
-                  <span class="expand-icon">{{ expandedOutcome === o.outcome ? '&#9650;' : '&#9660;' }}</span>
-                </div>
-              </div>
-
-              <!-- Expanded interaction list -->
-              <div v-if="expandedOutcome === o.outcome" class="drill-panel">
-                <div v-if="loadingOutcome" class="hint">Loading interactions...</div>
-                <div v-else-if="!outcomeInteractions.length" class="hint">No interactions found.</div>
-                <div
-                  v-else
-                  v-for="ix in outcomeInteractions"
-                  :key="ix.recordingId"
-                  class="drill-row"
-                  @click="openDetail(ix.recordingId)"
-                >
-                  <div class="drill-row-top">
-                    <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
-                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                    <span v-if="ix.campaign_detected" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign_detected }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                  </div>
-                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Opportunity Classification -->
+      <!-- Sales Opportunity Classification -->
       <div
         v-if="opportunityData && opportunityData.classified > 0"
         class="tile"
@@ -966,12 +553,12 @@ onMounted(async () => {
               <div class="opp-stat-label">Not Opportunities</div>
             </div>
             <div class="opp-stat">
-              <div class="opp-stat-value">{{ opportunityData.classified > 0 ? Math.round(opportunityData.opportunities / opportunityData.classified * 100) : 0 }}%</div>
+              <div class="opp-stat-value">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div>
               <div class="opp-stat-label">Opportunity Rate</div>
             </div>
           </div>
 
-          <!-- Opportunity row (clickable) -->
+          <!-- Opportunity row -->
           <div v-if="opportunityData.opportunities > 0">
             <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__opportunity')">
               <div class="metric-left">
@@ -1003,7 +590,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Reason breakdown (not opportunities) -->
+          <!-- Reason breakdown -->
           <div
             v-for="r in opportunityData.reason_breakdown"
             :key="r.reason"
@@ -1017,7 +604,6 @@ onMounted(async () => {
                 <span class="expand-icon">{{ expandedOpportunityReason === r.reason ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-
             <div v-if="expandedOpportunityReason === r.reason" class="drill-panel">
               <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
               <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
@@ -1041,46 +627,174 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Lowest scored (quick view) -->
-      <div
-        v-if="opsData.lowest_scored.length"
-        class="tile"
-        style="margin-top: 14px"
-      >
+      <!-- Client Services Metrics -->
+      <div class="grid grid-2" style="margin-top: 14px">
+        <!-- Customer Interest -->
+        <div class="tile">
+          <div class="tile-head">
+            <div class="tile-icon">&#128200;</div>
+            <div class="tile-text">
+              <div class="tile-title">Customer Interest</div>
+              <div class="tile-desc">Click an interest level to see individual interactions</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="hint" v-if="!csData.by_interest.length">No data.</div>
+            <div
+              v-for="r in csData.by_interest"
+              :key="r.interest_level"
+            >
+              <div class="metric-row metric-row--clickable" @click="toggleInterest(r.interest_level)">
+                <div class="metric-left">
+                  <span :class="badgeClass(r.interest_level)">{{ r.interest_level }}</span>
+                </div>
+                <div class="metric-right">
+                  <span class="count-pill">{{ r.count }}</span>
+                  <span class="expand-icon">{{ expandedInterest === r.interest_level ? '&#9650;' : '&#9660;' }}</span>
+                </div>
+              </div>
+              <div v-if="expandedInterest === r.interest_level" class="drill-panel">
+                <div v-if="loadingInterest" class="hint">Loading interactions...</div>
+                <div v-else-if="!interestInteractions.length" class="hint">No interactions found.</div>
+                <div
+                  v-else
+                  v-for="ix in interestInteractions"
+                  :key="ix.recordingId"
+                  class="drill-row"
+                  @click="openDetail(ix.recordingId)"
+                >
+                  <div class="drill-row-top">
+                    <span :class="badgeClass(ix.interest_level || r.interest_level)" style="font-size: 11px">{{ ix.interest_level || r.interest_level }}</span>
+                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                    <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
+                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  </div>
+                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Competitor Purchases & Objections -->
+        <div class="tile">
+          <div class="tile-head">
+            <div class="tile-icon">&#9878;</div>
+            <div class="tile-text">
+              <div class="tile-title">Competitor Purchases &amp; Objections</div>
+              <div class="tile-desc">Click a competitor to see individual interactions</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="hint" v-if="!csData.top_competitors.length">No data.</div>
+            <div
+              v-for="c in csData.top_competitors"
+              :key="c.competitor"
+              style="margin-bottom: 10px"
+            >
+              <div class="metric-row metric-row--clickable" @click="toggleCompetitor(c.competitor)">
+                <div class="metric-left">
+                  <span class="chip chip--warning">{{ c.competitor }}</span>
+                </div>
+                <div class="metric-right">
+                  <span class="count-pill">{{ c.count }}</span>
+                  <span class="expand-icon">{{ expandedCompetitor === c.competitor ? '&#9650;' : '&#9660;' }}</span>
+                </div>
+              </div>
+              <div
+                v-if="c.top_objections && c.top_objections.length && expandedCompetitor !== c.competitor"
+                style="padding-left: 12px; margin-top: 3px"
+              >
+                <div
+                  v-for="o in c.top_objections"
+                  :key="o.objection"
+                  style="font-size: 12px; display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--muted)"
+                >
+                  <span>{{ o.objection }}</span>
+                  <span class="count-pill" style="font-size: 11px; margin-left: 8px">{{ o.count }}</span>
+                </div>
+              </div>
+              <div v-if="expandedCompetitor === c.competitor" class="drill-panel">
+                <div v-if="loadingCompetitor" class="hint">Loading interactions...</div>
+                <div v-else-if="!competitorInteractions.length" class="hint">No interactions found.</div>
+                <div
+                  v-else
+                  v-for="ix in competitorInteractions"
+                  :key="ix.recordingId"
+                  class="drill-row"
+                  @click="openDetail(ix.recordingId)"
+                >
+                  <div class="drill-row-top">
+                    <span class="chip chip--warning" style="font-size: 11px">{{ ix.competitor_purchased || c.competitor }}</span>
+                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                    <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
+                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  </div>
+                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Dealer Follow-ups -->
+      <div v-if="csData.top_dealers.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#127970;</div>
+          <div class="tile-text">
+            <div class="tile-title">Top Dealer Follow-ups</div>
+            <div class="tile-desc">Dealers with the most lead follow-ups</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div
+            v-for="d in csData.top_dealers"
+            :key="d.dealer_name"
+            class="metric-row"
+          >
+            <div class="metric-left">
+              <span class="chip chip--info">{{ d.dealer_name }}</span>
+            </div>
+            <div class="metric-right">
+              <span class="count-pill">{{ d.count }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Lost Sales -->
+      <div v-if="csData.recent_lost_sales.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <div class="tile-icon">&#9888;</div>
           <div class="tile-text">
-            <div class="tile-title">Lowest Scored — Coaching Focus</div>
+            <div class="tile-title">Recent Lost Sales</div>
             <div class="tile-desc">Click to view full interaction detail</div>
           </div>
         </div>
         <div class="tile-body">
           <div
-            v-for="x in opsData.lowest_scored"
+            v-for="x in csData.recent_lost_sales"
             :key="x.recordingId"
             class="drill-row"
             @click="openDetail(x.recordingId)"
           >
             <div class="drill-row-top">
-              <span :class="scoreChip(x.overall_score)" style="font-size: 11px">{{ fmtScore(x.overall_score) }}</span>
+              <span class="chip chip--danger" style="font-size: 11px">lost sale</span>
+              <span v-if="x.competitor_purchased" class="chip chip--warning" style="font-size: 11px">{{ x.competitor_purchased }}</span>
               <span class="chip chip--secondary" style="font-size: 11px">{{ x.campaign_detected || "unknown" }}</span>
-              <span class="mono" style="font-size: 11px; opacity: 0.6">{{ String(x.recordingId).slice(0, 8) }}</span>
+              <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(x.interactionDateTime) }}</span>
             </div>
             <div class="drill-row-summary">{{ x.summary_short || "(no summary)" }}</div>
-            <div
-              v-if="x.coaching_json?.needs_improvement?.length"
-              class="muted"
-              style="margin-top: 3px; font-size: 12px"
-            >
-              Needs: {{ x.coaching_json.needs_improvement.slice(0, 3).join("; ") }}
-            </div>
           </div>
         </div>
       </div>
     </template>
 
     <!-- Generate Narrative -->
-    <div v-if="opsData" class="tile" style="margin-top: 14px">
+    <div v-if="csData" class="tile" style="margin-top: 14px">
       <div class="tile-head">
         <div class="tile-icon">&#128221;</div>
         <div class="tile-text">
@@ -1105,7 +819,7 @@ onMounted(async () => {
         </div>
         <div v-if="narrativeError" class="error-tile">{{ narrativeError }}</div>
         <div v-if="narrativeResult" class="narrative-box"><pre class="narrative-pre">{{ narrativeResult }}</pre></div>
-        <div v-else-if="!loadingNarrative" class="hint">Click Generate to create an AI briefing from the current operations data.</div>
+        <div v-else-if="!loadingNarrative" class="hint">Click Generate to create an AI briefing from the current client services data.</div>
       </div>
     </div>
 
@@ -1123,7 +837,7 @@ onMounted(async () => {
             <div v-else-if="!detailData" class="hint" style="padding: 24px">Could not load detail.</div>
             <template v-else>
               <div class="drawer-columns">
-                <!-- LEFT COLUMN: metadata, scores, dimensions -->
+                <!-- LEFT COLUMN: metadata, scores, QA -->
                 <div class="drawer-col drawer-col--left">
                   <!-- Metadata -->
                   <div class="drawer-section">
@@ -1135,14 +849,28 @@ onMounted(async () => {
                       <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
                       <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
                       <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span>{{ detailData.interaction.outcome }}</span></div>
-                      <div v-if="detailData.interaction.interactionId"><span class="drawer-label">Interaction ID</span><span class="mono" style="font-size: 12px">{{ detailData.interaction.interactionId }}</span></div>
                     </div>
-                    <div v-if="detailData.interaction.recordingUrl && !isChat" class="audio-player">
-                      <div class="drawer-label" style="margin-bottom: 6px">Recording</div>
-                      <audio controls preload="none" :src="detailData.interaction.recordingUrl" class="audio-el">
-                        Your browser does not support audio playback.
-                      </audio>
+                  </div>
+
+                  <!-- Opportunity Classification -->
+                  <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
+                    <div class="drawer-section-title">Opportunity Classification</div>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+                      <span
+                        class="chip"
+                        :class="detailData.insight.opportunity.is_opportunity ? 'chip--success' : 'chip--danger'"
+                        style="font-size: 12px"
+                      >{{ detailData.insight.opportunity.is_opportunity ? 'Opportunity to Sell' : 'Not an Opportunity' }}</span>
+                      <span
+                        v-if="!detailData.insight.opportunity.is_opportunity && detailData.insight.opportunity.not_opportunity_reason"
+                        class="chip chip--secondary"
+                        style="font-size: 11px"
+                      >{{ opportunityReasonLabel(detailData.insight.opportunity.not_opportunity_reason) }}</span>
                     </div>
+                    <p
+                      v-if="detailData.insight.opportunity.detail?.reason_detail"
+                      style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink)"
+                    >{{ detailData.insight.opportunity.detail.reason_detail }}</p>
                   </div>
 
                   <!-- Scores -->
@@ -1163,7 +891,7 @@ onMounted(async () => {
                       </div>
                     </div>
 
-                    <!-- Dimension scores — Standard 1-10 scoring (always shown when present) -->
+                    <!-- Standard dimension scores -->
                     <div v-if="detailData.insight.operations_scores" style="margin-top: 8px">
                       <div
                         v-for="(dim, key) in detailData.insight.operations_scores"
@@ -1182,7 +910,7 @@ onMounted(async () => {
                     </div>
                   </div>
 
-                  <!-- QA Assessment (separate from standard scoring) -->
+                  <!-- QA Assessment -->
                   <div v-if="detailData.insight?.qa_scores?.scores" class="drawer-section">
                     <div class="drawer-section-title">QA Assessment</div>
                     <template v-for="(section, sectionKey) in detailData.insight.qa_scores.scores" :key="sectionKey">
@@ -1207,7 +935,6 @@ onMounted(async () => {
                         </div>
                       </div>
                     </template>
-                    <!-- QA overall score -->
                     <div v-if="detailData.insight.qa_scores.overall_score != null" style="margin-top: 8px; display: flex; align-items: center; gap: 8px">
                       <span style="font-size: 12px; font-weight: 700; color: var(--ink)">Overall QA Score</span>
                       <span
@@ -1218,7 +945,7 @@ onMounted(async () => {
                   </div>
                 </div>
 
-                <!-- RIGHT COLUMN: summary, coaching, objections, actions, risks, transcript -->
+                <!-- RIGHT COLUMN: summary, coaching, client services, transcript -->
                 <div class="drawer-col drawer-col--right">
                   <!-- Summary -->
                   <div v-if="detailData.insight" class="drawer-section">
@@ -1277,32 +1004,9 @@ onMounted(async () => {
                     </ul>
                   </div>
 
-                  <!-- Opportunity Classification -->
-                  <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
-                    <div class="drawer-section-title">Opportunity Classification</div>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
-                      <span
-                        class="chip"
-                        :class="detailData.insight.opportunity.is_opportunity ? 'chip--success' : 'chip--danger'"
-                        style="font-size: 12px"
-                      >{{ detailData.insight.opportunity.is_opportunity ? 'Opportunity to Sell' : 'Not an Opportunity' }}</span>
-                      <span
-                        v-if="!detailData.insight.opportunity.is_opportunity && detailData.insight.opportunity.not_opportunity_reason"
-                        class="chip chip--secondary"
-                        style="font-size: 11px"
-                      >{{ opportunityReasonLabel(detailData.insight.opportunity.not_opportunity_reason) }}</span>
-                    </div>
-                    <p
-                      v-if="detailData.insight.opportunity.detail?.reason_detail"
-                      style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink)"
-                    >{{ detailData.insight.opportunity.detail.reason_detail }}</p>
-                  </div>
-
                   <!-- Transcript / Chat -->
                   <div v-if="detailData.transcript" class="drawer-section">
                     <div class="drawer-section-title">{{ isChat ? 'Chat Conversation' : 'Transcript' }}</div>
-
-                    <!-- Chat bubble view -->
                     <div v-if="isChat && chatMessages.length" class="chat-thread">
                       <div
                         v-for="msg in chatMessages"
@@ -1317,8 +1021,6 @@ onMounted(async () => {
                         </div>
                       </div>
                     </div>
-
-                    <!-- Fallback: raw transcript (calls, or chat parse failed) -->
                     <pre v-else class="drawer-transcript">{{ detailData.transcript.text }}</pre>
                   </div>
                 </div>
@@ -1332,20 +1034,18 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.ops-root {
+.cs-root {
   position: relative;
-  --overall-bar: #94a3b8;
-  --agent-bar: #6366f1;
 }
 
-/* ── Agents grid ───────────────────────────────────────────────────────────── */
-.agents-grid {
+/* ── Campaigns grid ─────────────────────────────────────────────────────────── */
+.campaigns-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
 }
 
-.agent-card {
+.campaign-card {
   padding: 10px 14px;
   border-radius: var(--radius-md, 6px);
   border: 1px solid var(--border);
@@ -1354,50 +1054,31 @@ onMounted(async () => {
   background: var(--surface);
 }
 
-.agent-card:hover {
-  border-color: var(--agent-bar);
-  background: color-mix(in srgb, var(--agent-bar) 6%, var(--surface));
-  box-shadow: 0 0 0 1px var(--agent-bar);
+.campaign-card:hover {
+  border-color: var(--brand, #6366f1);
+  background: color-mix(in srgb, var(--brand, #6366f1) 6%, var(--surface));
+  box-shadow: 0 0 0 1px var(--brand, #6366f1);
 }
 
-.agent-card-name {
+.campaign-card-name {
   font-size: 13px;
   font-weight: 700;
   color: var(--ink);
-  margin-bottom: 4px;
 }
 
-.agent-rank {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--muted);
-  margin-right: 4px;
-}
-
-.agent-card-stats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-card-count {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-/* ── Agent comparison banner ───────────────────────────────────────────────── */
-.agent-banner {
+/* ── Campaign comparison banner ───────────────────────────────────────────── */
+.campaign-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--agent-bar) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--agent-bar) 30%, transparent);
+  background: color-mix(in srgb, var(--brand, #6366f1) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand, #6366f1) 30%, transparent);
 }
 
-.agent-banner-text {
+.campaign-banner-text {
   font-size: 13px;
   color: var(--ink);
 }
@@ -1417,6 +1098,57 @@ onMounted(async () => {
   background: var(--surface-soft, #f0f0f0);
 }
 
+/* ── Opportunity summary strip ──────────────────────────────────────────────── */
+.opp-summary-strip {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--surface-soft, #f8f8f8);
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--border);
+}
+
+.opp-stat {
+  text-align: center;
+  min-width: 80px;
+}
+
+.opp-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.opp-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.opp-stat--opportunity .opp-stat-value {
+  color: var(--success, #22c55e);
+}
+
+.opp-stat--not .opp-stat-value {
+  color: var(--danger, #ef4444);
+}
+
+/* ── Stats strip ──────────────────────────────────────────────────────────── */
+.stats-strip {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── Exclude outcomes ─────────────────────────────────────────────────────── */
 .exclude-outcomes-wrap {
   display: flex;
   flex-direction: column;
@@ -1448,158 +1180,7 @@ onMounted(async () => {
   color: var(--brand, #6366f1);
 }
 
-/* ── Stats strip ───────────────────────────────────────────────────────────── */
-.stats-strip {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-/* ── Dimension rows ────────────────────────────────────────────────────────── */
-.dim-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.dim-label {
-  font-size: 12px;
-  min-width: 140px;
-  text-transform: capitalize;
-  color: var(--ink);
-}
-
-.dim-bars {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.dim-bar-track {
-  background: var(--surface-2, #e0e0e0);
-  border-radius: 3px;
-  height: 7px;
-  overflow: hidden;
-}
-
-.dim-bar-track--agent {
-  height: 7px;
-}
-
-.dim-bar {
-  height: 100%;
-  transition: width 0.4s ease;
-  border-radius: 3px;
-}
-
-.dim-scores {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  min-width: 120px;
-  justify-content: flex-end;
-}
-
-.dim-delta {
-  font-size: 11px;
-  font-weight: 700;
-  min-width: 40px;
-  text-align: right;
-}
-
-.dim-delta--positive {
-  color: var(--success, #22c55e);
-}
-
-.dim-delta--negative {
-  color: var(--danger, #ef4444);
-}
-
-/* Colour-coded score chips for overall vs agent */
-.dim-chip {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 700;
-}
-
-.dim-chip--overall {
-  background: color-mix(in srgb, var(--overall-bar) 20%, transparent);
-  color: #475569;
-  border: 1px solid var(--overall-bar);
-}
-
-.dim-chip--agent {
-  background: color-mix(in srgb, var(--agent-bar) 15%, transparent);
-  color: var(--agent-bar);
-  border: 1px solid color-mix(in srgb, var(--agent-bar) 50%, transparent);
-}
-
-/* ── Score bucket chips ─────────────────────────────────────────────────────── */
-.bucket-chip--below5 {
-  background: color-mix(in srgb, #ef4444 15%, transparent);
-  color: #dc2626;
-  border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
-}
-
-.bucket-chip--5to7 {
-  background: color-mix(in srgb, #f97316 12%, transparent);
-  color: #ea580c;
-  border: 1px solid color-mix(in srgb, #f97316 35%, transparent);
-}
-
-.bucket-chip--7to9 {
-  background: color-mix(in srgb, #0ea5e9 12%, transparent);
-  color: #0284c7;
-  border: 1px solid color-mix(in srgb, #0ea5e9 35%, transparent);
-}
-
-.bucket-chip--9plus {
-  background: color-mix(in srgb, #10b981 12%, transparent);
-  color: #059669;
-  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
-}
-
-.dim-legend {
-  display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.dim-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dim-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 7px;
-  border-radius: 2px;
-}
-
-.dim-swatch--overall {
-  background: hsl(215, 20%, 55%);
-}
-
-.dim-swatch--agent {
-  background: linear-gradient(90deg, hsl(0, 65%, 42%), hsl(60, 65%, 42%), hsl(120, 65%, 42%));
-  border-radius: 2px;
-}
-
-/* ── Clickable metric rows ─────────────────────────────────────────────────── */
+/* ── Clickable metric rows ──────────────────────────────────────────────────── */
 .metric-row--clickable {
   cursor: pointer;
   border-radius: var(--radius-md, 6px);
@@ -1618,7 +1199,7 @@ onMounted(async () => {
   margin-left: 8px;
 }
 
-/* ── Drill-down panel ──────────────────────────────────────────────────────── */
+/* ── Drill-down panel ────────────────────────────────────────────────────── */
 .drill-panel {
   padding: 8px 0 8px 12px;
   border-left: 3px solid var(--brand, #6366f1);
@@ -1648,6 +1229,116 @@ onMounted(async () => {
   color: var(--ink);
   margin-top: 3px;
   line-height: 1.4;
+}
+
+/* ── Dimension rows ──────────────────────────────────────────────────────── */
+.dim-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dim-label {
+  font-size: 12px;
+  min-width: 140px;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+
+.dim-bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dim-bar-track {
+  background: var(--surface-2, #e0e0e0);
+  border-radius: 3px;
+  height: 7px;
+  overflow: hidden;
+}
+
+.dim-bar {
+  height: 100%;
+  transition: width 0.4s ease;
+  border-radius: 3px;
+}
+
+.dim-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* ── Score bucket chips ─────────────────────────────────────────────────── */
+.bucket-chip--below5 {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #dc2626;
+  border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+}
+
+.bucket-chip--5to7 {
+  background: color-mix(in srgb, #f97316 12%, transparent);
+  color: #ea580c;
+  border: 1px solid color-mix(in srgb, #f97316 35%, transparent);
+}
+
+.bucket-chip--7to9 {
+  background: color-mix(in srgb, #0ea5e9 12%, transparent);
+  color: #0284c7;
+  border: 1px solid color-mix(in srgb, #0ea5e9 35%, transparent);
+}
+
+.bucket-chip--9plus {
+  background: color-mix(in srgb, #10b981 12%, transparent);
+  color: #059669;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+}
+
+/* ── QA scoring in detail drawer ──────────────────────────────────────────── */
+.qa-section {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.qa-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.qa-section-title {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+
+.qa-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
+}
+
+.qa-label {
+  font-size: 12px;
+  min-width: 140px;
+  text-transform: capitalize;
+  color: var(--ink);
+}
+
+.qa-rationale {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 120px;
 }
 
 /* ── Drawer ────────────────────────────────────────────────────────────────── */
@@ -1722,7 +1413,6 @@ onMounted(async () => {
   border-right: 1px solid var(--border);
 }
 
-/* On narrow screens, stack vertically */
 @media (max-width: 700px) {
   .drawer-columns {
     grid-template-columns: 1fr;
@@ -1767,16 +1457,6 @@ onMounted(async () => {
   color: var(--muted);
 }
 
-.audio-player {
-  margin-top: 12px;
-}
-
-.audio-el {
-  width: 100%;
-  height: 36px;
-  border-radius: var(--radius-md, 6px);
-}
-
 .drawer-list {
   margin: 0;
   padding-left: 18px;
@@ -1798,17 +1478,9 @@ onMounted(async () => {
   padding: 8px 4px;
 }
 
-.chat-msg {
-  display: flex;
-}
-
-.chat-msg--agent {
-  justify-content: flex-start;
-}
-
-.chat-msg--customer {
-  justify-content: flex-end;
-}
+.chat-msg { display: flex; }
+.chat-msg--agent { justify-content: flex-start; }
+.chat-msg--customer { justify-content: flex-end; }
 
 .chat-bubble {
   max-width: 80%;
@@ -1832,22 +1504,9 @@ onMounted(async () => {
   border-bottom-right-radius: 4px;
 }
 
-.chat-sender {
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 2px;
-  opacity: 0.7;
-}
-
-.chat-content {
-  margin-bottom: 4px;
-}
-
-.chat-time {
-  font-size: 10px;
-  opacity: 0.5;
-  text-align: right;
-}
+.chat-sender { font-size: 11px; font-weight: 700; margin-bottom: 2px; opacity: 0.7; }
+.chat-content { margin-bottom: 4px; }
+.chat-time { font-size: 10px; opacity: 0.5; text-align: right; }
 
 .drawer-transcript {
   margin: 0;
@@ -1862,106 +1521,6 @@ onMounted(async () => {
   padding: 12px;
   border-radius: var(--radius-md, 6px);
   line-height: 1.6;
-}
-
-/* ── QA dimension section headers (main dashboard) ────────────────────────── */
-.qa-dim-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 0;
-  margin-top: 10px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.qa-dim-section-title {
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--brand, #6366f1);
-}
-
-/* ── Opportunity summary strip ─────────────────────────────────────────────── */
-.opp-summary-strip {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  background: var(--surface-soft, #f8f8f8);
-  border-radius: var(--radius-md, 6px);
-  border: 1px solid var(--border);
-}
-
-.opp-stat {
-  text-align: center;
-  min-width: 80px;
-}
-
-.opp-stat-value {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--ink);
-}
-
-.opp-stat-label {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.opp-stat--opportunity .opp-stat-value {
-  color: var(--success, #22c55e);
-}
-
-.opp-stat--not .opp-stat-value {
-  color: var(--danger, #ef4444);
-}
-
-/* ── RAC QA scoring in detail drawer ──────────────────────────────────────── */
-.qa-section {
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.qa-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.qa-section-title {
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: capitalize;
-  color: var(--ink);
-}
-
-.qa-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
-  flex-wrap: wrap;
-}
-
-.qa-label {
-  font-size: 12px;
-  min-width: 140px;
-  text-transform: capitalize;
-  color: var(--ink);
-}
-
-.qa-rationale {
-  font-size: 11px;
-  color: var(--muted);
-  flex: 1;
-  min-width: 120px;
 }
 
 /* ── Narrative ─────────────────────────────────────────────────────────────── */
@@ -1984,7 +1543,7 @@ onMounted(async () => {
   color: var(--ink);
 }
 
-/* ── Drawer transition ─────────────────────────────────────────────────────── */
+/* ── Drawer transition ──────────────────────────────────────────────────────── */
 .drawer-enter-active,
 .drawer-leave-active {
   transition: transform 0.25s ease;

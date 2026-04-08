@@ -16,6 +16,10 @@ git push origin main
 TO DO 
 ################################
 
+lets add a way to view the current promppts and maybe edit?
+
+
+
 tidy up DATA
 
 update [app].[interactions] 

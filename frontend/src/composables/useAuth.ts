@@ -60,7 +60,15 @@ function clearSession() {
 
 async function parseError(res: Response, fallback: string) {
   const text = await res.text().catch(() => "");
-  return text || fallback;
+  if (!text) return fallback;
+  try {
+    const json = JSON.parse(text);
+    // NestJS validation errors return message as string or string[]
+    const msg = json.message;
+    if (Array.isArray(msg)) return msg.join(". ");
+    if (typeof msg === "string") return msg;
+  } catch { /* not JSON — fall through */ }
+  return fallback;
 }
 
 export function useAuth() {

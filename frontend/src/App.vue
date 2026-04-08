@@ -34,17 +34,34 @@
             <div class="app-user" v-if="user">
               <div class="app-user-name">{{ user.name || user.email }}</div>
             </div>
+            <button class="settings-btn" :class="{ 'settings-btn--active': tab === 'settings' }" @click="tab = 'settings'" title="Settings">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </button>
             <button class="logout-btn" @click="handleLogout">Sign out</button>
           </div>
         </div>
         <nav class="tabbar">
-          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'test' }" @click="tab = 'test'">Test Lab</button>
-          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'data' }" @click="tab = 'data'">Data Queue</button>
-          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'batch' }" @click="tab = 'batch'">Batch Dashboard</button>
+          <!-- Data Processing dropdown -->
+          <div v-if="canSeeFullUI" class="tab-dropdown" ref="dpRef">
+            <button
+              class="tab"
+              :class="{ 'tab--active': isDataProcessingTab }"
+              @click="dpOpen = !dpOpen"
+            >
+              Data Processing
+              <svg class="tab-chev" :class="{ 'tab-chev--open': dpOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div v-if="dpOpen" class="tab-dropdown-menu">
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'test' }" @click="tab = 'test'; dpOpen = false">Test Lab</button>
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'data' }" @click="tab = 'data'; dpOpen = false">Data Queue</button>
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'batch' }" @click="tab = 'batch'; dpOpen = false">Batch Dashboard</button>
+            </div>
+          </div>
           <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Summary</button>
           <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations</button>
+          <button class="tab" :class="{ 'tab--active': tab === 'clientservices' }" @click="tab = 'clientservices'">Client Services</button>
+          <button class="tab" :class="{ 'tab--active': tab === 'survey' }" @click="tab = 'survey'">Survey Analytics</button>
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'settings' }" @click="tab = 'settings'">Settings</button>
         </nav>
       </div>
 
@@ -54,6 +71,8 @@
         <BatchDashboard v-else-if="tab === 'batch'" />
         <SummaryDashboard v-else-if="tab === 'summary'" />
         <OperationsDashboard v-else-if="tab === 'ops'" />
+        <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
+        <SurveyDashboard v-else-if="tab === 'survey'" />
         <NarrativesPage v-else-if="tab === 'narratives'" />
         <SettingsPanel v-else />
       </div>
@@ -62,12 +81,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import TestLab from "./components/TestLab.vue";
 import DataQueue from "./components/DataQueue.vue";
 import BatchDashboard from "./components/BatchDashboard.vue";
 import SummaryDashboard from "./components/SummaryDashboard.vue";
 import OperationsDashboard from "./components/OperationsDashboard.vue";
+import ClientServicesDashboard from "./components/ClientServicesDashboard.vue";
+import SurveyDashboard from "./components/SurveyDashboard.vue";
 import NarrativesPage from "./components/NarrativesPage.vue";
 import LoginPanel from "./components/auth/LoginPanel.vue";
 import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
@@ -79,7 +100,18 @@ import logoUrl from "./assets/ai-icon.png";
 const { canSeeAdminTools, canSeeDevTools } = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
 
-const tab = ref<"test" | "data" | "batch" | "summary" | "ops" | "narratives" | "settings">("ops");
+const tab = ref<"test" | "data" | "batch" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "settings">("ops");
+const dpOpen = ref(false);
+const dpRef = ref<HTMLElement | null>(null);
+const isDataProcessingTab = computed(() => ["test", "data", "batch"].includes(tab.value));
+
+function onClickOutsideDp(e: MouseEvent) {
+  if (dpOpen.value && dpRef.value && !dpRef.value.contains(e.target as Node)) {
+    dpOpen.value = false;
+  }
+}
+onMounted(() => document.addEventListener("click", onClickOutsideDp));
+onUnmounted(() => document.removeEventListener("click", onClickOutsideDp));
 const booting = ref(true);
 const authStep = ref<"login" | "2fa" | "app">("login");
 const pendingTwoFactorToken = ref("");
@@ -260,6 +292,91 @@ function handleLogout() {
   background: #1a3a5c;
   color: #fff;
   border-color: #1a3a5c;
+}
+
+/* ── Settings icon button ──────────────────────────────────────────────────── */
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.settings-btn:hover {
+  background: #f3f6fb;
+  border-color: #1f6feb;
+  color: #1f6feb;
+}
+
+.settings-btn--active {
+  background: #1a3a5c;
+  border-color: #1a3a5c;
+  color: #fff;
+}
+
+/* ── Tab dropdown ─────────────────────────────────────────────────────────── */
+.tab-dropdown {
+  position: relative;
+}
+
+.tab-chev {
+  margin-left: 4px;
+  transition: transform 0.15s;
+}
+
+.tab-chev--open {
+  transform: rotate(180deg);
+}
+
+.tab-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  z-index: 100;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tab-dropdown-item {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #4b5563;
+  padding: 8px 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tab-dropdown-item:hover {
+  background: #f3f6fb;
+  color: #122033;
+}
+
+.tab-dropdown-item--active {
+  background: #1a3a5c;
+  color: #fff;
+}
+
+.tab-dropdown-item--active:hover {
+  background: #1a3a5c;
+  color: #fff;
 }
 
 .app-content {

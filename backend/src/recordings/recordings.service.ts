@@ -346,6 +346,18 @@ export class RecordingsService {
           dealer_name: cs?.dealer_name ?? null,
           client_services_json: cs ? JSON.stringify(cs) : null,
 
+          // QA assessment (campaign-specific)
+          qa_scores_json: parsed.qa_assessment
+            ? JSON.stringify(parsed.qa_assessment)
+            : null,
+
+          // Opportunity classification
+          is_opportunity: parsed.opportunity?.is_opportunity ?? null,
+          not_opportunity_reason: parsed.opportunity?.not_opportunity_reason ?? null,
+          opportunity_json: parsed.opportunity
+            ? JSON.stringify(parsed.opportunity)
+            : null,
+
           // Shared JSON
           action_items_json: JSON.stringify(parsed.action_items ?? []),
           key_entities_json: JSON.stringify(parsed.key_entities ?? []),
