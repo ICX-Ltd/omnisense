@@ -102,6 +102,13 @@ const expandedOutcome = ref<string | null>(null);
 const outcomeInteractions = ref<any[]>([]);
 const loadingOutcome = ref(false);
 
+// Objection assessment state
+const objectionAssessData = ref<any>(null);
+const expandedObjectionCat = ref<string | null>(null);
+const objectionCatInteractions = ref<any[]>([]);
+const loadingObjectionCat = ref(false);
+const objectionOppsOnly = ref(false);
+
 // Opportunity state
 const opportunityData = ref<any>(null);
 const expandedOpportunityReason = ref<string | null>(null);
@@ -158,8 +165,11 @@ function fmtDate(iso: string | null) {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+function fmtTime(ts: string) {
+  if (/^\d{2}:\d{2}:\d{2}$/.test(ts)) return ts.slice(0, 5);
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 const isChat = computed(() => detailData.value?.interaction?.interactionType === "chat");
@@ -172,17 +182,46 @@ interface ChatMessage {
   content: string;
 }
 
+function parseLineChatFormat(text: string): ChatMessage[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const re = /^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*(.*)$/i;
+  const msgs: ChatMessage[] = [];
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (m) {
+      const role = m[2].trim().toLowerCase();
+      const source = role === 'agent' ? 'Agent' : 'Customer';
+      const sender = role === 'agent' ? 'Agent' : m[2].trim();
+      msgs.push({ id: msgs.length, source, sender, timestamp: m[1], content: m[3] });
+    } else if (msgs.length) {
+      // Continuation line — append to previous message
+      msgs[msgs.length - 1].content += ' ' + line;
+    } else {
+      return []; // first line doesn't match — not this format
+    }
+  }
+  return msgs;
+}
+
 const chatMessages = computed<ChatMessage[]>(() => {
   if (!isChat.value || !detailData.value?.transcript?.text) return [];
+  let raw: string = detailData.value.transcript.text;
+  // Try JSON parse — could be an array of message objects or a JSON-encoded string
   try {
-    const parsed = JSON.parse(detailData.value.transcript.text);
-    if (!Array.isArray(parsed)) return [];
-    return [...parsed].sort(
-      (a: ChatMessage, b: ChatMessage) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-    );
-  } catch {
-    return [];
-  }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) {
+      return [...parsed].sort(
+        (a: ChatMessage, b: ChatMessage) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+    }
+    // If JSON.parse returned a string, use the unescaped version for line parsing
+    if (typeof parsed === 'string') raw = parsed;
+  } catch { /* not JSON */ }
+  // Try line-based format: HH:MM:SS-role: message
+  const lineParsed = parseLineChatFormat(raw);
+  if (lineParsed.length) return lineParsed;
+  return [];
 });
 
 function opportunityReasonLabel(r: string) {
@@ -234,6 +273,22 @@ const hasQaData = computed(() => {
 function fmtQaScore(v: number | null | undefined) {
   if (typeof v !== "number" || v === null) return "n/a";
   return v.toFixed(2);
+}
+
+// Objection rate colour helpers
+function rateColorSolid(rate: number | null | undefined): string {
+  if (typeof rate !== "number") return "#ccc";
+  if (rate >= 0.7) return "#059669";
+  if (rate >= 0.4) return "#ea580c";
+  return "#dc2626";
+}
+
+function agentObjCat(category: string) {
+  return objectionAssessData.value?.agent?.categories?.find((c: any) => c.category === category) ?? null;
+}
+
+function agentChecklist(itemName: string) {
+  return objectionAssessData.value?.agent?.checklist?.find((c: any) => c.item === itemName) ?? null;
 }
 
 function bucketLabel(b: string) {
@@ -356,6 +411,7 @@ async function loadAll() {
   expandedNeed.value = null;
   expandedOutcome.value = null;
   expandedOpportunityReason.value = null;
+  expandedObjectionCat.value = null;
   detailId.value = null;
 
   try {
@@ -367,12 +423,25 @@ async function loadAll() {
     opsData.value = opsRes.data;
     dimData.value = dimRes.data;
     opportunityData.value = oppRes.data;
+    await fetchObjectionAssessments();
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
   } finally {
     loading.value = false;
   }
 }
+
+async function fetchObjectionAssessments() {
+  expandedObjectionCat.value = null;
+  try {
+    const res = await axios.get(ApiPath.InsightsSummaryObjectionAssessments, {
+      params: { ...sharedParams.value, opportunitiesOnly: objectionOppsOnly.value || undefined },
+    });
+    objectionAssessData.value = res.data;
+  } catch { objectionAssessData.value = null; }
+}
+
+watch(objectionOppsOnly, () => { fetchObjectionAssessments(); });
 
 async function toggleBucket(bucket: string) {
   if (expandedBucket.value === bucket) {
@@ -436,6 +505,22 @@ async function toggleOpportunityReason(reason: string) {
     opportunityInteractions.value = res.data;
   } catch { opportunityInteractions.value = []; }
   finally { loadingOpportunityReason.value = false; }
+}
+
+async function toggleObjectionCategory(category: string) {
+  if (expandedObjectionCat.value === category) {
+    expandedObjectionCat.value = null;
+    return;
+  }
+  expandedObjectionCat.value = category;
+  loadingObjectionCat.value = true;
+  try {
+    const res = await axios.get(ApiPath.OpsInteractionsByObjectionCategory, {
+      params: { ...sharedParams.value, category, limit: 200, opportunitiesOnly: objectionOppsOnly.value || undefined },
+    });
+    objectionCatInteractions.value = res.data;
+  } catch { objectionCatInteractions.value = []; }
+  finally { loadingObjectionCat.value = false; }
 }
 
 async function openDetail(recordingId: string) {
@@ -786,6 +871,154 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- Objection Handling Assessment Summary -->
+      <div v-if="objectionAssessData?.categories?.some((c: any) => c.raised_count > 0)" class="tile" style="margin-top: 14px">
+        <div class="tile-head" style="flex-wrap: wrap">
+          <div class="tile-icon">&#128172;</div>
+          <div class="tile-text" style="flex: 1">
+            <div class="tile-title">Objection Handling Assessment</div>
+            <div class="tile-desc">
+              {{ agent ? `Comparing ${agent} against overall average` : 'Click a category to see individual interactions' }}
+            </div>
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink); cursor: pointer; user-select: none">
+            <input type="checkbox" v-model="objectionOppsOnly" style="cursor: pointer" />
+            Opportunities only
+          </label>
+        </div>
+        <div class="tile-body">
+          <!-- Legend when comparing -->
+          <div v-if="agent && objectionAssessData.agent" class="dim-legend" style="margin-bottom: 14px">
+            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--overall" /> Overall average</span>
+            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
+          </div>
+
+          <!-- Totals summary -->
+          <div style="display: flex; gap: 20px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap">
+            <div class="objection-stat">
+              <div class="objection-stat-value">{{ objectionAssessData.totals.assessed }}</div>
+              <div class="objection-stat-label">Assessed</div>
+              <template v-if="agent && objectionAssessData.agent">
+                <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.assessed }}</div>
+                <div class="objection-stat-label">{{ agent }}</div>
+              </template>
+            </div>
+            <div class="objection-stat">
+              <div class="objection-stat-value">{{ objectionAssessData.totals.with_objections }}</div>
+              <div class="objection-stat-label">With Objections</div>
+              <template v-if="agent && objectionAssessData.agent">
+                <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.with_objections }}</div>
+                <div class="objection-stat-label">{{ agent }}</div>
+              </template>
+            </div>
+            <div class="objection-stat">
+              <div class="objection-stat-value">{{ objectionAssessData.totals.total_objections_raised }}</div>
+              <div class="objection-stat-label">Total Objections</div>
+              <template v-if="agent && objectionAssessData.agent">
+                <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.total_objections_raised }}</div>
+                <div class="objection-stat-label">{{ agent }}</div>
+              </template>
+            </div>
+            <div class="objection-stat">
+              <div class="objection-stat-value" :style="{ color: rateColorSolid(objectionAssessData.totals.avg_checklist_score) }">
+                {{ objectionAssessData.totals.avg_checklist_score != null ? (objectionAssessData.totals.avg_checklist_score * 100).toFixed(0) + '%' : 'n/a' }}
+              </div>
+              <div class="objection-stat-label">Avg Checklist Score</div>
+              <template v-if="agent && objectionAssessData.agent">
+                <div class="objection-stat-agent" :style="{ color: rateColorSolid(objectionAssessData.agent.totals.avg_checklist_score) }">
+                  {{ objectionAssessData.agent.totals.avg_checklist_score != null ? (objectionAssessData.agent.totals.avg_checklist_score * 100).toFixed(0) + '%' : 'n/a' }}
+                </div>
+                <div class="objection-stat-label">{{ agent }}</div>
+              </template>
+            </div>
+          </div>
+          <!-- Category breakdown with drill-down -->
+          <div>
+            <template v-for="cat in objectionAssessData.categories" :key="cat.category">
+              <div v-if="cat.raised_count > 0">
+                <div class="metric-row metric-row--clickable" @click="toggleObjectionCategory(cat.category)">
+                  <div class="metric-left" style="flex-wrap: wrap; gap: 4px 8px">
+                    <span style="font-size: 13px; font-weight: 600; text-transform: capitalize">{{ cat.category.replace(/_/g, ' ') }}</span>
+                    <!-- Overall BP chip -->
+                    <span
+                      class="dim-chip"
+                      :style="{ background: agent ? overallCompareColorSolid(cat.best_practice_rate != null ? cat.best_practice_rate * 10 : null) : rateColorSolid(cat.best_practice_rate), color: '#fff', fontSize: '10px', minWidth: '50px', textAlign: 'center' }"
+                    >BP {{ cat.best_practice_rate != null ? (cat.best_practice_rate * 100).toFixed(0) + '%' : 'n/a' }}</span>
+                    <!-- Agent BP chip -->
+                    <template v-if="agent && agentObjCat(cat.category)?.best_practice_rate != null">
+                      <span
+                        class="dim-chip"
+                        :style="{ background: rateColorSolid(agentObjCat(cat.category).best_practice_rate), color: '#fff', fontSize: '10px', minWidth: '50px', textAlign: 'center' }"
+                      >BP {{ (agentObjCat(cat.category).best_practice_rate * 100).toFixed(0) }}%</span>
+                    </template>
+                    <span v-if="cat.could_do_more_count > 0" style="font-size: 11px; color: #ea580c">+{{ cat.could_do_more_count }} could do more</span>
+                  </div>
+                  <div class="metric-right">
+                    <span class="count-pill">{{ cat.raised_count }}</span>
+                    <template v-if="agent && agentObjCat(cat.category)?.raised_count > 0">
+                      <span class="count-pill" style="background: var(--accent, #3b82f6); color: #fff">{{ agentObjCat(cat.category).raised_count }}</span>
+                    </template>
+                    <span class="expand-icon">{{ expandedObjectionCat === cat.category ? '&#9650;' : '&#9660;' }}</span>
+                  </div>
+                </div>
+
+                <!-- Expanded interaction list -->
+                <div v-if="expandedObjectionCat === cat.category" class="drill-panel">
+                  <div v-if="loadingObjectionCat" class="hint">Loading interactions...</div>
+                  <div v-else-if="!objectionCatInteractions.length" class="hint">No interactions found.</div>
+                  <div
+                    v-else
+                    v-for="ix in objectionCatInteractions"
+                    :key="ix.recordingId"
+                    class="drill-row"
+                    @click="openDetail(ix.recordingId)"
+                  >
+                    <div class="drill-row-top">
+                      <span class="mono" style="font-size: 11px; font-weight: 600; color: var(--ink); min-width: 60px">{{ ix.interactionId || ix.recordingId?.slice(0, 8) }}</span>
+                      <span :class="scoreChip(ix.overall_score)" style="font-size: 11px">{{ fmtScore(ix.overall_score) }}</span>
+                      <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                      <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                      <span v-if="ix.objection_detail?.best_practice_followed === true" class="chip chip--success" style="font-size: 10px">Best practice</span>
+                      <span v-if="ix.objection_detail?.best_practice_followed === false" class="chip chip--danger" style="font-size: 10px">Missed</span>
+                      <span v-if="ix.objection_detail?.could_do_more" class="chip chip--warning" style="font-size: 10px">Could do more</span>
+                      <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                    </div>
+                    <div class="drill-row-summary">{{ ix.objection_detail?.comment || ix.summary_short || "(no summary)" }}</div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Generic checklist summary -->
+          <div v-if="objectionAssessData.checklist?.length" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border)">
+            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--ink); margin-bottom: 8px">Generic Handling Checklist Rates</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px 16px">
+              <div v-for="item in objectionAssessData.checklist" :key="item.item" style="display: flex; align-items: center; gap: 6px">
+                <div style="flex: 1; font-size: 11px; text-transform: capitalize; color: var(--ink)">{{ item.item.replace(/_/g, ' ') }}</div>
+                <span
+                  class="dim-chip"
+                  :style="{
+                    background: agent ? overallCompareColorSolid(item.rate != null ? item.rate * 10 : null) : rateColorSolid(item.rate),
+                    color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center'
+                  }"
+                >{{ item.rate != null ? (item.rate * 100).toFixed(0) + '%' : 'n/a' }}</span>
+                <!-- Agent checklist chip -->
+                <template v-if="agent && agentChecklist(item.item)?.rate != null">
+                  <span
+                    class="dim-chip"
+                    :style="{
+                      background: rateColorSolid(agentChecklist(item.item).rate),
+                      color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center'
+                    }"
+                  >{{ (agentChecklist(item.item).rate * 100).toFixed(0) }}%</span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid grid-3" style="margin-top: 14px">
         <!-- Score Distribution -->
         <div class="tile">
@@ -1115,27 +1348,43 @@ onMounted(async () => {
       <Transition name="drawer">
         <div v-if="detailId" class="drawer">
           <div class="drawer-header">
-            <div class="drawer-title">Interaction Detail</div>
-            <button class="drawer-close" @click="closeDetail">&times;</button>
+            <div class="drawer-header-left">
+              <div class="drawer-title">Interaction Detail</div>
+              <div v-if="detailData" class="drawer-header-sub">
+                <span v-if="detailData.interaction?.agent">{{ detailData.interaction.agent }}</span>
+                <span v-if="detailData.interaction?.agent && detailData.interaction?.campaign" class="drawer-header-sep">/</span>
+                <span v-if="detailData.interaction?.campaign">{{ detailData.interaction.campaign }}</span>
+              </div>
+            </div>
+            <div class="drawer-header-right">
+              <span
+                v-if="detailData?.insight?.overall_score != null"
+                class="drawer-header-score"
+                :style="{ background: scoreColorSolid(detailData.insight.overall_score) }"
+              >{{ fmtScore(detailData.insight.overall_score) }}</span>
+              <button class="drawer-close" @click="closeDetail">&times;</button>
+            </div>
           </div>
           <div class="drawer-body">
             <div v-if="loadingDetail" class="hint" style="padding: 24px">Loading detail...</div>
             <div v-else-if="!detailData" class="hint" style="padding: 24px">Could not load detail.</div>
             <template v-else>
               <div class="drawer-columns">
-                <!-- LEFT COLUMN: metadata, scores, dimensions -->
-                <div class="drawer-col drawer-col--left">
+                <!-- LEFT COLUMN: metadata, scores, QA -->
+                <div class="drawer-col">
                   <!-- Metadata -->
                   <div class="drawer-section">
                     <div class="drawer-section-title">Metadata</div>
                     <div class="drawer-meta-grid">
-                      <div><span class="drawer-label">Agent</span><span>{{ detailData.interaction.agent || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Campaign</span><span>{{ detailData.interaction.campaign || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Type</span><span>{{ detailData.interaction.interactionType || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
+                      <div><span class="drawer-label">Agent</span><span class="drawer-value">{{ detailData.interaction.agent || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Campaign</span><span class="drawer-value">{{ detailData.interaction.campaign || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Type</span><span class="drawer-value">{{ detailData.interaction.interactionType || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Date</span><span class="drawer-value">{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
+                      <div v-if="detailData.interaction.interactionId"><span class="drawer-label">Interaction ID</span><span class="drawer-value mono" style="font-size: 12px">{{ detailData.interaction.interactionId }}</span></div>
+                      <div v-if="detailData.interaction.interactionTpsId"><span class="drawer-label">TPS ID</span><span class="drawer-value mono" style="font-size: 12px">{{ detailData.interaction.interactionTpsId }}</span></div>
+                      <div v-if="detailData.interaction.interactionSource"><span class="drawer-label">Source</span><span class="drawer-value">{{ detailData.interaction.interactionSource }}</span></div>
                       <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
-                      <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span>{{ detailData.interaction.outcome }}</span></div>
-                      <div v-if="detailData.interaction.interactionId"><span class="drawer-label">Interaction ID</span><span class="mono" style="font-size: 12px">{{ detailData.interaction.interactionId }}</span></div>
+                      <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span class="chip chip--secondary">{{ detailData.interaction.outcome }}</span></div>
                     </div>
                     <div v-if="detailData.interaction.recordingUrl && !isChat" class="audio-player">
                       <div class="drawer-label" style="margin-bottom: 6px">Recording</div>
@@ -1185,6 +1434,14 @@ onMounted(async () => {
                   <!-- QA Assessment (separate from standard scoring) -->
                   <div v-if="detailData.insight?.qa_scores?.scores" class="drawer-section">
                     <div class="drawer-section-title">QA Assessment</div>
+                    <!-- QA overall score -->
+                    <div v-if="detailData.insight.qa_scores.overall_score != null" style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px">
+                      <span style="font-size: 12px; font-weight: 700; color: var(--ink)">Overall QA Score</span>
+                      <span
+                        class="dim-chip"
+                        :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
+                      >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
+                    </div>
                     <template v-for="(section, sectionKey) in detailData.insight.qa_scores.scores" :key="sectionKey">
                       <div v-if="typeof section === 'object' && section !== null && 'section_score' in section" class="qa-section">
                         <div class="qa-section-header">
@@ -1207,19 +1464,11 @@ onMounted(async () => {
                         </div>
                       </div>
                     </template>
-                    <!-- QA overall score -->
-                    <div v-if="detailData.insight.qa_scores.overall_score != null" style="margin-top: 8px; display: flex; align-items: center; gap: 8px">
-                      <span style="font-size: 12px; font-weight: 700; color: var(--ink)">Overall QA Score</span>
-                      <span
-                        class="dim-chip"
-                        :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                      >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
-                    </div>
                   </div>
                 </div>
 
-                <!-- RIGHT COLUMN: summary, coaching, objections, actions, risks, transcript -->
-                <div class="drawer-col drawer-col--right">
+                <!-- MIDDLE COLUMN: summary, coaching, action items, objections, objection handling -->
+                <div class="drawer-col">
                   <!-- Summary -->
                   <div v-if="detailData.insight" class="drawer-section">
                     <div class="drawer-section-title">Summary</div>
@@ -1244,14 +1493,6 @@ onMounted(async () => {
                     </div>
                   </div>
 
-                  <!-- Objections -->
-                  <div v-if="detailData.insight?.objections?.length" class="drawer-section">
-                    <div class="drawer-section-title">Objections</div>
-                    <ul class="drawer-list">
-                      <li v-for="(obj, i) in detailData.insight.objections" :key="i">{{ obj }}</li>
-                    </ul>
-                  </div>
-
                   <!-- Action Items -->
                   <div v-if="detailData.insight?.action_items?.length" class="drawer-section">
                     <div class="drawer-section-title">Action Items</div>
@@ -1263,20 +1504,62 @@ onMounted(async () => {
                     </ul>
                   </div>
 
-                  <!-- Risk Flags -->
-                  <div v-if="detailData.insight?.risk_flags?.length" class="drawer-section">
-                    <div class="drawer-section-title">Risk Flags</div>
+                  <!-- Objections -->
+                  <div v-if="detailData.insight?.objections?.length" class="drawer-section">
+                    <div class="drawer-section-title">Objections</div>
                     <ul class="drawer-list">
-                      <li v-for="(flag, i) in detailData.insight.risk_flags" :key="i">
-                        <template v-if="typeof flag === 'string'">{{ flag }}</template>
-                        <template v-else>
-                          <span v-if="flag.risk_level" :class="flag.risk_level === 'high' ? 'chip chip--danger' : flag.risk_level === 'medium' ? 'chip chip--warning' : 'chip chip--success'" style="font-size: 11px; margin-right: 6px">{{ flag.risk_level }}</span>
-                          {{ flag.description || flag.flag || JSON.stringify(flag) }}
-                        </template>
-                      </li>
+                      <li v-for="(obj, i) in detailData.insight.objections" :key="i">{{ obj }}</li>
                     </ul>
                   </div>
 
+                  <!-- Objection Handling Assessment -->
+                  <div v-if="detailData.insight?.objection_assessment?.categories" class="drawer-section">
+                    <div class="drawer-section-title">Objection Handling Assessment</div>
+
+                    <!-- Overall summary -->
+                    <div v-if="detailData.insight.objection_assessment.overall_handling_comment" style="margin-bottom: 10px; font-style: italic; color: var(--ink); font-size: 12px; line-height: 1.5">
+                      {{ detailData.insight.objection_assessment.overall_handling_comment }}
+                    </div>
+
+                    <!-- Category results — only show raised ones -->
+                    <div v-for="(cat, catKey) in detailData.insight.objection_assessment.categories" :key="catKey">
+                      <div v-if="cat.raised" class="objection-cat-row">
+                        <div class="objection-cat-label">{{ String(catKey).replace(/_/g, ' ') }}</div>
+                        <div class="objection-cat-flags">
+                          <span class="chip" :class="cat.best_practice_followed ? 'chip--success' : 'chip--danger'" style="font-size: 10px">
+                            {{ cat.best_practice_followed ? 'Best practice ✓' : 'Best practice ✗' }}
+                          </span>
+                          <span v-if="cat.could_do_more" class="chip chip--warning" style="font-size: 10px">Could do more</span>
+                        </div>
+                        <div v-if="cat.comment && cat.comment !== 'Not raised'" class="objection-cat-comment">{{ cat.comment }}</div>
+                      </div>
+                    </div>
+
+                    <!-- No objections raised message -->
+                    <div v-if="detailData.insight.objection_assessment.objections_raised_count === 0" style="font-size: 12px; color: var(--muted)">
+                      No objections identified in this interaction.
+                    </div>
+
+                    <!-- Generic checklist -->
+                    <div v-if="detailData.insight.objection_assessment.objections_raised_count > 0 && detailData.insight.objection_assessment.generic_checklist" style="margin-top: 12px">
+                      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--ink); margin-bottom: 6px">Handling Checklist</div>
+                      <div v-if="detailData.insight.objection_assessment.checklist_score != null" style="margin-bottom: 6px; font-size: 11px; color: var(--ink)">
+                        <strong>Checklist score:</strong> {{ (detailData.insight.objection_assessment.checklist_score * 100).toFixed(0) }}%
+                      </div>
+                      <div class="checklist-grid">
+                        <div v-for="(val, key) in detailData.insight.objection_assessment.generic_checklist" :key="key" class="checklist-item">
+                          <span class="chip" :class="val === true ? 'chip--success' : val === false ? 'chip--danger' : 'chip--secondary'" style="font-size: 10px; min-width: 16px; text-align: center">
+                            {{ val === true ? '✓' : val === false ? '✗' : '—' }}
+                          </span>
+                          <span style="font-size: 11px; color: var(--ink)">{{ String(key).replace(/_/g, ' ') }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- RIGHT COLUMN: opportunity, risk flags, transcript -->
+                <div class="drawer-col">
                   <!-- Opportunity Classification -->
                   <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
                     <div class="drawer-section-title">Opportunity Classification</div>
@@ -1296,6 +1579,20 @@ onMounted(async () => {
                       v-if="detailData.insight.opportunity.detail?.reason_detail"
                       style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink)"
                     >{{ detailData.insight.opportunity.detail.reason_detail }}</p>
+                  </div>
+
+                  <!-- Risk Flags -->
+                  <div v-if="detailData.insight?.risk_flags?.length" class="drawer-section">
+                    <div class="drawer-section-title">Risk Flags</div>
+                    <ul class="drawer-list">
+                      <li v-for="(flag, i) in detailData.insight.risk_flags" :key="i">
+                        <template v-if="typeof flag === 'string'">{{ flag }}</template>
+                        <template v-else>
+                          <span v-if="flag.risk_level" :class="flag.risk_level === 'high' ? 'chip chip--danger' : flag.risk_level === 'medium' ? 'chip chip--warning' : 'chip chip--success'" style="font-size: 11px; margin-right: 6px">{{ flag.risk_level }}</span>
+                          {{ flag.description || flag.flag || JSON.stringify(flag) }}
+                        </template>
+                      </li>
+                    </ul>
                   </div>
 
                   <!-- Transcript / Chat -->
@@ -1662,7 +1959,7 @@ onMounted(async () => {
   position: fixed;
   top: 0;
   right: 0;
-  width: min(960px, 92vw);
+  width: min(1400px, 95vw);
   height: 100vh;
   background: var(--surface, #fff);
   border-left: 1px solid var(--border);
@@ -1676,29 +1973,78 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
+  color: #fff;
   flex-shrink: 0;
 }
 
+.drawer-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .drawer-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
-  color: var(--ink);
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.drawer-header-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-header-sep {
+  margin: 0 5px;
+  opacity: 0.5;
+}
+
+.drawer-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.drawer-header-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
 }
 
 .drawer-close {
-  background: none;
+  background: rgba(255, 255, 255, 0.15);
   border: none;
-  font-size: 24px;
+  font-size: 20px;
   cursor: pointer;
-  color: var(--muted);
-  padding: 0 4px;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
   line-height: 1;
 }
 
 .drawer-close:hover {
-  color: var(--ink);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .drawer-body {
@@ -1709,27 +2055,31 @@ onMounted(async () => {
 
 .drawer-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   height: 100%;
 }
 
 .drawer-col {
   overflow-y: auto;
   min-height: 0;
-}
-
-.drawer-col--left {
   border-right: 1px solid var(--border);
 }
 
+.drawer-col:last-child {
+  border-right: none;
+}
+
 /* On narrow screens, stack vertically */
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .drawer-columns {
     grid-template-columns: 1fr;
   }
-  .drawer-col--left {
+  .drawer-col {
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+  .drawer-col:last-child {
+    border-bottom: none;
   }
 }
 
@@ -1749,14 +2099,21 @@ onMounted(async () => {
 
 .drawer-meta-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 5px 10px;
+  align-items: baseline;
 }
 
 .drawer-meta-grid > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: contents;
+}
+
+.drawer-value {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-label {
@@ -1793,8 +2150,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 500px;
-  overflow-y: auto;
   padding: 8px 4px;
 }
 
@@ -1856,8 +2211,6 @@ onMounted(async () => {
   color: var(--ink);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 400px;
-  overflow-y: auto;
   background: var(--surface-soft, #f8f8f8);
   padding: 12px;
   border-radius: var(--radius-md, 6px);
@@ -1962,6 +2315,75 @@ onMounted(async () => {
   color: var(--muted);
   flex: 1;
   min-width: 120px;
+}
+
+/* ── Objection Assessment ─────────────────────────────────────────────────── */
+.objection-cat-row {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: var(--surface-soft, #f8f8f8);
+  border-radius: var(--radius-sm, 4px);
+  border-left: 3px solid var(--border);
+}
+
+.objection-cat-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.objection-cat-flags {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.objection-cat-comment {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.objection-stat {
+  text-align: center;
+  min-width: 80px;
+}
+
+.objection-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.objection-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+
+.objection-stat-agent {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand);
+  line-height: 1.2;
+  margin-top: 4px;
 }
 
 /* ── Narrative ─────────────────────────────────────────────────────────────── */

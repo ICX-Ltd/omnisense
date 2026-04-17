@@ -562,6 +562,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                       <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.allocation_date) }}</span></div>
                       <div><span class="drawer-label">Category</span><span class="chip chip--secondary">{{ detailData.result_code_desc || "n/a" }}</span></div>
                       <div><span class="drawer-label">Survey Status</span><span class="chip chip--secondary">{{ detailData.survey_flow_status || "n/a" }}</span></div>
+                      <div v-if="detailData.source_type"><span class="drawer-label">Source</span><span>{{ detailData.source_type }}</span></div>
                     </div>
                   </div>
 

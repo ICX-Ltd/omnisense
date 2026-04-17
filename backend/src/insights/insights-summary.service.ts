@@ -682,6 +682,202 @@ export class InsightsSummaryService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // OBJECTION ASSESSMENT METRICS (campaign-specific detailed evaluation)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private static readonly OBJECTION_CATEGORIES = [
+    'price_value', 'incentive_offer', 'time_delay', 'think_about_it_consult',
+    'channel_preference', 'post_link_drop_off', 'technical_issues',
+    'future_purchase_intent', 'independent_customer', 'confusion_validation',
+    'low_engagement', 'product_policy_fit', 'effort_process_friction',
+  ] as const;
+
+  private static readonly CHECKLIST_ITEMS = [
+    'acknowledged_concern', 'clarified_reason', 'reframed_value',
+    'offered_solution', 'maintained_control', 'progressed_next_step',
+  ] as const;
+
+  private aggregateObjectionAssessments(rows: Array<{ assessment: string }>) {
+    const categoryStats: Record<string, { raised: number; best_practice: number; could_do_more: number; total_raised: number }> = {};
+    for (const cat of InsightsSummaryService.OBJECTION_CATEGORIES) {
+      categoryStats[cat] = { raised: 0, best_practice: 0, could_do_more: 0, total_raised: 0 };
+    }
+
+    const checklistStats: Record<string, { yes: number; total: number }> = {};
+    for (const item of InsightsSummaryService.CHECKLIST_ITEMS) {
+      checklistStats[item] = { yes: 0, total: 0 };
+    }
+
+    let totalAssessed = 0;
+    let totalWithObjections = 0;
+    let totalObjectionsRaised = 0;
+    let checklistScoreSum = 0;
+    let checklistScoreCount = 0;
+
+    for (const row of rows) {
+      let assessment: any;
+      try { assessment = typeof row.assessment === 'string' ? JSON.parse(row.assessment) : row.assessment; } catch { continue; }
+      if (!assessment?.categories) continue;
+
+      totalAssessed++;
+      let anyRaised = false;
+
+      for (const cat of InsightsSummaryService.OBJECTION_CATEGORIES) {
+        const entry = assessment.categories[cat];
+        if (!entry) continue;
+        if (entry.raised) {
+          categoryStats[cat].raised++;
+          categoryStats[cat].total_raised++;
+          anyRaised = true;
+          if (entry.best_practice_followed === true) categoryStats[cat].best_practice++;
+          if (entry.could_do_more === true) categoryStats[cat].could_do_more++;
+        }
+      }
+
+      if (anyRaised) totalWithObjections++;
+      totalObjectionsRaised += assessment.objections_raised_count ?? 0;
+
+      if (assessment.generic_checklist) {
+        for (const item of InsightsSummaryService.CHECKLIST_ITEMS) {
+          const val = assessment.generic_checklist[item];
+          if (val !== null && val !== undefined) {
+            checklistStats[item].total++;
+            if (val === true) checklistStats[item].yes++;
+          }
+        }
+      }
+
+      if (typeof assessment.checklist_score === 'number') {
+        checklistScoreSum += assessment.checklist_score;
+        checklistScoreCount++;
+      }
+    }
+
+    return {
+      totals: {
+        assessed: totalAssessed,
+        with_objections: totalWithObjections,
+        total_objections_raised: totalObjectionsRaised,
+        avg_checklist_score: checklistScoreCount > 0
+          ? Math.round((checklistScoreSum / checklistScoreCount) * 100) / 100
+          : null,
+      },
+      categories: InsightsSummaryService.OBJECTION_CATEGORIES.map((cat) => ({
+        category: cat,
+        raised_count: categoryStats[cat].raised,
+        best_practice_count: categoryStats[cat].best_practice,
+        could_do_more_count: categoryStats[cat].could_do_more,
+        best_practice_rate: categoryStats[cat].total_raised > 0
+          ? Math.round((categoryStats[cat].best_practice / categoryStats[cat].total_raised) * 100) / 100
+          : null,
+      })),
+      checklist: InsightsSummaryService.CHECKLIST_ITEMS.map((item) => ({
+        item,
+        yes_count: checklistStats[item].yes,
+        total: checklistStats[item].total,
+        rate: checklistStats[item].total > 0
+          ? Math.round((checklistStats[item].yes / checklistStats[item].total) * 100) / 100
+          : null,
+      })),
+    };
+  }
+
+  private buildObjectionAssessmentSql(filterClause: string, oppClause: string) {
+    return `SELECT ii.objection_assessments_json AS assessment
+      FROM app.interaction_insights ii
+      INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+      WHERE ii.objection_assessments_json IS NOT NULL
+        AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+        AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+        ${oppClause}
+        ${filterClause}`;
+  }
+
+  async getObjectionAssessmentMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'chats', campaign?: string, agent?: string, excludeOutcomes?: string[], opportunitiesOnly = false) {
+    const oppClause = opportunitiesOnly ? 'AND (ii.is_opportunity = 1 OR ii.is_opportunity IS NULL)' : '';
+
+    // Always compute overall (no agent filter)
+    const { clause: overallClause, extraParams: overallParams } = this.buildRawFilters(filterKey, campaign, undefined, excludeOutcomes);
+    const overallRows = await this.insightsRepo.manager.query<Array<{ assessment: string }>>(
+      this.buildObjectionAssessmentSql(overallClause, oppClause),
+      [from, to, ...overallParams],
+    );
+    const overall = this.aggregateObjectionAssessments(overallRows);
+
+    // If agent is specified, also compute agent-specific
+    let agentResult: ReturnType<typeof this.aggregateObjectionAssessments> | null = null;
+    if (agent) {
+      const { clause: agentClause, extraParams: agentParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+      const agentRows = await this.insightsRepo.manager.query<Array<{ assessment: string }>>(
+        this.buildObjectionAssessmentSql(agentClause, oppClause),
+        [from, to, ...agentParams],
+      );
+      agentResult = this.aggregateObjectionAssessments(agentRows);
+    }
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: filterKey,
+      agentName: agent ?? null,
+      ...overall,
+      agent: agentResult,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: INTERACTIONS BY OBJECTION CATEGORY
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async getInteractionsByObjectionCategory(
+    from: Date, to: Date, filterKey: InteractionFilter = 'chats',
+    category: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[], opportunitiesOnly = false,
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
+    const paramOffset = 2 + extraParams.length;
+    const oppClause = opportunitiesOnly ? 'AND (ii.is_opportunity = 1 OR ii.is_opportunity IS NULL)' : '';
+
+    const safeCategory = category.replace(/[^a-z_]/g, '');
+
+    const rows = await this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
+              ii.campaign_detected, ii.sentiment_overall, ii.objection_assessments_json,
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionId
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.objection_assessments_json IS NOT NULL
+         AND JSON_VALUE(ii.objection_assessments_json, '$.categories.${safeCategory}.raised') = 'true'
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${oppClause}
+         ${filterClause}
+       ORDER BY ia.interactionDateTime DESC
+       OFFSET @${paramOffset} ROWS FETCH NEXT @${paramOffset + 1} ROWS ONLY`,
+      [from, to, ...extraParams, offset, limit],
+    );
+
+    return rows.map((r: any) => {
+      let catDetail = null;
+      try {
+        const parsed = typeof r.objection_assessments_json === 'string' ? JSON.parse(r.objection_assessments_json) : r.objection_assessments_json;
+        catDetail = parsed?.categories?.[safeCategory] ?? null;
+      } catch { /* ignore */ }
+      return {
+        recordingId: r.recordingId,
+        interactionId: r.interactionId,
+        summary_short: r.summary_short,
+        overall_score: r.overall_score,
+        contact_disposition: r.contact_disposition,
+        campaign_detected: r.campaign_detected,
+        sentiment_overall: r.sentiment_overall,
+        agent: r.agent,
+        interactionDateTime: r.interactionDateTime,
+        campaign: r.campaign,
+        outcome: r.outcome,
+        objection_detail: catDetail,
+      };
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // CAMPAIGN COMPLIANCE METRICS
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1389,6 +1585,8 @@ ${prompt}
         interactionDateTime: interaction.interactionDateTime?.toISOString() ?? null,
         status: interaction.status,
         interactionId: interaction.interactionId,
+        interactionTpsId: interaction.interactionTpsId,
+        interactionSource: interaction.interactionSource,
         recordingUrl: interaction.recordingUrl,
         outcome: interaction.outcome,
       },
@@ -1408,6 +1606,7 @@ ${prompt}
         qa_scores: insight.qa_scores_json ? safeParseJson(insight.qa_scores_json) : null,
         coaching: insight.coaching_json ? safeParseJson(insight.coaching_json) : null,
         objections: insight.objections_json ? safeParseJson(insight.objections_json) : null,
+        objection_assessment: insight.objection_assessments_json ? safeParseJson(insight.objection_assessments_json) : null,
         action_items: insight.action_items_json ? safeParseJson(insight.action_items_json) : null,
         risk_flags: insight.risk_flags_json ? safeParseJson(insight.risk_flags_json) : null,
         opportunity: {

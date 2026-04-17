@@ -37,6 +37,12 @@ textarea {
   --surface: #ffffff;
   --surface-soft: rgba(18, 26, 50, 0.03);
 
+  --success: #059669;
+  --success-soft: rgba(5, 150, 105, 0.08);
+
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.08);
+
   --danger: #b91c1c;
   --danger-soft: rgba(220, 38, 38, 0.06);
 }

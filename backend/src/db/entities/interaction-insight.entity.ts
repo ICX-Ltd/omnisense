@@ -120,6 +120,11 @@ export class InteractionInsight {
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   qa_scores_json!: string | null;
 
+  // ── Objection handling assessment (campaign-specific) ───────────────────
+
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  objection_assessments_json!: string | null;
+
   // ── Opportunity classification ───────────────────────────────────────────
 
   @Index()

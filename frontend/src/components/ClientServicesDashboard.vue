@@ -115,8 +115,11 @@ function fmtDate(iso: string | null) {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+function fmtTime(ts: string) {
+  if (/^\d{2}:\d{2}:\d{2}$/.test(ts)) return ts.slice(0, 5);
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtScore(v: number | null | undefined) {
@@ -211,17 +214,46 @@ interface ChatMessage {
   content: string;
 }
 
+function parseLineChatFormat(text: string): ChatMessage[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const re = /^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*(.*)$/i;
+  const msgs: ChatMessage[] = [];
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (m) {
+      const role = m[2].trim().toLowerCase();
+      const source = role === 'agent' ? 'Agent' : 'Customer';
+      const sender = role === 'agent' ? 'Agent' : m[2].trim();
+      msgs.push({ id: msgs.length, source, sender, timestamp: m[1], content: m[3] });
+    } else if (msgs.length) {
+      // Continuation line — append to previous message
+      msgs[msgs.length - 1].content += ' ' + line;
+    } else {
+      return []; // first line doesn't match — not this format
+    }
+  }
+  return msgs;
+}
+
 const chatMessages = computed<ChatMessage[]>(() => {
   if (!isChat.value || !detailData.value?.transcript?.text) return [];
+  let raw: string = detailData.value.transcript.text;
+  // Try JSON parse — could be an array of message objects or a JSON-encoded string
   try {
-    const parsed = JSON.parse(detailData.value.transcript.text);
-    if (!Array.isArray(parsed)) return [];
-    return [...parsed].sort(
-      (a: ChatMessage, b: ChatMessage) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-    );
-  } catch {
-    return [];
-  }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) {
+      return [...parsed].sort(
+        (a: ChatMessage, b: ChatMessage) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+    }
+    // If JSON.parse returned a string, use the unescaped version for line parsing
+    if (typeof parsed === 'string') raw = parsed;
+  } catch { /* not JSON */ }
+  // Try line-based format: HH:MM:SS-role: message
+  const lineParsed = parseLineChatFormat(raw);
+  if (lineParsed.length) return lineParsed;
+  return [];
 });
 
 
@@ -824,8 +856,22 @@ onMounted(async () => {
       <Transition name="drawer">
         <div v-if="detailId" class="drawer">
           <div class="drawer-header">
-            <div class="drawer-title">Interaction Detail</div>
-            <button class="drawer-close" @click="closeDetail">&times;</button>
+            <div class="drawer-header-left">
+              <div class="drawer-title">Interaction Detail</div>
+              <div v-if="detailData" class="drawer-header-sub">
+                <span v-if="detailData.interaction?.agent">{{ detailData.interaction.agent }}</span>
+                <span v-if="detailData.interaction?.agent && detailData.interaction?.campaign" class="drawer-header-sep">/</span>
+                <span v-if="detailData.interaction?.campaign">{{ detailData.interaction.campaign }}</span>
+              </div>
+            </div>
+            <div class="drawer-header-right">
+              <span
+                v-if="detailData?.insight?.overall_score != null"
+                class="drawer-header-score"
+                :style="{ background: scoreColorSolid(detailData.insight.overall_score) }"
+              >{{ fmtScore(detailData.insight.overall_score) }}</span>
+              <button class="drawer-close" @click="closeDetail">&times;</button>
+            </div>
           </div>
           <div class="drawer-body">
             <div v-if="loadingDetail" class="hint" style="padding: 24px">Loading detail...</div>
@@ -833,39 +879,21 @@ onMounted(async () => {
             <template v-else>
               <div class="drawer-columns">
                 <!-- LEFT COLUMN: metadata, scores, QA -->
-                <div class="drawer-col drawer-col--left">
+                <div class="drawer-col">
                   <!-- Metadata -->
                   <div class="drawer-section">
                     <div class="drawer-section-title">Metadata</div>
                     <div class="drawer-meta-grid">
-                      <div><span class="drawer-label">Agent</span><span>{{ detailData.interaction.agent || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Campaign</span><span>{{ detailData.interaction.campaign || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Type</span><span>{{ detailData.interaction.interactionType || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
+                      <div><span class="drawer-label">Agent</span><span class="drawer-value">{{ detailData.interaction.agent || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Campaign</span><span class="drawer-value">{{ detailData.interaction.campaign || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Type</span><span class="drawer-value">{{ detailData.interaction.interactionType || "n/a" }}</span></div>
+                      <div><span class="drawer-label">Date</span><span class="drawer-value">{{ fmtDate(detailData.interaction.interactionDateTime) }}</span></div>
+                      <div v-if="detailData.interaction.interactionId"><span class="drawer-label">Interaction ID</span><span class="drawer-value mono" style="font-size: 12px">{{ detailData.interaction.interactionId }}</span></div>
+                      <div v-if="detailData.interaction.interactionTpsId"><span class="drawer-label">TPS ID</span><span class="drawer-value mono" style="font-size: 12px">{{ detailData.interaction.interactionTpsId }}</span></div>
+                      <div v-if="detailData.interaction.interactionSource"><span class="drawer-label">Source</span><span class="drawer-value">{{ detailData.interaction.interactionSource }}</span></div>
                       <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
-                      <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span>{{ detailData.interaction.outcome }}</span></div>
+                      <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span class="chip chip--secondary">{{ detailData.interaction.outcome }}</span></div>
                     </div>
-                  </div>
-
-                  <!-- Opportunity Classification -->
-                  <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
-                    <div class="drawer-section-title">Opportunity Classification</div>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
-                      <span
-                        class="chip"
-                        :class="detailData.insight.opportunity.is_opportunity ? 'chip--success' : 'chip--danger'"
-                        style="font-size: 12px"
-                      >{{ detailData.insight.opportunity.is_opportunity ? 'Opportunity to Sell' : 'Not an Opportunity' }}</span>
-                      <span
-                        v-if="!detailData.insight.opportunity.is_opportunity && detailData.insight.opportunity.not_opportunity_reason"
-                        class="chip chip--secondary"
-                        style="font-size: 11px"
-                      >{{ opportunityReasonLabel(detailData.insight.opportunity.not_opportunity_reason) }}</span>
-                    </div>
-                    <p
-                      v-if="detailData.insight.opportunity.detail?.reason_detail"
-                      style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink)"
-                    >{{ detailData.insight.opportunity.detail.reason_detail }}</p>
                   </div>
 
                   <!-- Scores -->
@@ -908,6 +936,14 @@ onMounted(async () => {
                   <!-- QA Assessment -->
                   <div v-if="detailData.insight?.qa_scores?.scores" class="drawer-section">
                     <div class="drawer-section-title">QA Assessment</div>
+                    <!-- QA overall score -->
+                    <div v-if="detailData.insight.qa_scores.overall_score != null" style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px">
+                      <span style="font-size: 12px; font-weight: 700; color: var(--ink)">Overall QA Score</span>
+                      <span
+                        class="dim-chip"
+                        :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
+                      >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
+                    </div>
                     <template v-for="(section, sectionKey) in detailData.insight.qa_scores.scores" :key="sectionKey">
                       <div v-if="typeof section === 'object' && section !== null && 'section_score' in section" class="qa-section">
                         <div class="qa-section-header">
@@ -930,18 +966,11 @@ onMounted(async () => {
                         </div>
                       </div>
                     </template>
-                    <div v-if="detailData.insight.qa_scores.overall_score != null" style="margin-top: 8px; display: flex; align-items: center; gap: 8px">
-                      <span style="font-size: 12px; font-weight: 700; color: var(--ink)">Overall QA Score</span>
-                      <span
-                        class="dim-chip"
-                        :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
-                      >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
-                    </div>
                   </div>
                 </div>
 
-                <!-- RIGHT COLUMN: summary, coaching, client services, transcript -->
-                <div class="drawer-col drawer-col--right">
+                <!-- MIDDLE COLUMN: summary, coaching, action items, objections -->
+                <div class="drawer-col">
                   <!-- Summary -->
                   <div v-if="detailData.insight" class="drawer-section">
                     <div class="drawer-section-title">Summary</div>
@@ -966,14 +995,6 @@ onMounted(async () => {
                     </div>
                   </div>
 
-                  <!-- Objections -->
-                  <div v-if="detailData.insight?.objections?.length" class="drawer-section">
-                    <div class="drawer-section-title">Objections</div>
-                    <ul class="drawer-list">
-                      <li v-for="(obj, i) in detailData.insight.objections" :key="i">{{ obj }}</li>
-                    </ul>
-                  </div>
-
                   <!-- Action Items -->
                   <div v-if="detailData.insight?.action_items?.length" class="drawer-section">
                     <div class="drawer-section-title">Action Items</div>
@@ -983,6 +1004,38 @@ onMounted(async () => {
                         <template v-else>{{ item.description || item.action || JSON.stringify(item) }}</template>
                       </li>
                     </ul>
+                  </div>
+
+                  <!-- Objections -->
+                  <div v-if="detailData.insight?.objections?.length" class="drawer-section">
+                    <div class="drawer-section-title">Objections</div>
+                    <ul class="drawer-list">
+                      <li v-for="(obj, i) in detailData.insight.objections" :key="i">{{ obj }}</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <!-- RIGHT COLUMN: opportunity, risk flags, transcript -->
+                <div class="drawer-col">
+                  <!-- Opportunity Classification -->
+                  <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
+                    <div class="drawer-section-title">Opportunity Classification</div>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+                      <span
+                        class="chip"
+                        :class="detailData.insight.opportunity.is_opportunity ? 'chip--success' : 'chip--danger'"
+                        style="font-size: 12px"
+                      >{{ detailData.insight.opportunity.is_opportunity ? 'Opportunity to Sell' : 'Not an Opportunity' }}</span>
+                      <span
+                        v-if="!detailData.insight.opportunity.is_opportunity && detailData.insight.opportunity.not_opportunity_reason"
+                        class="chip chip--secondary"
+                        style="font-size: 11px"
+                      >{{ opportunityReasonLabel(detailData.insight.opportunity.not_opportunity_reason) }}</span>
+                    </div>
+                    <p
+                      v-if="detailData.insight.opportunity.detail?.reason_detail"
+                      style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink)"
+                    >{{ detailData.insight.opportunity.detail.reason_detail }}</p>
                   </div>
 
                   <!-- Risk Flags -->
@@ -1348,7 +1401,7 @@ onMounted(async () => {
   position: fixed;
   top: 0;
   right: 0;
-  width: min(960px, 92vw);
+  width: min(1400px, 95vw);
   height: 100vh;
   background: var(--surface, #fff);
   border-left: 1px solid var(--border);
@@ -1362,29 +1415,78 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
+  color: #fff;
   flex-shrink: 0;
 }
 
+.drawer-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .drawer-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
-  color: var(--ink);
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.drawer-header-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-header-sep {
+  margin: 0 5px;
+  opacity: 0.5;
+}
+
+.drawer-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.drawer-header-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
 }
 
 .drawer-close {
-  background: none;
+  background: rgba(255, 255, 255, 0.15);
   border: none;
-  font-size: 24px;
+  font-size: 20px;
   cursor: pointer;
-  color: var(--muted);
-  padding: 0 4px;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
   line-height: 1;
 }
 
 .drawer-close:hover {
-  color: var(--ink);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .drawer-body {
@@ -1395,26 +1497,30 @@ onMounted(async () => {
 
 .drawer-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   height: 100%;
 }
 
 .drawer-col {
   overflow-y: auto;
   min-height: 0;
-}
-
-.drawer-col--left {
   border-right: 1px solid var(--border);
 }
 
-@media (max-width: 700px) {
+.drawer-col:last-child {
+  border-right: none;
+}
+
+@media (max-width: 900px) {
   .drawer-columns {
     grid-template-columns: 1fr;
   }
-  .drawer-col--left {
+  .drawer-col {
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+  .drawer-col:last-child {
+    border-bottom: none;
   }
 }
 
@@ -1434,14 +1540,21 @@ onMounted(async () => {
 
 .drawer-meta-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 5px 10px;
+  align-items: baseline;
 }
 
 .drawer-meta-grid > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: contents;
+}
+
+.drawer-value {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-label {
@@ -1468,8 +1581,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 500px;
-  overflow-y: auto;
   padding: 8px 4px;
 }
 
@@ -1510,8 +1621,6 @@ onMounted(async () => {
   color: var(--ink);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 400px;
-  overflow-y: auto;
   background: var(--surface-soft, #f8f8f8);
   padding: 12px;
   border-radius: var(--radius-md, 6px);

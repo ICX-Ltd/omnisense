@@ -450,6 +450,162 @@ function buildDefaultOperationsSchema(): string {
   }`;
 }
 
+function buildRacObjectionHandlingSection(): string {
+  return `
+═══════════════════════════════════════
+SECTION — OBJECTION HANDLING ASSESSMENT (campaign-specific)
+═══════════════════════════════════════
+Evaluate the customer chat for objections and how the agent handled them.
+Return results in a separate "objection_assessment" object.
+
+── OBJECTION CATEGORIES ──
+
+For EACH of the 13 categories below, determine whether the customer raised
+that type of objection during the conversation. Use the triggers to help
+identify each category. For every category return:
+  {
+    "raised": boolean,
+    "best_practice_followed": boolean | null,   (null if not raised)
+    "could_do_more": boolean | null,            (null if not raised)
+    "comment": string                           (if raised: max 50 words justifying the three flags above; if not raised: "Not raised")
+  }
+
+Category keys and identification guidance:
+
+1. price_value
+   Description: Customer challenges price or perceived value.
+   Triggers: compares with competitor pricing; requests discount or better price;
+   questions value vs cost; mentions previous cheaper quote; indicates price is a barrier.
+   Agent should: acknowledge comparison; apply discount link early; reframe value vs
+   competitors; keep control of the sale.
+
+2. incentive_offer
+   Description: Customer expects additional perks, vouchers or offers.
+   Triggers: asks about vouchers or rewards; references competitor incentives; expects
+   additional benefits beyond price; queries "offers" specifically; hesitates due to
+   lack of extras.
+   Agent should: acknowledge expectation; reframe RAC value — mention exclusive perks;
+   position discount as immediate benefit.
+
+3. time_delay
+   Description: Customer is frustrated with speed and/or waiting.
+   Triggers: highlights slow responses; mentions waiting too long; appears frustrated
+   with pace; sends follow-ups like "hello?"; drops engagement due to delay.
+   Agent should: apologise and reassure; speed up process; summarise and move forward.
+
+4. think_about_it_consult
+   Description: Customer delays decision-making or wants to consult others.
+   Triggers: delays decision without clear reason; mentions discussing with partner/family;
+   avoids committing after quote; indicates future return intention; uses soft exit language.
+   Agent should: explore hesitation; create urgency; offer support.
+
+5. channel_preference
+   Description: Customer prefers to call or email over chat.
+   Triggers: requests phone contact; asks to move away from chat; shows discomfort with
+   chat process; requests callback or number; indicates preference for another channel.
+   Agent should: respect request; attempt to retain in chat; offer quicker alternative.
+
+6. post_link_drop_off
+   Description: Customer disengages after a link is sent.
+   Triggers: no response after link is sent; customer disengages mid-journey; stops
+   replying after CTA; does not confirm completion; long silence post-link.
+   Agent should: follow up quickly; reassure; offer help.
+
+7. technical_issues
+   Description: Issues with system, links, or process.
+   Triggers: reports link not working; website errors or blank screens; trouble completing
+   purchase; issues entering details; problems with codes or activation.
+   Agent should: reassure; offer workaround (but not repetitively); stay with customer.
+
+8. future_purchase_intent
+   Description: Customer not ready to purchase yet / upcoming renewal.
+   Triggers: wants delayed start date; mentions existing cover end date; not ready to
+   purchase today; planning ahead; queries renewal timing.
+   Agent should: keep engagement; show value now; offer indicative pricing.
+
+9. independent_customer
+   Description: Customer prefers to complete journey alone.
+   Triggers: wants to self-serve; declines assistance; prefers to complete journey alone;
+   rejects guided support; moves away from agent-led journey.
+   Agent should: respect independence; stay present; offer support.
+
+10. confusion_validation
+    Description: Customer lacks understanding or seeks reassurance.
+    Triggers: asks repeated clarification questions; seeks reassurance on details; appears
+    unsure or hesitant; questions accuracy of information; misunderstands product.
+    Agent should: simplify; reassure; confirm understanding.
+
+11. low_engagement
+    Description: Minimal or delayed responses from customer.
+    Triggers: short or minimal responses; delayed replies; lack of questions or interaction;
+    passive behaviour; limited engagement with journey.
+    Agent should: re-engage; ask simple questions; add value; guide conversation.
+
+12. product_policy_fit
+    Description: Customer has specific requirements or constraints.
+    Triggers: requires specific policy features; questions eligibility; needs coverage
+    clarification; mentions constraints (monthly, business use etc.); requests specific
+    configuration.
+    Agent should: clarify requirement; match to correct product; reassure suitability.
+
+13. effort_process_friction
+    Description: Customer perceives process as complex or inconvenient.
+    Triggers: perceives process as too complex; reluctance to complete steps; avoids
+    multi-step journeys; mentions inconvenience; expresses difficulty using tech.
+    Agent should: reduce perceived effort; offer guided support; emphasise speed.
+
+── GENERIC OBJECTION HANDLING CHECKLIST ──
+
+If ANY objection was raised (at least one category has raised = true), also evaluate
+whether the agent followed these six generic best-practice steps. For each, return
+true/false. If NO objections were raised, set all six to null.
+
+  acknowledged_concern    — Did the agent acknowledge the customer's concern?
+  clarified_reason        — Did the agent clarify the reason behind the objection?
+  reframed_value          — Did the agent reframe value based on customer needs?
+  offered_solution        — Did the agent offer a solution (e.g. discount link, alternative)?
+  maintained_control      — Did the agent maintain control of the conversation?
+  progressed_next_step    — Did the agent progress towards a clear next step?
+
+Finally, compute:
+  objections_raised_count  — total number of categories where raised = true (0–13)
+  checklist_score          — count of checklist items that are true / count of non-null items,
+                             as a value from 0.00 to 1.00 (null if no objections raised)
+  overall_handling_comment — max 60 words summarising the agent's objection handling performance
+`;
+}
+
+function buildRacObjectionHandlingSchema(): string {
+  return `"objection_assessment": {
+    "categories": {
+      "price_value":             { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "incentive_offer":         { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "time_delay":              { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "think_about_it_consult":  { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "channel_preference":      { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "post_link_drop_off":      { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "technical_issues":        { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "future_purchase_intent":  { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "independent_customer":    { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "confusion_validation":    { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "low_engagement":          { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "product_policy_fit":      { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string },
+      "effort_process_friction": { "raised": boolean, "best_practice_followed": boolean | null, "could_do_more": boolean | null, "comment": string }
+    },
+    "generic_checklist": {
+      "acknowledged_concern":  boolean | null,
+      "clarified_reason":      boolean | null,
+      "reframed_value":        boolean | null,
+      "offered_solution":      boolean | null,
+      "maintained_control":    boolean | null,
+      "progressed_next_step":  boolean | null
+    },
+    "objections_raised_count": number,
+    "checklist_score": number | null,
+    "overall_handling_comment": string
+  }`;
+}
+
 function buildRacOpportunitySection(): string {
   return `
 ═══════════════════════════════════════
@@ -488,7 +644,9 @@ export function buildChatInsightsPrompt(chatTranscript: string, campaign?: strin
   const rac = isRacCampaign(campaign);
   const opportunitySection = rac ? buildRacOpportunitySection() : '';
   const qaSection = rac ? buildRacOperationsSection() : '';
+  const objectionSection = rac ? buildRacObjectionHandlingSection() : '';
   const qaSchema = rac ? `,\n\n  ${buildRacOperationsSchema()}` : '';
+  const objectionSchema = rac ? `,\n\n  ${buildRacObjectionHandlingSchema()}` : '';
 
   return `
 You are an expert analyst for a UK automotive contact centre handling live chat interactions.
@@ -510,6 +668,7 @@ conversation_type: lead_generation | sales_follow_up | satisfaction_check | comp
 ${opportunitySection}
 ${buildDefaultOperationsSection()}
 ${qaSection}
+${objectionSection}
 ═══════════════════════════════════════
 SECTION 3 — CLIENT SERVICES INTELLIGENCE
 ═══════════════════════════════════════
@@ -551,7 +710,7 @@ JSON SCHEMA
     "next_step_agreed": string | null
   },
 
-  ${buildDefaultOperationsSchema()}${qaSchema},
+  ${buildDefaultOperationsSchema()}${qaSchema}${objectionSchema},
 
   "client_services": {
     "is_in_market_now": boolean | null,

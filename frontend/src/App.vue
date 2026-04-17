@@ -66,15 +66,17 @@
       </div>
 
       <div class="app-content">
-        <TestLab v-if="tab === 'test'" />
-        <DataQueue v-else-if="tab === 'data'" />
-        <BatchDashboard v-else-if="tab === 'batch'" />
-        <SummaryDashboard v-else-if="tab === 'summary'" />
-        <OperationsDashboard v-else-if="tab === 'ops'" />
-        <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
-        <SurveyDashboard v-else-if="tab === 'survey'" />
-        <NarrativesPage v-else-if="tab === 'narratives'" />
-        <SettingsPanel v-else />
+        <keep-alive>
+          <TestLab v-if="tab === 'test'" />
+          <DataQueue v-else-if="tab === 'data'" />
+          <BatchDashboard v-else-if="tab === 'batch'" />
+          <SummaryDashboard v-else-if="tab === 'summary'" />
+          <OperationsDashboard v-else-if="tab === 'ops'" />
+          <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
+          <SurveyDashboard v-else-if="tab === 'survey'" />
+          <NarrativesPage v-else-if="tab === 'narratives'" />
+          <SettingsPanel v-else />
+        </keep-alive>
       </div>
     </div>
   </div>
@@ -193,12 +195,10 @@ function handleLogout() {
 }
 
 .app-header {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-bottom: 0px;
+  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
   border-radius: 18px 18px 0 0;
   padding: 14px 20px 0;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
 }
 
 .app-header-row {
@@ -218,13 +218,15 @@ function handleLogout() {
   width: 36px;
   height: 36px;
   object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .app-title {
   margin: 0;
   font-size: 1.35rem;
-  font-weight: 700;
-  color: #122033;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
 }
 
 .app-topbar-right {
@@ -235,22 +237,22 @@ function handleLogout() {
 
 .app-subtitle {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.65);
   margin-top: 2px;
 }
 
 .app-user-name {
   font-size: 0.88rem;
   font-weight: 600;
-  color: #4b5563;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .logout-btn {
-  border: 1px solid #d0d7e2;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 12px;
   padding: 8px 14px;
-  background: #fff;
-  color: #243447;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
   font-size: 0.88rem;
   font-weight: 700;
   cursor: pointer;
@@ -258,8 +260,8 @@ function handleLogout() {
 }
 
 .logout-btn:hover {
-  background: #f3f6fb;
-  border-color: #1f6feb;
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .tabbar {
@@ -267,14 +269,15 @@ function handleLogout() {
   gap: 4px;
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid #e5e7eb;
+  padding-bottom: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .tab {
   border: 1px solid transparent;
-  border-radius: 8px 8px 8px 8px;
-  background: #f3f6fb;
-  color: #6b7280;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
   padding: 8px 16px;
   font-size: 0.88rem;
   font-weight: 600;
@@ -283,15 +286,16 @@ function handleLogout() {
 }
 
 .tab:hover {
-  background: #fff;
-  color: #6b7280;
-  border-color: #d0d7e2;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-color: transparent;
 }
 
 .tab--active {
-  background: #1a3a5c;
-  color: #fff;
-  border-color: #1a3a5c;
+  background: #fff;
+  color: #1a3a5c;
+  border-color: #fff;
+  font-weight: 700;
 }
 
 /* ── Settings icon button ──────────────────────────────────────────────────── */
@@ -301,24 +305,24 @@ function handleLogout() {
   justify-content: center;
   width: 36px;
   height: 36px;
-  border: 1px solid #d0d7e2;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 10px;
-  background: #fff;
-  color: #6b7280;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .settings-btn:hover {
-  background: #f3f6fb;
-  border-color: #1f6feb;
-  color: #1f6feb;
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
 }
 
 .settings-btn--active {
-  background: #1a3a5c;
-  border-color: #1a3a5c;
-  color: #fff;
+  background: #fff;
+  border-color: #fff;
+  color: #1a3a5c;
 }
 
 /* ── Tab dropdown ─────────────────────────────────────────────────────────── */
@@ -370,12 +374,12 @@ function handleLogout() {
 }
 
 .tab-dropdown-item--active {
-  background: #1a3a5c;
+  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
   color: #fff;
 }
 
 .tab-dropdown-item--active:hover {
-  background: #1a3a5c;
+  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
   color: #fff;
 }
 

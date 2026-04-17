@@ -76,6 +76,28 @@ type SalesOpportunity = {
   reason_detail: string | null;
 };
 
+type ObjectionCategoryAssessment = {
+  raised: boolean;
+  best_practice_followed: boolean | null;
+  could_do_more: boolean | null;
+  comment: string;
+};
+
+type ObjectionAssessment = {
+  categories: Record<string, ObjectionCategoryAssessment>;
+  generic_checklist: {
+    acknowledged_concern: boolean | null;
+    clarified_reason: boolean | null;
+    reframed_value: boolean | null;
+    offered_solution: boolean | null;
+    maintained_control: boolean | null;
+    progressed_next_step: boolean | null;
+  };
+  objections_raised_count: number;
+  checklist_score: number | null;
+  overall_handling_comment: string;
+};
+
 export type ExtractedInsights = {
   contact_disposition: string;
   conversation_type: string;
@@ -92,6 +114,7 @@ export type ExtractedInsights = {
     coaching: Coaching;
   };
   qa_assessment?: any;                  // campaign-specific QA scoring (e.g. RAC Q1-Q15)
+  objection_assessment?: ObjectionAssessment; // campaign-specific objection handling
   client_services: ClientServices;
   action_items: ActionItem[];
   key_entities: Array<{ type: string; value: string }>;

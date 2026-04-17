@@ -351,6 +351,11 @@ export class RecordingsService {
             ? JSON.stringify(parsed.qa_assessment)
             : null,
 
+          // Objection handling assessment (campaign-specific)
+          objection_assessments_json: parsed.objection_assessment
+            ? JSON.stringify(parsed.objection_assessment)
+            : null,
+
           // Opportunity classification
           is_opportunity: parsed.opportunity?.is_opportunity ?? null,
           not_opportunity_reason: parsed.opportunity?.not_opportunity_reason ?? null,

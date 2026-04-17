@@ -166,6 +166,31 @@ export class InsightsController {
     );
   }
 
+  @Get('ops/interactions-by-objection-category')
+  async opsByObjectionCategory(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('category') category?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('opportunitiesOnly') opportunitiesOnly?: string,
+  ) {
+    if (!category) throw new BadRequestException('category is required');
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInteractionsByObjectionCategory(
+      fromDate, toDate, filter, category,
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      opportunitiesOnly === 'true',
+    );
+  }
+
   @Get('ops/interactions-by-competitor')
   async opsByCompetitor(
     @Query('from') from?: string,
@@ -287,6 +312,21 @@ export class InsightsController {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getObjectionsMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
+  }
+
+  @Get('summary/objection-assessments')
+  async summaryObjectionAssessments(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('opportunitiesOnly') opportunitiesOnly?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getObjectionAssessmentMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), opportunitiesOnly === 'true');
   }
 
   @Get('summary/compliance')
