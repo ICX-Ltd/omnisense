@@ -190,13 +190,13 @@ function parseLineChatFormat(text: string): ChatMessage[] {
   for (const line of lines) {
     const m = re.exec(line);
     if (m) {
-      const role = m[2].trim().toLowerCase();
+      const role = m[2]!.trim().toLowerCase();
       const source = role === 'agent' ? 'Agent' : 'Customer';
-      const sender = role === 'agent' ? 'Agent' : m[2].trim();
-      msgs.push({ id: msgs.length, source, sender, timestamp: m[1], content: m[3] });
+      const sender = role === 'agent' ? 'Agent' : m[2]!.trim();
+      msgs.push({ id: msgs.length, source, sender, timestamp: m[1]!, content: m[3] ?? '' });
     } else if (msgs.length) {
       // Continuation line — append to previous message
-      msgs[msgs.length - 1].content += ' ' + line;
+      msgs[msgs.length - 1]!.content += ' ' + line;
     } else {
       return []; // first line doesn't match — not this format
     }
