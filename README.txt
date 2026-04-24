@@ -1,4 +1,4 @@
--- now hooker up to ICX Ltd omnisense repository
+-- now hooked up to ICX Ltd omnisense repository
 
 we need to add the outcome to the interactions table and add a filter to the page to exclude multiple outcomes when doing summaries and narratives
 
