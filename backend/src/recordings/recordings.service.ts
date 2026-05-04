@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Or, IsNull, Equal, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
+import { Repository, In, Or, IsNull, Equal } from 'typeorm';
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
 
@@ -17,6 +17,54 @@ import { BatchJob } from '../db/entities/batch-job.entity';
 import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
 import { InsightsService, cleanJsonText } from '../insights/insights.service';
 import { InsightsProviderName } from '../insights/types/insights-provider.type';
+
+// Bounded string columns on InteractionInsight — declared length in characters.
+// Used by the upsert diagnostic logger so we can spot length / encoding issues
+// when MSSQL rejects a parameter (e.g. TDS 0xE7 invalid data length).
+const INSIGHT_BOUNDED_FIELDS: Array<{ name: string; max: number }> = [
+  { name: 'providerUsed', max: 50 },
+  { name: 'model', max: 120 },
+  { name: 'extractorVersion', max: 50 },
+  { name: 'contact_disposition', max: 50 },
+  { name: 'conversation_type', max: 50 },
+  { name: 'summary_short', max: 500 },
+  { name: 'interest_level', max: 20 },
+  { name: 'decision_timeline', max: 200 },
+  { name: 'next_step_agreed', max: 200 },
+  { name: 'campaign_detected', max: 50 },
+  { name: 'competitor_purchased', max: 100 },
+  { name: 'dealer_name', max: 200 },
+  { name: 'not_opportunity_reason', max: 50 },
+];
+
+function inspectInsightFields(payload: Record<string, unknown>) {
+  const report: Record<string, unknown> = {};
+  for (const { name, max } of INSIGHT_BOUNDED_FIELDS) {
+    const v = payload[name];
+    if (v == null) {
+      report[name] = null;
+      continue;
+    }
+    if (typeof v !== 'string') {
+      report[name] = { nonString: typeof v };
+      continue;
+    }
+    const len = v.length;
+    const hasControl = /[\x00-\x1F\x7F]/.test(v);
+    // Lone high or low UTF-16 surrogate — known cause of TDS NVARCHAR length mismatches.
+    const hasLoneSurrogate =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(v);
+    report[name] = {
+      len,
+      max,
+      overLimit: len > max,
+      hasControl,
+      hasLoneSurrogate,
+      preview: len > 60 ? `${v.slice(0, 60)}…` : v,
+    };
+  }
+  return report;
+}
 
 function sniffAudioExt(buf: Buffer): 'wav' | 'mp3' | 'mp4' | 'unknown' {
   if (buf.length >= 12) {
@@ -100,40 +148,38 @@ export class RecordingsService {
     dateTo?: Date;
     order?: 'ASC' | 'DESC';
   }) {
-    let where: any = {};
+    // Filter and sort on COALESCE(interactionDateTime, createdAt) so records
+    // without an interactionDateTime (e.g. manually-created via POST /recordings)
+    // are still findable and order sensibly by import time.
+    const qb = this.recordingsRepo.createQueryBuilder('r');
+    const dateExpr = 'COALESCE(r.interactionDateTime, r.createdAt)';
 
     if (opts.status === 'incomplete') {
-      where.status = In([
-        'pending_transcription',
-        'transcribing',
-        'transcribed',
-        'error',
-      ] as any);
+      qb.andWhere('r.status IN (:...incompleteStatuses)', {
+        incompleteStatuses: ['pending_transcription', 'transcribing', 'transcribed', 'error'],
+      });
     } else if (opts.status) {
-      where.status = opts.status;
+      qb.andWhere('r.status = :status', { status: opts.status });
     }
 
     if (opts.interactionType) {
-      where.interactionType = opts.interactionType;
+      qb.andWhere('r.interactionType = :interactionType', { interactionType: opts.interactionType });
     }
 
     if (opts.campaign) {
-      where.campaign = opts.campaign;
+      qb.andWhere('r.campaign = :campaign', { campaign: opts.campaign });
     }
 
-    if (opts.dateFrom && opts.dateTo) {
-      where.interactionDateTime = Between(opts.dateFrom, opts.dateTo);
-    } else if (opts.dateFrom) {
-      where.interactionDateTime = MoreThanOrEqual(opts.dateFrom);
-    } else if (opts.dateTo) {
-      where.interactionDateTime = LessThanOrEqual(opts.dateTo);
+    if (opts.dateFrom) {
+      qb.andWhere(`${dateExpr} >= :dateFrom`, { dateFrom: opts.dateFrom });
+    }
+    if (opts.dateTo) {
+      qb.andWhere(`${dateExpr} <= :dateTo`, { dateTo: opts.dateTo });
     }
 
-    return this.recordingsRepo.find({
-      where,
-      order: { interactionDateTime: opts.order ?? 'DESC' },
-      take: opts.limit,
-    });
+    qb.orderBy(dateExpr, opts.order ?? 'DESC').take(opts.limit);
+
+    return qb.getMany();
   }
 
   async createRecording(recordingUrl: string, provider: string) {
@@ -299,94 +345,103 @@ export class RecordingsService {
       const { rawJsonText, parsed, providerUsed, model } = result;
       const cs = parsed.client_services;
 
-      await this.insightsRepo.upsert(
-        {
-          recordingId,
-          providerUsed,
-          model,
-          json: cleanJsonText(rawJsonText),
-          extractorVersion: 'v3',
+      const insightPayload = {
+        recordingId,
+        providerUsed,
+        model,
+        json: cleanJsonText(rawJsonText),
+        extractorVersion: 'v3',
 
-          // Shared scalars
-          contact_disposition: parsed.contact_disposition ?? null,
-          conversation_type: parsed.conversation_type ?? null,
-          summary_short: parsed.summary_short ?? null,
-          summary_detailed: parsed.summary_detailed ?? null,
-          sentiment_overall:
-            typeof parsed.sentiment_overall === 'number'
-              ? parsed.sentiment_overall
-              : null,
-
-          // Customer signals
-          interest_level: parsed.customer_signals?.interest_level ?? null,
-          decision_timeline: parsed.customer_signals?.decision_timeline ?? null,
-          next_step_agreed: parsed.customer_signals?.next_step_agreed ?? null,
-          objections_json: JSON.stringify(parsed.customer_signals?.objections ?? []),
-
-          // Operations
-          overall_score:
-            typeof parsed.operations?.overall_score === 'number'
-              ? parsed.operations.overall_score
-              : null,
-          operations_scores_json: JSON.stringify(parsed.operations?.scores ?? {}),
-          coaching_json: JSON.stringify(parsed.operations?.coaching ?? {}),
-          operations_partial_scoring:
-            typeof parsed.operations?.scoring_flags?.partial_scoring === 'boolean'
-              ? parsed.operations.scoring_flags.partial_scoring
-              : null,
-          operations_low_score_alert:
-            typeof parsed.operations?.scoring_flags?.low_score_alert === 'boolean'
-              ? parsed.operations.scoring_flags.low_score_alert
-              : null,
-
-          // Call-specific
-          campaign_detected: parsed.campaign_detected ?? null,
-          campaign_compliance_json: parsed.campaign_compliance
-            ? JSON.stringify(parsed.campaign_compliance)
+        // Shared scalars
+        contact_disposition: parsed.contact_disposition ?? null,
+        conversation_type: parsed.conversation_type ?? null,
+        summary_short: parsed.summary_short ?? null,
+        summary_detailed: parsed.summary_detailed ?? null,
+        sentiment_overall:
+          typeof parsed.sentiment_overall === 'number'
+            ? parsed.sentiment_overall
             : null,
 
-          // Client services scalars
-          is_in_market_now: cs?.is_in_market_now ?? null,
-          has_purchased_elsewhere: cs?.has_purchased_elsewhere ?? null,
-          competitor_purchased: cs?.competitor_purchased ?? null,
-          lost_sale: cs?.lost_sale ?? null,
-          lead_generated_for_dealer: cs?.lead_generated_for_dealer ?? null,
-          dealer_name: cs?.dealer_name ?? null,
-          client_services_json: cs ? JSON.stringify(cs) : null,
+        // Customer signals
+        interest_level: parsed.customer_signals?.interest_level ?? null,
+        decision_timeline: parsed.customer_signals?.decision_timeline ?? null,
+        next_step_agreed: parsed.customer_signals?.next_step_agreed ?? null,
+        objections_json: JSON.stringify(parsed.customer_signals?.objections ?? []),
 
-          // QA assessment (campaign-specific)
-          qa_scores_json: parsed.qa_assessment
-            ? JSON.stringify(parsed.qa_assessment)
+        // Operations
+        overall_score:
+          typeof parsed.operations?.overall_score === 'number'
+            ? parsed.operations.overall_score
             : null,
-          qa_partial_scoring:
-            typeof parsed.qa_assessment?.scoring_flags?.partial_scoring === 'boolean'
-              ? parsed.qa_assessment.scoring_flags.partial_scoring
-              : null,
-          qa_low_score_alert:
-            typeof parsed.qa_assessment?.scoring_flags?.low_score_alert === 'boolean'
-              ? parsed.qa_assessment.scoring_flags.low_score_alert
-              : null,
-
-          // Objection handling assessment (campaign-specific)
-          objection_assessments_json: parsed.objection_assessment
-            ? JSON.stringify(parsed.objection_assessment)
+        operations_scores_json: JSON.stringify(parsed.operations?.scores ?? {}),
+        coaching_json: JSON.stringify(parsed.operations?.coaching ?? {}),
+        operations_partial_scoring:
+          typeof parsed.operations?.scoring_flags?.partial_scoring === 'boolean'
+            ? parsed.operations.scoring_flags.partial_scoring
+            : null,
+        operations_low_score_alert:
+          typeof parsed.operations?.scoring_flags?.low_score_alert === 'boolean'
+            ? parsed.operations.scoring_flags.low_score_alert
             : null,
 
-          // Opportunity classification
-          is_opportunity: parsed.opportunity?.is_opportunity ?? null,
-          not_opportunity_reason: parsed.opportunity?.not_opportunity_reason ?? null,
-          opportunity_json: parsed.opportunity
-            ? JSON.stringify(parsed.opportunity)
+        // Call-specific
+        campaign_detected: parsed.campaign_detected ?? null,
+        campaign_compliance_json: parsed.campaign_compliance
+          ? JSON.stringify(parsed.campaign_compliance)
+          : null,
+
+        // Client services scalars
+        is_in_market_now: cs?.is_in_market_now ?? null,
+        has_purchased_elsewhere: cs?.has_purchased_elsewhere ?? null,
+        competitor_purchased: cs?.competitor_purchased ?? null,
+        lost_sale: cs?.lost_sale ?? null,
+        lead_generated_for_dealer: cs?.lead_generated_for_dealer ?? null,
+        dealer_name: cs?.dealer_name ?? null,
+        client_services_json: cs ? JSON.stringify(cs) : null,
+
+        // QA assessment (campaign-specific)
+        qa_scores_json: parsed.qa_assessment
+          ? JSON.stringify(parsed.qa_assessment)
+          : null,
+        qa_partial_scoring:
+          typeof parsed.qa_assessment?.scoring_flags?.partial_scoring === 'boolean'
+            ? parsed.qa_assessment.scoring_flags.partial_scoring
+            : null,
+        qa_low_score_alert:
+          typeof parsed.qa_assessment?.scoring_flags?.low_score_alert === 'boolean'
+            ? parsed.qa_assessment.scoring_flags.low_score_alert
             : null,
 
-          // Shared JSON
-          action_items_json: JSON.stringify(parsed.action_items ?? []),
-          key_entities_json: JSON.stringify(parsed.key_entities ?? []),
-          risk_flags_json: JSON.stringify(parsed.risk_flags ?? []),
-          data_quality_json: JSON.stringify(parsed.data_quality ?? {}),
-        } as any,
-        ['recordingId'],
-      );
+        // Objection handling assessment (campaign-specific)
+        objection_assessments_json: parsed.objection_assessment
+          ? JSON.stringify(parsed.objection_assessment)
+          : null,
+
+        // Opportunity classification
+        is_opportunity: parsed.opportunity?.is_opportunity ?? null,
+        not_opportunity_reason: parsed.opportunity?.not_opportunity_reason ?? null,
+        opportunity_json: parsed.opportunity
+          ? JSON.stringify(parsed.opportunity)
+          : null,
+
+        // Shared JSON
+        action_items_json: JSON.stringify(parsed.action_items ?? []),
+        key_entities_json: JSON.stringify(parsed.key_entities ?? []),
+        risk_flags_json: JSON.stringify(parsed.risk_flags ?? []),
+        data_quality_json: JSON.stringify(parsed.data_quality ?? {}),
+      };
+
+      try {
+        await this.insightsRepo.upsert(insightPayload as any, ['recordingId']);
+      } catch (dbErr: any) {
+        this.logger.error(
+          `Insights upsert failed for recordingId=${recordingId} provider=${providerUsed} model=${model}: ${dbErr?.message ?? dbErr}`,
+        );
+        this.logger.error(
+          `Bounded-field inspection: ${JSON.stringify(inspectInsightFields(insightPayload as Record<string, unknown>))}`,
+        );
+        throw dbErr;
+      }
 
       await this.recordingsRepo.update(recordingId, {
         status: 'insights_done',

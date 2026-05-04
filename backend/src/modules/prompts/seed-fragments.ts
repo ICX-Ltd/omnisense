@@ -646,25 +646,200 @@ SECTION — RAC SALES OPPORTUNITY CLASSIFICATION
 This campaign sells RAC breakdown cover to NEW customers. Classify whether this chat
 represents a genuine opportunity to sell a new policy.
 
-is_opportunity: false if ANY of the following apply:
-  "existing_policy"       → customer already has an active RAC policy
-  "recent_policy_lapse"   → customer had a policy within the last 60 days
-  "renewal_enquiry"       → customer is looking to renew an existing policy
-  "cancellation_enquiry"  → customer is looking to cancel their policy
-  "policy_update"         → customer is looking to update their policy or account details
-  "opt_out"               → customer is requesting to opt out of communications
-  "breakdown_report"      → customer is reporting or chasing a breakdown incident
-  "phone_line_complaint"  → customer is complaining about not being able to get through on phone lines
-  "myrac_enquiry"         → customer is asking questions about MyRAC (the online account portal)
+═══════════════════════════════════════
+MINIMUM INTENT THRESHOLD (CRITICAL FILTER)
+═══════════════════════════════════════
+A chat must demonstrate CONFIRMED or EXPRESSED customer intent beyond the
+initial bot interaction to qualify as an opportunity.
 
-is_opportunity: true if NONE of the above apply — i.e. this is a genuine prospect for new breakdown cover.
+The following on their own are NOT sufficient to qualify as a sales opportunity:
 
+  • Selecting or typing "Buying breakdown cover" in the bot
+  • Opening a chat and asking to go to the website only
+  • Greetings only ("hi", "hello")
+  • Partial, unclear, misspelled, or fragmented messages without follow-up
+  • Providing name/email only without any product or purchase discussion
+  • Not responding to the human agent after handover
+
+If the customer does NOT engage with the human agent AND does NOT express a
+clear buying, pricing, product, or payment intent in their own words:
+
+  → is_opportunity = NULL
+  → not_opportunity_reason = NULL
+  → reason_detail explaining that intent could not be confirmed due to lack of engagement.
+
+CRITICAL:
+Do NOT classify as TRUE based on bot-stage intent alone.
+
+═══════════════════════════════════════
+── DECISION ORDER ──
+═══════════════════════════════════════
+Apply these rules IN ORDER. The first rule that matches decides the outcome.
+
+  1. If the customer expresses a clear POSITIVE intent to buy, restart, set up,
+     pay for, or complete NEW breakdown cover at any point in the conversation
+     → is_opportunity = TRUE.
+
+  2. OVERRIDE RULE — NEW SALE JOURNEY AFTER SERVICE / LAPSE SIGNAL
+
+     If ANY "not-opportunity" identifier appears earlier (e.g. existing_policy,
+     recent_policy_lapse), BUT the customer later clearly engages in a NEW
+     purchase or sign-up journey, classify as:
+
+     → is_opportunity = TRUE
+
+     This includes:
+       • asking how to buy or restart cover
+       • asking about cover types before purchase
+       • asking about multi-person / personal cover before purchase
+       • asking how to pay or complete purchase
+       • asking how to use Tesco Clubcard vouchers or codes
+       • confirming that cover has been purchased or set up
+
+     CRITICAL:
+     Later confirmed sales intent OVERRIDES earlier service/lapse signals.
+
+  3. If NO positive sales intent is present AND ANY "not-opportunity"
+     identifier below applies → is_opportunity = FALSE.
+     Pick the single most dominant identifier as not_opportunity_reason.
+
+  4. If neither a not-opportunity identifier NOR a clear positive intent
+     signal is present (e.g. customer disengaged before stating intent,
+     transcript too short, intent genuinely ambiguous)
+     → is_opportunity = NULL, not_opportunity_reason = NULL,
+       reason_detail explaining why intent could not be determined.
+
+CRITICAL:
+Do NOT default to is_opportunity = TRUE merely because no negative
+identifier fired. Absence of negatives is NOT positive intent.
+
+If unsure between FALSE and NULL, prefer NULL when intent is not clearly expressed.
+
+═══════════════════════════════════════
+── POSITIVE SIGNALS (required for is_opportunity = TRUE) ──
+═══════════════════════════════════════
+At least ONE of these must be clearly present in customer messages
+AFTER initial bot interaction AND demonstrate active engagement:
+
+  • asks for a quote, price, or "how much" for breakdown cover
+  • compares RAC against a competitor while shopping for cover
+    (e.g. "AA quoted me X, can you beat it?") AND no membership signal
+  • states they currently have no breakdown cover and is enquiring about getting some
+  • asks about levels/tiers of cover, family cover, or add-ons before holding a policy
+  • mentions buying cover for a vehicle they don't yet have cover on
+  • asks how to take out / sign up / start a NEW policy
+  • asks how to use Tesco Clubcard vouchers, voucher codes, discount codes,
+    or promo codes to buy RAC breakdown cover
+  • asks how to pay for membership or complete purchase
+  • confirms they have bought / signed up / completed cover during the chat
+
+NOT VALID positive signals on their own:
+
+  • "Buying breakdown cover" (bot selection)
+  • "I just want to get on your website"
+  • greetings only
+  • unclear or fragmented input without follow-up
+
+If the customer is ONLY asking for a phone number, a service, an account
+change, documents, or help with an existing policy/breakdown — that is
+NOT a positive signal, even if RAC products are mentioned in passing.
+
+═══════════════════════════════════════
+── NOT-OPPORTUNITY IDENTIFIERS ──
+═══════════════════════════════════════
+Set is_opportunity = false and use the matching key as not_opportunity_reason.
+If multiple apply, pick the dominant intent.
+
+Apply these ONLY if no positive new-sale intent is present OR the conversation
+remains purely service-based.
+
+"existing_policy"
+  The customer is or behaves as a current RAC member.
+  Triggers (any one is sufficient):
+    • "I'm a member" / "I have RAC" / "I'm with the RAC" / "I'm covered by you"
+    • "my cover" / "my policy" / "my membership" / "my plan"
+    • supplies a membership number, policy number, or customer reference
+    • mentions logging into the RAC app or account
+    • asks about adding a vehicle, driver, or upgrading existing cover
+    • references benefits they already hold (e.g. "my joining gift", "my free months")
+    • asks about claims, documents, certificates, or invoices for cover they hold
+
+"recent_policy_lapse"
+  The customer had a policy that ended/expired/was cancelled within the
+  last ~60 days and has not yet restarted.
+  Triggers:
+    • "my cover ended last week / last month"
+    • "I cancelled recently and want to..."
+    • "lapsed" / "expired" referencing a recent date
+    • returning ex-member referencing their previous cover
+
+"renewal_enquiry"
+  The customer is looking to renew an EXISTING policy.
+  Triggers:
+    • "due for renewal" / "renewing" / "my renewal"
+    • "my policy ends on..." asking about continuing
+    • renewal price discussion for cover they already hold
+    • received a renewal letter / email and is querying it
+
+"cancellation_enquiry"
+  The customer wants to cancel or stop an existing policy.
+  Triggers:
+    • "I want to cancel" / "stop my policy" / "end my cover"
+    • "cancel direct debit" / "stop the payment"
+    • complaint-driven cancellation request
+
+"policy_update"
+  The customer wants to change details on an EXISTING policy/account.
+  Triggers:
+    • change of address / change of vehicle / change of payment method
+    • update personal details (name, phone, email, bank)
+    • "I need to update my..." referring to held cover
+    • adding or removing a named driver / second vehicle on existing plan
+
+"opt_out"
+  The customer is requesting communication preferences changes or data
+  removal.
+  Triggers:
+    • "stop emailing me" / "unsubscribe" / "opt out"
+    • "remove my data" / GDPR / Subject Access Request
+    • marketing-preference change
+
+"breakdown_report"
+  The customer is dealing with a live or recent breakdown, OR is trying to
+  reach the breakdown assistance line, OR is asking how to report a breakdown.
+  Triggers:
+    • "I've broken down" / "my car won't start" / "stranded" / "at the roadside"
+    • "where is the recovery truck?" / "ETA on my recovery?"
+    • follow-up or chase on an open breakdown case
+    • asks for the BREAKDOWN NUMBER / breakdown phone number / breakdown
+      assistance number / recovery number / "the number to call when I break down"
+    • "how do I report a breakdown?" / "who do I call if I break down?"
+    • asks for the contact number used in an emergency / on the roadside
+
+"phone_line_complaint"
+  The customer cannot reach RAC by phone or is complaining about
+  call-centre wait times.
+  Triggers:
+    • "I've been on hold for X minutes"
+    • "no one answers the phone" / "can't get through" / "kept on hold"
+    • "your phone lines are awful"
+
+"myrac_enquiry"
+  The customer is asking about MyRAC — the online account portal or app.
+  Triggers:
+    • can't log in to MyRAC / RAC app
+    • password reset / locked out of MyRAC
+    • "where do I find X in MyRAC"
+    • app errors, missing documents in MyRAC, registration issues
+
+═══════════════════════════════════════
 Return:
-  "opportunity": {
-    "is_opportunity": boolean,
-    "not_opportunity_reason": string | null   (one of the categories above, or null if is_opportunity is true)
-    "reason_detail": string | null            (max 50 words explaining the classification)
-  }
+═══════════════════════════════════════
+"opportunity": {
+  "is_opportunity": boolean | null,
+  "not_opportunity_reason": string | null,
+  "reason_detail": string | null
+}
 `;
 
 const CHAT_RAC_QA = `═══════════════════════════════════════

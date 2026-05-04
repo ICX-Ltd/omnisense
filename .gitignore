@@ -8,3 +8,8 @@ node_modules/
 .env.*
 dist/
 build/
+
+# claude / local working files
+prompts/
+CLAUDE.md
+.claude/

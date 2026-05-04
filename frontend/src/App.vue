@@ -2,7 +2,7 @@
   <div v-if="booting" class="boot-screen">
     <div class="boot-card">
       <img class="boot-logo" :src="logoUrl" alt="Auto Ignite" />
-      <div class="boot-title">Loading Pulse...</div>
+      <div class="boot-title">Loading Omni-Sense...</div>
     </div>
   </div>
 

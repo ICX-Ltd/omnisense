@@ -220,6 +220,7 @@ function fmtDate(iso: string | null) {
 
 function opportunityReasonLabel(r: string) {
   const labels: Record<string, string> = {
+    __unclassified: "Unable to Classify",
     existing_policy: "Existing Policy",
     recent_policy_lapse: "Recent Policy (60 days)",
     renewal_enquiry: "Renewal Enquiry",
@@ -1404,7 +1405,7 @@ onMounted(async () => {
 
       <!-- Opportunity Classification -->
       <div
-        v-if="opportunityData && opportunityData.classified > 0"
+        v-if="opportunityData && (opportunityData.classified > 0 || opportunityData.unclassified > 0)"
         class="tile"
         style="margin-top: 14px"
       >
@@ -1429,6 +1430,10 @@ onMounted(async () => {
             <div class="opp-stat opp-stat--not">
               <div class="opp-stat-value">{{ opportunityData.not_opportunities }}</div>
               <div class="opp-stat-label">Not Opportunities</div>
+            </div>
+            <div class="opp-stat opp-stat--unclassified">
+              <div class="opp-stat-value">{{ opportunityData.unclassified || 0 }}</div>
+              <div class="opp-stat-label">Unable to Classify</div>
             </div>
             <div class="opp-stat">
               <div class="opp-stat-value">{{ opportunityData.classified > 0 ? Math.round(opportunityData.opportunities / opportunityData.classified * 100) : 0 }}%</div>
@@ -1495,6 +1500,39 @@ onMounted(async () => {
               >
                 <div class="drill-row-top">
                   <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
+                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                </div>
+                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unable to classify (attempted but ambiguous) -->
+          <div v-if="opportunityData.unclassified > 0">
+            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__unclassified')">
+              <div class="metric-left">
+                <span class="chip chip--secondary" style="font-size: 12px">{{ opportunityReasonLabel('__unclassified') }}</span>
+                <span class="hint" style="font-size: 11px; margin-left: 8px">Classification attempted but intent could not be determined</span>
+              </div>
+              <div class="metric-right">
+                <span class="count-pill">{{ opportunityData.unclassified }}</span>
+                <span class="expand-icon">{{ expandedOpportunityReason === '__unclassified' ? '&#9650;' : '&#9660;' }}</span>
+              </div>
+            </div>
+            <div v-if="expandedOpportunityReason === '__unclassified'" class="drill-panel">
+              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
+              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+              <div
+                v-else
+                v-for="ix in opportunityInteractions"
+                :key="ix.recordingId"
+                class="drill-row"
+                @click="openDetail(ix.recordingId)"
+              >
+                <div class="drill-row-top">
+                  <span class="chip chip--secondary" style="font-size: 11px">Unable to Classify</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
@@ -2453,6 +2491,10 @@ onMounted(async () => {
 
 .opp-stat--not .opp-stat-value {
   color: var(--danger, #ef4444);
+}
+
+.opp-stat--unclassified .opp-stat-value {
+  color: var(--muted, #6b7280);
 }
 
 /* ── RAC QA scoring in detail drawer ──────────────────────────────────────── */

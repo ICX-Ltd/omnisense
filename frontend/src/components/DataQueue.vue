@@ -49,7 +49,7 @@
                 v-model="searchText"
                 class="input"
                 style="flex: 1 1 180px"
-                placeholder="Search id, url, provider, status…"
+                placeholder="Search id, interactionId, tpsId, url, provider, status…"
               />
               <div class="filter-group">
                 <label class="label">From</label>
@@ -242,6 +242,8 @@ type Recording = {
   recordingUrl: string;
   status: string;
   interactionType: string | null;
+  interactionId: string | null;
+  interactionTpsId: string | null;
   campaign: string | null;
   lastError: string | null;
   createdAt: string;
@@ -253,13 +255,6 @@ type InsightMeta = {
   providerUsed?: string | null;
   model?: string | null;
 };
-
-function todayDateTimeLocal() {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  // datetime-local format: YYYY-MM-DDTHH:mm
-  return now.toISOString().slice(0, 16);
-}
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
@@ -304,7 +299,7 @@ const newProvider = ref<TranscriptionProvider>(TranscriptionProvider.Deepgram);
 const status = ref<string>("");
 const filterType = ref<string>("");
 const filterCampaign = ref<string>("");
-const dateFrom = ref<string>(todayDateTimeLocal());
+const dateFrom = ref<string>("");
 const dateTo = ref<string>("");
 const sortOrder = ref<"DESC" | "ASC">("DESC");
 const resultLimit = ref(250);
@@ -336,6 +331,8 @@ const filteredRecordings = computed(() => {
   if (!q) return recordings.value;
   return recordings.value.filter((r) =>
     r.id.toLowerCase().includes(q) ||
+    (r.interactionId ?? "").toLowerCase().includes(q) ||
+    (r.interactionTpsId ?? "").toLowerCase().includes(q) ||
     (r.recordingUrl ?? "").toLowerCase().includes(q) ||
     (r.provider ?? "").toLowerCase().includes(q) ||
     (r.insightProviderUsed ?? "").toLowerCase().includes(q) ||

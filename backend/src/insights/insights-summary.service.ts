@@ -1776,15 +1776,17 @@ ${prompt}
       opportunities: string;
       not_opportunities: string;
       classified: string;
+      unclassified: string;
     }>>(
       `SELECT
         COUNT(1) AS total,
         SUM(CASE WHEN ii.is_opportunity = 1 THEN 1 ELSE 0 END) AS opportunities,
         SUM(CASE WHEN ii.is_opportunity = 0 THEN 1 ELSE 0 END) AS not_opportunities,
-        SUM(CASE WHEN ii.is_opportunity IS NOT NULL THEN 1 ELSE 0 END) AS classified
+        SUM(CASE WHEN ii.is_opportunity IS NOT NULL THEN 1 ELSE 0 END) AS classified,
+        SUM(CASE WHEN ii.is_opportunity IS NULL AND ii.opportunity_json IS NOT NULL THEN 1 ELSE 0 END) AS unclassified
       FROM app.interaction_insights ii
       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
-      WHERE ii.is_opportunity IS NOT NULL
+      WHERE (ii.is_opportunity IS NOT NULL OR ii.opportunity_json IS NOT NULL)
         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
         ${filterClause}`,
       [from, to, ...extraParams],
@@ -1811,6 +1813,7 @@ ${prompt}
       opportunities: parseInt(stats?.opportunities ?? '0', 10),
       not_opportunities: parseInt(stats?.not_opportunities ?? '0', 10),
       classified: parseInt(stats?.classified ?? '0', 10),
+      unclassified: parseInt(stats?.unclassified ?? '0', 10),
       reason_breakdown: reasonBreakdown.map((r) => ({
         reason: r.reason,
         count: parseInt(r.count, 10),
@@ -1825,10 +1828,18 @@ ${prompt}
     const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes);
     const paramOffset = 2 + extraParams.length;
 
-    const isOpportunityFilter = reason === '__opportunity'
-      ? `ii.is_opportunity = 1`
-      : `ii.is_opportunity = 0 AND ii.not_opportunity_reason = @${paramOffset}`;
-    const extraQueryParams = reason === '__opportunity' ? [] : [reason];
+    let isOpportunityFilter: string;
+    let extraQueryParams: string[];
+    if (reason === '__opportunity') {
+      isOpportunityFilter = `ii.is_opportunity = 1`;
+      extraQueryParams = [];
+    } else if (reason === '__unclassified') {
+      isOpportunityFilter = `ii.is_opportunity IS NULL AND ii.opportunity_json IS NOT NULL`;
+      extraQueryParams = [];
+    } else {
+      isOpportunityFilter = `ii.is_opportunity = 0 AND ii.not_opportunity_reason = @${paramOffset}`;
+      extraQueryParams = [reason];
+    }
 
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
