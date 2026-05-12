@@ -143,6 +143,30 @@ export class InteractionInsight {
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   objection_assessments_json!: string | null;
 
+  // ── Chat response time metrics ───────────────────────────────────────────
+  // Populated only for chats (transcripts with per-message timestamps).
+  // Auto-messages (idle prompts) are excluded from these measurements.
+
+  @Column({ type: 'float', nullable: true })
+  chat_response_avg_seconds!: number | null;
+
+  @Column({ type: 'float', nullable: true })
+  chat_response_longest_seconds!: number | null;
+
+  @Column({ type: 'float', nullable: true })
+  chat_response_last_seconds!: number | null;
+
+  @Index()
+  @Column({ type: 'int', nullable: true })
+  chat_response_sla_breach_count!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  chat_response_measured_count!: number | null;
+
+  // Full per-turn pair list (customer→agent gaps with is_auto_message flag).
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  chat_response_metrics_json!: string | null;
+
   // ── Opportunity classification ───────────────────────────────────────────
 
   @Index()

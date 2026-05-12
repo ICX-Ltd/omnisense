@@ -60,6 +60,43 @@ export class InsightsController {
 
   // ── Ops endpoints ──────────────────────────────────────────────────────────
 
+  @Get('ops/chat-response-time')
+  async opsChatResponseTime(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getChatResponseTimeMetrics(
+      fromDate, toDate, filter, campaign, agent,
+      parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
+  // Recompute chat response-time metrics from the transcript text for every
+  // chat in the supplied filter window. Always overwrites — backend code is
+  // the canonical source of these numbers.
+  @Post('ops/recompute-chat-response-time')
+  async opsRecomputeChatResponseTime(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.recomputeChatResponseTimeMetrics(
+      fromDate, toDate, filter, campaign, agent,
+      parseExcludeOutcomes(excludeOutcomesRaw),
+    );
+  }
+
   @Get('ops/dimensions')
   async opsDimensions(
     @Query('from') from?: string,

@@ -15,7 +15,15 @@ import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { BatchJob } from '../db/entities/batch-job.entity';
 
 import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
-import { InsightsService, cleanJsonText } from '../insights/insights.service';
+import {
+  ChatResponseMetrics,
+  InsightsService,
+  cleanJsonText,
+} from '../insights/insights.service';
+import {
+  aggregateChatResponseMetrics,
+  computeChatResponseMetricsFromTranscript,
+} from '../insights/chat-response-time';
 import { InsightsProviderName } from '../insights/types/insights-provider.type';
 
 // Bounded string columns on InteractionInsight — declared length in characters.
@@ -344,6 +352,16 @@ export class RecordingsService {
 
       const { rawJsonText, parsed, providerUsed, model } = result;
       const cs = parsed.client_services;
+      // Chat response-time metrics are computed deterministically from the
+      // transcript text — the LLM is not asked for them. For calls we leave
+      // the metrics null.
+      const isChat = rec.interactionType === 'chat';
+      const chatResponseMetrics: ChatResponseMetrics | null = isChat
+        ? computeChatResponseMetricsFromTranscript(transcript.text, rec.campaign)
+        : null;
+      const chatResponseAgg = aggregateChatResponseMetrics(
+        chatResponseMetrics ?? undefined,
+      );
 
       const insightPayload = {
         recordingId,
@@ -415,6 +433,16 @@ export class RecordingsService {
         // Objection handling assessment (campaign-specific)
         objection_assessments_json: parsed.objection_assessment
           ? JSON.stringify(parsed.objection_assessment)
+          : null,
+
+        // Chat agent response-time metrics (chats only; null for calls)
+        chat_response_avg_seconds: chatResponseAgg.avgSeconds,
+        chat_response_longest_seconds: chatResponseAgg.longestSeconds,
+        chat_response_last_seconds: chatResponseAgg.lastSeconds,
+        chat_response_sla_breach_count: chatResponseAgg.slaBreachCount,
+        chat_response_measured_count: chatResponseAgg.measuredCount,
+        chat_response_metrics_json: chatResponseMetrics
+          ? JSON.stringify(chatResponseMetrics)
           : null,
 
         // Opportunity classification

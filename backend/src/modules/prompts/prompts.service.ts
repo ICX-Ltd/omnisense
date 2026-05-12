@@ -297,6 +297,9 @@ export class PromptsService implements OnModuleInit {
       'chat.operations_schema.default',
     );
 
+    // Chat response-time metrics are computed in code from the transcript
+    // (backend/src/insights/chat-response-time.ts) — no LLM prompt section.
+
     const racIdleRule = isRac
       ? await this.getActiveByKey('chat.rac.idle_rule')
       : null;

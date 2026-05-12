@@ -83,6 +83,19 @@ type ObjectionCategoryAssessment = {
   comment: string;
 };
 
+export type ChatResponsePair = {
+  customer_at: string | null;
+  agent_at: string | null;
+  gap_seconds: number | null;
+  agent_message_preview: string;
+  is_auto_message: boolean;
+  is_last_pair: boolean;
+};
+
+export type ChatResponseMetrics = {
+  pairs: ChatResponsePair[];
+};
+
 type ObjectionAssessment = {
   categories: Record<string, ObjectionCategoryAssessment>;
   generic_checklist: {

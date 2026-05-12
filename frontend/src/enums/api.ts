@@ -25,6 +25,8 @@ export const ApiPath = {
   OpsOpportunity: "/uiapi/insights/ops/opportunity",
   OpsInteractionsByOpportunityReason: "/uiapi/insights/ops/interactions-by-opportunity-reason",
   OpsInteractionDetail: "/uiapi/insights/ops/interaction-detail",
+  OpsChatResponseTime: "/uiapi/insights/ops/chat-response-time",
+  OpsRecomputeChatResponseTime: "/uiapi/insights/ops/recompute-chat-response-time",
 
   SurveyFilters: "/uiapi/survey/filters",
   SurveyOverview: "/uiapi/survey/overview",

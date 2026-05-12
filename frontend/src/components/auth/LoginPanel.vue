@@ -5,10 +5,6 @@
         <img class="auth-logo" :src="logoUrl" alt="Auto Ignite" />
         <div>
           <h1 class="auth-title">Omni-Sense</h1>
-          <p class="auth-subtitle">
-            Sign in to access transcription, insights extraction, and batch
-            processing.
-          </p>
         </div>
       </div>
 
@@ -56,6 +52,8 @@
           {{ submitting ? "Signing in..." : "Sign in" }}
         </button>
       </form>
+
+      <div class="auth-version">v{{ APP_VERSION }}</div>
     </div>
   </div>
 </template>
@@ -64,6 +62,7 @@
 import { ref } from "vue";
 import logoUrl from "../../assets/ai-icon.png";
 import { useAuth } from "../../composables/useAuth";
+import { APP_VERSION } from "../../version";
 
 const emit = defineEmits<{
   (
@@ -119,6 +118,16 @@ async function submit() {
   background: #f4f7fb;
 }
 
+.auth-version {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
 .auth-card {
   width: 100%;
   max-width: 460px;
@@ -149,13 +158,6 @@ async function submit() {
   font-weight: 800;
   color: #fff;
   letter-spacing: 0.02em;
-}
-
-.auth-subtitle {
-  margin: 6px 0 0;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 0.95rem;
-  line-height: 1.45;
 }
 
 .auth-form {

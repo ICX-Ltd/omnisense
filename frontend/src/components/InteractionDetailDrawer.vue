@@ -34,6 +34,11 @@
               :title="qaLowScoreTitle"
             >QA low score</span>
             <span
+              v-if="chatResponseBreached"
+              class="drawer-flag drawer-flag--rt-breach"
+              :title="chatResponseBreachTitle"
+            >SLA breach</span>
+            <span
               v-if="detailData?.insight?.overall_score != null"
               class="drawer-header-score"
               :style="{ background: scoreColorSolid(detailData.insight.overall_score) }"
@@ -149,6 +154,79 @@
                   <div class="drawer-section-title">Summary</div>
                   <p style="margin: 0 0 8px; font-weight: 600">{{ detailData.insight.summary_short }}</p>
                   <p v-if="detailData.insight.summary_detailed" style="margin: 0; line-height: 1.6; color: var(--ink)">{{ detailData.insight.summary_detailed }}</p>
+                </div>
+
+                <!-- Chat Response Time -->
+                <div v-if="chatResponse" class="drawer-section">
+                  <div class="drawer-section-title">
+                    Chat Response Time
+                    <span
+                      v-if="chatResponseBreached"
+                      class="chip chip--danger"
+                      style="font-size: 10px; margin-left: 8px"
+                      :title="chatResponseBreachTitle"
+                    >{{ chatResponse.sla_breach_count }} SLA breach{{ chatResponse.sla_breach_count === 1 ? '' : 'es' }}</span>
+                    <span
+                      v-else-if="chatResponse.measured_count > 0"
+                      class="chip chip--success"
+                      style="font-size: 10px; margin-left: 8px"
+                      title="No agent reply exceeded the SLA in this chat."
+                    >Within SLA</span>
+                  </div>
+                  <div class="stats-strip" style="margin-bottom: 10px">
+                    <div class="stat">
+                      <div class="stat-label">Avg</div>
+                      <div class="stat-value" :class="responseTimeChip(chatResponse.avg_seconds, chatResponse.sla_threshold_seconds)">{{ fmtSeconds(chatResponse.avg_seconds) }}</div>
+                    </div>
+                    <div class="stat">
+                      <div class="stat-label">Longest</div>
+                      <div class="stat-value" :class="responseTimeChip(chatResponse.longest_seconds, chatResponse.sla_threshold_seconds)">{{ fmtSeconds(chatResponse.longest_seconds) }}</div>
+                    </div>
+                    <div class="stat">
+                      <div class="stat-label">Last reply</div>
+                      <div class="stat-value" :class="responseTimeChip(chatResponse.last_seconds, chatResponse.sla_threshold_seconds)">{{ fmtSeconds(chatResponse.last_seconds) }}</div>
+                    </div>
+                    <div class="stat">
+                      <div class="stat-label">Turns</div>
+                      <div class="stat-value chip chip--secondary" style="font-size: 12px">{{ chatResponse.measured_count ?? 0 }}</div>
+                    </div>
+                  </div>
+                  <div v-if="chatResponse.pairs?.length" class="rt-pairs">
+                    <div
+                      v-for="(p, i) in chatResponse.pairs"
+                      :key="i"
+                      class="rt-pair"
+                      :class="{
+                        'rt-pair--auto': p.is_auto_message,
+                        'rt-pair--breach': !p.is_auto_message && typeof p.gap_seconds === 'number' && p.gap_seconds > chatResponse.sla_threshold_seconds,
+                        'rt-pair--unanswered': !p.is_auto_message && p.gap_seconds === null && p.agent_at === null,
+                      }"
+                    >
+                      <div class="rt-pair-meta">
+                        <span v-if="p.customer_at" class="rt-pair-ts mono">{{ p.customer_at }}</span>
+                        <span v-if="p.customer_at && p.agent_at" class="rt-pair-arrow">→</span>
+                        <span v-if="p.agent_at" class="rt-pair-ts mono">{{ p.agent_at }}</span>
+                        <span
+                          v-if="p.is_auto_message"
+                          class="chip chip--secondary"
+                          style="font-size: 10px"
+                        >auto-message</span>
+                        <span
+                          v-else-if="p.gap_seconds === null && p.agent_at === null"
+                          class="chip chip--warning"
+                          style="font-size: 10px"
+                        >no reply</span>
+                        <span
+                          v-else-if="typeof p.gap_seconds === 'number'"
+                          class="chip"
+                          :class="responseTimeChip(p.gap_seconds, chatResponse.sla_threshold_seconds)"
+                          style="font-size: 10px"
+                        >{{ fmtSeconds(p.gap_seconds) }}</span>
+                        <span v-if="p.is_last_pair" class="chip chip--secondary" style="font-size: 10px">last</span>
+                      </div>
+                      <div v-if="p.agent_message_preview" class="rt-pair-preview">"{{ p.agent_message_preview }}"</div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Coaching -->
@@ -268,9 +346,25 @@
 
                 <!-- Transcript / Chat -->
                 <div v-if="detailData.transcript" class="drawer-section">
-                  <div class="drawer-section-title">{{ isChat ? 'Chat Conversation' : 'Transcript' }}</div>
+                  <div class="drawer-section-title">
+                    {{ isChat ? 'Chat Conversation' : 'Transcript' }}
+                    <div v-if="isChat && chatMessages.length" class="chat-view-toggle">
+                      <button
+                        type="button"
+                        class="chat-view-btn"
+                        :class="{ 'chat-view-btn--active': chatView === 'bubbles' }"
+                        @click="chatView = 'bubbles'"
+                      >Chat</button>
+                      <button
+                        type="button"
+                        class="chat-view-btn"
+                        :class="{ 'chat-view-btn--active': chatView === 'raw' }"
+                        @click="chatView = 'raw'"
+                      >Raw</button>
+                    </div>
+                  </div>
 
-                  <div v-if="isChat && chatMessages.length" class="chat-thread">
+                  <div v-if="isChat && chatMessages.length && chatView === 'bubbles'" class="chat-thread">
                     <div
                       v-for="msg in chatMessages"
                       :key="msg.id"
@@ -305,10 +399,13 @@ const emit = defineEmits<{ (e: "close"): void }>();
 
 const detailData = ref<any>(null);
 const loadingDetail = ref(false);
+// Default to the styled bubble view; user can opt into raw transcript per open.
+const chatView = ref<"bubbles" | "raw">("bubbles");
 
 watch(
   () => props.recordingId,
   async (id) => {
+    chatView.value = "bubbles";
     if (!id) {
       detailData.value = null;
       return;
@@ -480,6 +577,36 @@ const qaLowScoreTitle = computed(() => {
     : "One or more QA questions were answered 'no'.";
 });
 
+// ─── chat response time ─────────────────────────────────────────────────────
+const chatResponse = computed<any>(
+  () => detailData.value?.insight?.chat_response ?? null,
+);
+const chatResponseBreached = computed(
+  () => Boolean(chatResponse.value?.sla_breached),
+);
+const chatResponseBreachTitle = computed(() => {
+  const r = chatResponse.value;
+  if (!r) return "";
+  const thresh = Math.round((r.sla_threshold_seconds ?? 180) / 60);
+  return `${r.sla_breach_count} of ${r.measured_count} agent replies took longer than the ${thresh}-minute SLA.`;
+});
+
+function fmtSeconds(v: number | null | undefined) {
+  if (typeof v !== "number" || !isFinite(v)) return "n/a";
+  const rounded = Math.round(v);
+  if (rounded < 60) return `${rounded}s`;
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+function responseTimeChip(v: number | null | undefined, threshold: number) {
+  if (typeof v !== "number") return "chip chip--secondary";
+  if (v > threshold) return "chip bucket-chip--below5";
+  if (v > 60) return "chip bucket-chip--5to7";
+  return "chip bucket-chip--9plus";
+}
+
 interface ChatMessage {
   id: number;
   source: string;
@@ -637,6 +764,71 @@ const chatMessages = computed<ChatMessage[]>(() => {
 .drawer-flag--qa-low {
   background: #be185d;
 }
+.drawer-flag--rt-breach {
+  background: #c2410c;
+}
+
+/* Chat response-time per-turn pair list */
+.rt-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.rt-pair {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.03);
+  border-left: 3px solid transparent;
+}
+
+.rt-pair--auto {
+  opacity: 0.6;
+  border-left-color: #94a3b8;
+}
+
+.rt-pair--breach {
+  background: rgba(220, 38, 38, 0.08);
+  border-left-color: #dc2626;
+}
+
+.rt-pair--unanswered {
+  background: rgba(234, 88, 12, 0.08);
+  border-left-color: #ea580c;
+}
+
+.rt-pair-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.rt-pair-ts {
+  color: var(--ink, #1f2937);
+  font-weight: 600;
+}
+
+.rt-pair-arrow {
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+}
+
+.rt-pair-preview {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  font-style: italic;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .drawer-close {
   background: rgba(255, 255, 255, 0.15);
@@ -705,6 +897,37 @@ const chatMessages = computed<ChatMessage[]>(() => {
   letter-spacing: 0.06em;
   color: var(--brand, #6366f1);
   margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-view-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chat-view-btn {
+  background: transparent;
+  border: none;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+
+.chat-view-btn:not(:last-child) {
+  border-right: 1px solid var(--border, #e5e7eb);
+}
+
+.chat-view-btn--active {
+  background: var(--brand, #6366f1);
+  color: #fff;
 }
 
 .drawer-meta-grid {

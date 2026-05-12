@@ -288,8 +288,6 @@ Extract structured insights from the chat transcript below.
 Return ONLY valid JSON matching the schema exactly. No markdown, no extra keys, no commentary.
 {{campaign_line}}
 {{idle_rule_section}}
-Note: Response time and accept time SLAs cannot be measured from transcript text alone — leave those fields null.
-
 ═══════════════════════════════════════
 SECTION 1 — CONTACT & CONVERSATION
 ═══════════════════════════════════════
@@ -392,6 +390,13 @@ Quality rules:
 Chat Transcript:
 """{{transcript}}"""
 `.trim();
+
+// NOTE: chat response-time metrics used to live here as the "chat.response_time"
+// + "chat.response_time_schema" prompt fragments. The LLM was unreliable at
+// timestamp pairing, so the feature now runs deterministically in code —
+// see backend/src/insights/chat-response-time.ts. The two prompt fragments
+// have been removed from the SEED_FRAGMENTS array below; existing DB rows
+// are deactivated by the migration in backend/sql/.
 
 // ─── CHAT OPERATIONS (default / non-RAC) ─────────────────────────────────────
 
@@ -1241,7 +1246,7 @@ export const SEED_FRAGMENTS: SeedFragment[] = [
     campaign: null,
     label: 'Chat — base template',
     notes:
-      'Placeholders: {{campaign_line}}, {{idle_rule_section}}, {{opportunity_section}}, {{operations_section}}, {{qa_section}}, {{objection_section}}, {{operations_schema}}, {{qa_schema}}, {{objection_schema}}, {{transcript}}.',
+      'Placeholders: {{campaign_line}}, {{idle_rule_section}}, {{opportunity_section}}, {{operations_section}}, {{qa_section}}, {{objection_section}}, {{operations_schema}}, {{qa_schema}}, {{objection_schema}}, {{transcript}}. (Chat response-time metrics are computed in code, not via the LLM.)',
     body: CHAT_BASE,
   },
   {

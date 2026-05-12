@@ -164,6 +164,16 @@ const objectionCatInteractions = ref<any[]>([]);
 const loadingObjectionCat = ref(false);
 const objectionOppsOnly = ref(false);
 
+// Chat response-time state (chats / all only)
+const chatResponseData = ref<any>(null);
+const showChatResponse = computed(() => interactionFilter.value !== "calls");
+
+// Returned by the backend only when an agent filter is in effect. Holds the
+// all-agents baseline summary the UI overlays as comparison figures.
+const chatResponseComparison = computed(
+  () => chatResponseData.value?.comparison?.summary ?? null,
+);
+
 // Opportunity state
 const opportunityData = ref<any>(null);
 const expandedOpportunityReason = ref<string | null>(null);
@@ -211,6 +221,42 @@ function scoreChip(_v: number | null) {
   if (_v >= 7) return "chip bucket-chip--7to9";
   if (_v >= 5) return "chip bucket-chip--5to7";
   return "chip bucket-chip--below5";
+}
+
+// Format a duration in seconds as e.g. "1m 23s" / "45s" / "n/a"
+function fmtSeconds(v: number | null | undefined) {
+  if (typeof v !== "number" || !isFinite(v)) return "n/a";
+  const rounded = Math.round(v);
+  if (rounded < 60) return `${rounded}s`;
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+// Colour chip for response-time scalars — under 60s green, under SLA (180) orange, breach red.
+function responseTimeChip(v: number | null | undefined) {
+  if (typeof v !== "number") return "chip chip--secondary";
+  if (v > 180) return "chip bucket-chip--below5";
+  if (v > 60) return "chip bucket-chip--5to7";
+  return "chip bucket-chip--9plus";
+}
+
+// Signed delta for "agent vs all-agents" — negative is good (faster).
+function chatRtDelta(agentVal: number | null | undefined, allVal: number | null | undefined) {
+  if (typeof agentVal !== "number" || typeof allVal !== "number") return "";
+  const delta = Math.round(agentVal - allVal);
+  if (delta === 0) return "0s";
+  const abs = Math.abs(delta);
+  const fmt = abs < 60 ? `${abs}s` : `${Math.round(abs / 60)}m`;
+  return `${delta > 0 ? "+" : "−"}${fmt}`;
+}
+
+function chatRtDeltaClass(agentVal: number | null | undefined, allVal: number | null | undefined) {
+  if (typeof agentVal !== "number" || typeof allVal !== "number") return "";
+  // For response time, lower is better — green when agent is faster than baseline.
+  if (agentVal < allVal) return "dim-delta--positive";
+  if (agentVal > allVal) return "dim-delta--negative";
+  return "";
 }
 
 function fmtDate(iso: string | null) {
@@ -414,14 +460,18 @@ async function loadAll() {
   detailId.value = null;
 
   try {
-    const [opsRes, dimRes, oppRes] = await Promise.all([
+    const [opsRes, dimRes, oppRes, chatRtRes] = await Promise.all([
       axios.get(ApiPath.InsightsSummaryOperations, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsDimensions, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsOpportunity, { params: sharedParams.value }).catch(() => ({ data: null })),
+      showChatResponse.value
+        ? axios.get(ApiPath.OpsChatResponseTime, { params: sharedParams.value }).catch(() => ({ data: null }))
+        : Promise.resolve({ data: null }),
     ]);
     opsData.value = opsRes.data;
     dimData.value = dimRes.data;
     opportunityData.value = oppRes.data;
+    chatResponseData.value = chatRtRes.data;
     await fetchObjectionAssessments();
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
@@ -799,7 +849,8 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Agents in dataset -->
+      <!-- Agents in dataset (positioned before Chat Response Time so users
+           can pick an agent first, then see their comparison numbers below) -->
       <div v-if="agentsInData.length && !agent" class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <div class="tile-icon">&#128101;</div>
@@ -820,6 +871,181 @@ onMounted(async () => {
               <div class="agent-card-stats">
                 <span :class="scoreChip(a.avg_score)" style="font-size: 11px">{{ fmtScore(a.avg_score) }}</span>
                 <span class="agent-card-count">{{ a.count }} interactions</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat response time (chats / all filters only) -->
+      <div
+        v-if="showChatResponse && chatResponseData && (chatResponseData.summary?.chats_measured ?? 0) > 0"
+        class="tile"
+        style="margin-top: 14px"
+      >
+        <div class="tile-head">
+          <div class="tile-icon">&#9201;</div>
+          <div class="tile-text">
+            <div class="tile-title">Chat Response Time</div>
+            <div class="tile-desc">
+              <template v-if="chatResponseComparison">
+                Agent reply speed for <strong>{{ agent }}</strong> across {{ chatResponseData.summary.chats_measured }} chat{{ chatResponseData.summary.chats_measured === 1 ? '' : 's' }}
+                &middot; compared against {{ chatResponseComparison.chats_measured }} all-agent chat{{ chatResponseComparison.chats_measured === 1 ? '' : 's' }}
+              </template>
+              <template v-else>
+                Agent reply speed across {{ chatResponseData.summary.chats_measured }} chat{{ chatResponseData.summary.chats_measured === 1 ? '' : 's' }}
+              </template>
+              &middot; SLA threshold {{ Math.round((chatResponseData.sla_threshold_seconds ?? 180) / 60) }} min
+              &middot; auto-messages excluded
+            </div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div v-if="chatResponseComparison" class="dim-legend" style="margin-bottom: 12px">
+            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
+            <span class="dim-legend-item"><span class="dim-swatch dim-swatch--overall" /> All agents</span>
+          </div>
+
+          <div class="summary-grid" style="grid-template-columns: repeat(4, minmax(140px, 1fr));">
+            <div class="score-panel">
+              <div class="score-panel-head"><span class="score-panel-title">Avg Response</span></div>
+              <div class="score-panel-body">
+                <div class="mini-stat">
+                  <div class="mini-stat-value" :class="responseTimeChip(chatResponseData.summary.avg_response_seconds)">
+                    {{ fmtSeconds(chatResponseData.summary.avg_response_seconds) }}
+                  </div>
+                  <div class="mini-stat-label">
+                    <template v-if="chatResponseComparison">
+                      vs <span class="chat-rt-compare">{{ fmtSeconds(chatResponseComparison.avg_response_seconds) }}</span>
+                      <span class="chat-rt-delta" :class="chatRtDeltaClass(chatResponseData.summary.avg_response_seconds, chatResponseComparison.avg_response_seconds)">{{ chatRtDelta(chatResponseData.summary.avg_response_seconds, chatResponseComparison.avg_response_seconds) }}</span>
+                    </template>
+                    <template v-else>across all turns</template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="score-panel">
+              <div class="score-panel-head"><span class="score-panel-title">Longest Response</span></div>
+              <div class="score-panel-body">
+                <div class="mini-stat">
+                  <div class="mini-stat-value" :class="responseTimeChip(chatResponseData.summary.max_longest_seconds)">
+                    {{ fmtSeconds(chatResponseData.summary.max_longest_seconds) }}
+                  </div>
+                  <div class="mini-stat-label">
+                    <template v-if="chatResponseComparison">
+                      vs <span class="chat-rt-compare">{{ fmtSeconds(chatResponseComparison.max_longest_seconds) }}</span>
+                      <span class="chat-rt-delta" :class="chatRtDeltaClass(chatResponseData.summary.max_longest_seconds, chatResponseComparison.max_longest_seconds)">{{ chatRtDelta(chatResponseData.summary.max_longest_seconds, chatResponseComparison.max_longest_seconds) }}</span>
+                    </template>
+                    <template v-else>worst single gap</template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="score-panel">
+              <div class="score-panel-head"><span class="score-panel-title">Last-Response Avg</span></div>
+              <div class="score-panel-body">
+                <div class="mini-stat">
+                  <div class="mini-stat-value" :class="responseTimeChip(chatResponseData.summary.avg_last_response_seconds)">
+                    {{ fmtSeconds(chatResponseData.summary.avg_last_response_seconds) }}
+                  </div>
+                  <div class="mini-stat-label">
+                    <template v-if="chatResponseComparison">
+                      vs <span class="chat-rt-compare">{{ fmtSeconds(chatResponseComparison.avg_last_response_seconds) }}</span>
+                      <span class="chat-rt-delta" :class="chatRtDeltaClass(chatResponseData.summary.avg_last_response_seconds, chatResponseComparison.avg_last_response_seconds)">{{ chatRtDelta(chatResponseData.summary.avg_last_response_seconds, chatResponseComparison.avg_last_response_seconds) }}</span>
+                    </template>
+                    <template v-else>final customer → agent</template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="score-panel">
+              <div class="score-panel-head"><span class="score-panel-title">SLA Breaches</span></div>
+              <div class="score-panel-body">
+                <div class="mini-stat">
+                  <div
+                    class="mini-stat-value"
+                    :class="(chatResponseData.summary.sla_breach_total ?? 0) > 0 ? 'chip bucket-chip--below5' : 'chip bucket-chip--9plus'"
+                  >
+                    {{ chatResponseData.summary.sla_breach_total ?? 0 }}
+                  </div>
+                  <div class="mini-stat-label">
+                    {{ chatResponseData.summary.chats_with_breach ?? 0 }} chats &middot;
+                    {{
+                      chatResponseData.summary.sla_breach_rate !== null
+                        ? (chatResponseData.summary.sla_breach_rate * 100).toFixed(1) + '% of turns'
+                        : 'no turns'
+                    }}
+                    <template v-if="chatResponseComparison">
+                      <br />
+                      vs <span class="chat-rt-compare">{{ chatResponseComparison.sla_breach_total }}</span> breach{{ chatResponseComparison.sla_breach_total === 1 ? '' : 'es' }}
+                      ({{ chatResponseComparison.sla_breach_rate !== null ? (chatResponseComparison.sla_breach_rate * 100).toFixed(1) + '%' : '—' }} all agents)
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="chatResponseData.worst_by_agent?.length"
+            style="margin-top: 14px"
+          >
+            <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Agents</div>
+            <div
+              v-for="row in chatResponseData.worst_by_agent"
+              :key="row.agent"
+              class="drill-row"
+            >
+              <div class="drill-row-top">
+                <strong>{{ row.agent }}</strong>
+                <span class="chip chip--secondary" style="font-size: 11px">{{ row.chats }} chat{{ row.chats === 1 ? '' : 's' }}</span>
+                <span
+                  :class="row.sla_breach_count > 0 ? 'chip bucket-chip--below5' : 'chip chip--secondary'"
+                  style="font-size: 11px"
+                >
+                  {{ row.sla_breach_count }} SLA breach{{ row.sla_breach_count === 1 ? '' : 'es' }}
+                </span>
+              </div>
+              <div class="drill-row-summary">
+                Avg
+                <span :class="responseTimeChip(row.avg_response_seconds)">{{ fmtSeconds(row.avg_response_seconds) }}</span>
+                &middot; Longest
+                <span :class="responseTimeChip(row.max_longest_seconds)">{{ fmtSeconds(row.max_longest_seconds) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="chatResponseData.slowest_chats?.length"
+            style="margin-top: 14px"
+          >
+            <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Chats</div>
+            <div
+              v-for="row in chatResponseData.slowest_chats"
+              :key="row.recordingId"
+              class="drill-row"
+              @click="detailId = row.recordingId"
+            >
+              <div class="drill-row-top">
+                <span :class="responseTimeChip(row.longest_seconds)" style="font-size: 11px">
+                  {{ fmtSeconds(row.longest_seconds) }} longest
+                </span>
+                <span class="chip chip--secondary" style="font-size: 11px">{{ row.agent || 'unknown' }}</span>
+                <span
+                  v-if="(row.sla_breach_count ?? 0) > 0"
+                  class="chip bucket-chip--below5"
+                  style="font-size: 11px"
+                >
+                  {{ row.sla_breach_count }} SLA breach{{ row.sla_breach_count === 1 ? '' : 'es' }}
+                </span>
+                <span class="mono" style="font-size: 11px; opacity: 0.6">{{ String(row.recordingId).slice(0, 8) }}</span>
+              </div>
+              <div class="drill-row-summary">{{ row.summary_short || '(no summary)' }}</div>
+              <div class="muted" style="margin-top: 3px; font-size: 12px">
+                Avg {{ fmtSeconds(row.avg_seconds) }} &middot; Last {{ fmtSeconds(row.last_seconds) }}
               </div>
             </div>
           </div>
@@ -2036,6 +2262,18 @@ onMounted(async () => {
 
 .dim-delta--negative {
   color: var(--danger, #ef4444);
+}
+
+/* Chat response time — agent vs all-agents comparison overlay */
+.chat-rt-compare {
+  font-weight: 600;
+  color: var(--ink, #1f2937);
+}
+
+.chat-rt-delta {
+  margin-left: 4px;
+  font-weight: 600;
+  font-size: 11px;
 }
 
 /* Colour-coded score chips for overall vs agent */

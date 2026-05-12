@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { InsightsProvider } from "@/enums/api";
+import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 
 type SectionKey = "summary" | "actions" | "lastRun" | "history";
@@ -244,6 +244,61 @@ async function runBatchInsightsChats() {
   }
 }
 
+// ── Chat response-time recompute ────────────────────────────────────────────
+// Walks every chat in the supplied date range, parses its transcript and
+// rewrites the chat_response_metrics_json + scalar columns. Computed in
+// backend code — no LLM involvement.
+const startingRecomputeRt = ref(false);
+const recomputeRtFrom = ref(defaultFromIso());
+const recomputeRtTo = ref(defaultToIso());
+const recomputeRtResult = ref<{
+  candidates: number;
+  processed: number;
+  skipped: number;
+  errored: number;
+  errors: Array<{ recordingId: string; message: string }>;
+} | null>(null);
+
+function defaultFromIso() {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return d.toISOString().slice(0, 10);
+}
+function defaultToIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function runRecomputeChatResponseTime() {
+  startingRecomputeRt.value = true;
+  recomputeRtResult.value = null;
+  error.value = "";
+  try {
+    // Backend honours from/to inclusive of the day boundaries.
+    const params: Record<string, string> = {
+      filterKey: "chats",
+      from: recomputeRtFrom.value,
+      // Make 'to' exclusive of the next day so the user-typed end-date is
+      // included end-to-end.
+      to: new Date(
+        new Date(recomputeRtTo.value).getTime() + 24 * 60 * 60 * 1000,
+      )
+        .toISOString()
+        .slice(0, 10),
+    };
+    const res = await axios.post(ApiPath.OpsRecomputeChatResponseTime, null, {
+      params,
+    });
+    recomputeRtResult.value = res.data;
+  } catch (e: any) {
+    error.value =
+      e?.response?.data?.message ||
+      e?.message ||
+      "Recompute chat response time failed";
+  } finally {
+    startingRecomputeRt.value = false;
+  }
+}
+
 const totalRows = computed(() => summary.value?.totalRows ?? 0);
 const callStatusEntries = computed(() =>
   Object.entries(summary.value?.calls?.byStatus ?? {})
@@ -427,6 +482,64 @@ onUnmounted(stopPolling);
               <button class="btn btn--secondary" :disabled="insightsChatsDisabled" @click="runBatchInsightsChats">
                 {{ startingInsightsChats ? "Starting..." : hasRunningJob("insights_chats") ? "Generating…" : `Chat insights next ${limit}` }}
               </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat response-time recompute tile -->
+        <div class="tile tile--accent" @click="toggle('actions')">
+          <div class="tile-head">
+            <div class="tile-icon">⏱</div>
+            <div class="tile-text">
+              <div class="tile-title">Chat Response-Time Metrics</div>
+              <div class="tile-desc">
+                Recompute avg/longest/last/SLA-breach figures for every chat in
+                a date range. Runs in code from the transcript — no LLM.
+              </div>
+            </div>
+            <div class="spacer" />
+          </div>
+
+          <div class="tile-body" @click.stop>
+            <div class="batch-grid" style="grid-template-columns: auto 1fr">
+              <label class="label">From</label>
+              <input v-model="recomputeRtFrom" type="date" class="select" />
+
+              <label class="label">To</label>
+              <input v-model="recomputeRtTo" type="date" class="select" />
+
+              <div />
+              <button
+                class="btn btn--secondary"
+                :disabled="startingRecomputeRt"
+                @click="runRecomputeChatResponseTime"
+              >
+                {{ startingRecomputeRt ? "Recomputing…" : "Recompute chat response time" }}
+              </button>
+            </div>
+
+            <div
+              v-if="recomputeRtResult"
+              style="margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center"
+            >
+              <span class="chip chip--primary">{{ recomputeRtResult.candidates }} candidates</span>
+              <span class="chip chip--success">{{ recomputeRtResult.processed }} processed</span>
+              <span v-if="recomputeRtResult.skipped" class="chip chip--secondary">{{ recomputeRtResult.skipped }} skipped (no transcript)</span>
+              <span v-if="recomputeRtResult.errored" class="chip chip--danger">{{ recomputeRtResult.errored }} errored</span>
+            </div>
+
+            <div
+              v-if="recomputeRtResult?.errors?.length"
+              style="margin-top: 10px; background: var(--surface-2, #f5f5f5); border-radius: 4px; padding: 8px 10px; max-height: 200px; overflow-y: auto"
+            >
+              <div
+                v-for="e in recomputeRtResult.errors"
+                :key="e.recordingId"
+                style="font-size: 12px; margin-bottom: 4px"
+              >
+                <span class="mono" style="opacity: 0.7">{{ e.recordingId.slice(0, 8) }}…</span>
+                <span style="color: var(--danger, #e55); margin-left: 8px">{{ e.message }}</span>
+              </div>
             </div>
           </div>
         </div>

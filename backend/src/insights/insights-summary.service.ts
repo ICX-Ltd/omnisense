@@ -24,6 +24,11 @@ import {
   NarrativeSummary,
 } from './helpers/validate-narrative-json';
 import { aggregateIntoBuckets } from './helpers/objection-normalizer';
+import {
+  CHAT_RESPONSE_SLA_SECONDS,
+  aggregateChatResponseMetrics,
+  computeChatResponseMetricsFromTranscript,
+} from './chat-response-time';
 
 export interface FilterOptions {
   campaigns: string[];
@@ -650,6 +655,255 @@ export class InsightsSummaryService {
         ...r,
         coaching_json: r.coaching_json ? safeParseJson(r.coaching_json as string) : null,
       })),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CHAT RESPONSE-TIME METRICS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Re-exposed from the chat-response-time module so the summary endpoint
+  // can advertise the active SLA threshold to the dashboard.
+  private readonly CHAT_RESPONSE_SLA_SECONDS = CHAT_RESPONSE_SLA_SECONDS;
+
+  async getChatResponseTimeMetrics(
+    from: Date,
+    to: Date,
+    filterKey: InteractionFilter = 'chats',
+    campaign?: string,
+    agent?: string,
+    excludeOutcomes?: string[],
+  ) {
+    const dateWhere =
+      'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
+    const dateParams = { from, to };
+
+    const baseQb = () =>
+      this.insightsRepo
+        .createQueryBuilder('ii')
+        .innerJoin(Interaction, 'ia', 'ia.id = ii.recordingId')
+        .where(dateWhere, dateParams)
+        .andWhere('ii.chat_response_measured_count IS NOT NULL');
+
+    // Aggregate summary block — reused for the agent-filtered figures and the
+    // all-agents comparison baseline.
+    const summaryFor = async (agentFilter: string | undefined) => {
+      const totals = await this.applyFilters(
+        baseQb(),
+        filterKey,
+        campaign,
+        agentFilter,
+        excludeOutcomes,
+      )
+        .select('COUNT(1)', 'chats_measured')
+        .addSelect('AVG(ii.chat_response_avg_seconds)', 'avg_response_seconds')
+        .addSelect('AVG(ii.chat_response_last_seconds)', 'avg_last_response_seconds')
+        .addSelect('MAX(ii.chat_response_longest_seconds)', 'max_longest_seconds')
+        .addSelect('SUM(ii.chat_response_sla_breach_count)', 'sla_breach_total')
+        .addSelect('SUM(ii.chat_response_measured_count)', 'pairs_measured_total')
+        .addSelect(
+          'SUM(CASE WHEN ii.chat_response_sla_breach_count > 0 THEN 1 ELSE 0 END)',
+          'chats_with_breach',
+        )
+        .getRawOne<{
+          chats_measured: string | null;
+          avg_response_seconds: number | null;
+          avg_last_response_seconds: number | null;
+          max_longest_seconds: number | null;
+          sla_breach_total: string | null;
+          pairs_measured_total: string | null;
+          chats_with_breach: string | null;
+        }>();
+
+      const chatsMeasured = parseInt(totals?.chats_measured ?? '0', 10);
+      const slaBreachTotal = parseInt(totals?.sla_breach_total ?? '0', 10);
+      const pairsMeasuredTotal = parseInt(totals?.pairs_measured_total ?? '0', 10);
+      const chatsWithBreach = parseInt(totals?.chats_with_breach ?? '0', 10);
+
+      return {
+        chats_measured: chatsMeasured,
+        avg_response_seconds: totals?.avg_response_seconds ?? null,
+        avg_last_response_seconds: totals?.avg_last_response_seconds ?? null,
+        max_longest_seconds: totals?.max_longest_seconds ?? null,
+        sla_breach_total: slaBreachTotal,
+        pairs_measured_total: pairsMeasuredTotal,
+        chats_with_breach: chatsWithBreach,
+        sla_breach_rate:
+          pairsMeasuredTotal > 0 ? slaBreachTotal / pairsMeasuredTotal : null,
+      };
+    };
+
+    const summary = await summaryFor(agent);
+    // When the caller scoped to a single agent, also compute the all-agents
+    // baseline so the UI can render comparison figures alongside.
+    const comparisonSummary = agent ? await summaryFor(undefined) : null;
+
+    const worstByAgent = await this.applyFilters(
+      baseQb(),
+      filterKey,
+      campaign,
+      agent,
+      excludeOutcomes,
+    )
+      .select("COALESCE(NULLIF(ia.agent, ''), 'unknown')", 'agent')
+      .addSelect('COUNT(1)', 'chats')
+      .addSelect('AVG(ii.chat_response_avg_seconds)', 'avg_response_seconds')
+      .addSelect('SUM(ii.chat_response_sla_breach_count)', 'sla_breach_count')
+      .addSelect('MAX(ii.chat_response_longest_seconds)', 'max_longest_seconds')
+      .groupBy("COALESCE(NULLIF(ia.agent, ''), 'unknown')")
+      .orderBy('sla_breach_count', 'DESC')
+      .addOrderBy('avg_response_seconds', 'DESC')
+      .limit(10)
+      .getRawMany<{
+        agent: string;
+        chats: string;
+        avg_response_seconds: number | null;
+        sla_breach_count: string | null;
+        max_longest_seconds: number | null;
+      }>();
+
+    const slowestChats = await this.applyFilters(
+      baseQb(),
+      filterKey,
+      campaign,
+      agent,
+      excludeOutcomes,
+    )
+      .select([
+        'ii.recordingId AS recordingId',
+        'ii.summary_short AS summary_short',
+        'ia.agent AS agent',
+        'ia.campaign AS campaign',
+        'ii.chat_response_avg_seconds AS avg_seconds',
+        'ii.chat_response_longest_seconds AS longest_seconds',
+        'ii.chat_response_last_seconds AS last_seconds',
+        'ii.chat_response_sla_breach_count AS sla_breach_count',
+      ])
+      .andWhere('ii.chat_response_longest_seconds IS NOT NULL')
+      .orderBy('ii.chat_response_longest_seconds', 'DESC')
+      .limit(10)
+      .getRawMany();
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: filterKey,
+      sla_threshold_seconds: this.CHAT_RESPONSE_SLA_SECONDS,
+      agent: agent ?? null,
+      summary,
+      // Populated only when an agent filter is in effect — contains the same
+      // summary shape computed across ALL agents in the same window so the UI
+      // can render the agent vs. baseline comparison.
+      comparison: comparisonSummary
+        ? { scope: 'all_agents', summary: comparisonSummary }
+        : null,
+      worst_by_agent: worstByAgent.map((r) => ({
+        agent: r.agent,
+        chats: parseInt(r.chats, 10),
+        avg_response_seconds: r.avg_response_seconds ?? null,
+        sla_breach_count: parseInt(r.sla_breach_count ?? '0', 10),
+        max_longest_seconds: r.max_longest_seconds ?? null,
+      })),
+      slowest_chats: slowestChats,
+    };
+  }
+
+  // Recomputes chat response-time metrics from the stored transcript for
+  // every chat in the supplied filter window. Always overwrites the existing
+  // metrics — the LLM outputs were unreliable so backend code is canonical.
+  async recomputeChatResponseTimeMetrics(
+    from: Date,
+    to: Date,
+    filterKey: InteractionFilter = 'chats',
+    campaign?: string,
+    agent?: string,
+    excludeOutcomes?: string[],
+  ) {
+    // We always operate on chats — calls have no per-message timestamps to
+    // measure. Honour the user's filterKey but coerce 'calls' to 'chats'
+    // (and 'all' down-narrows to chats by virtue of the chat-only filter
+    // below).
+    const effectiveFilter: InteractionFilter =
+      filterKey === 'calls' ? 'chats' : filterKey;
+
+    const dateWhere =
+      'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
+    const dateParams = { from, to };
+
+    // Match the chats by joining interaction → insight via the standard
+    // filter helpers, then narrow to chats only.
+    const qb = this.applyFilters(
+      this.insightsRepo
+        .createQueryBuilder('ii')
+        .innerJoin(Interaction, 'ia', 'ia.id = ii.recordingId')
+        .where(dateWhere, dateParams)
+        .andWhere("ia.interactionType = 'chat'"),
+      effectiveFilter,
+      campaign,
+      agent,
+      excludeOutcomes,
+    )
+      .select([
+        'ii.recordingId AS recordingId',
+        'ia.campaign AS campaign',
+      ]);
+
+    const rows = await qb.getRawMany<{
+      recordingId: string;
+      campaign: string | null;
+    }>();
+
+    let processed = 0;
+    let skipped = 0;
+    let errored = 0;
+    const errors: Array<{ recordingId: string; message: string }> = [];
+
+    for (const row of rows) {
+      try {
+        const transcript = await this.transcriptsRepo.findOne({
+          where: { recordingId: row.recordingId },
+        });
+        if (!transcript?.text?.trim()) {
+          skipped++;
+          continue;
+        }
+
+        const metrics = computeChatResponseMetricsFromTranscript(
+          transcript.text,
+          row.campaign,
+        );
+        const agg = aggregateChatResponseMetrics(metrics);
+
+        await this.insightsRepo.update(
+          { recordingId: row.recordingId },
+          {
+            chat_response_avg_seconds: agg.avgSeconds,
+            chat_response_longest_seconds: agg.longestSeconds,
+            chat_response_last_seconds: agg.lastSeconds,
+            chat_response_sla_breach_count: agg.slaBreachCount,
+            chat_response_measured_count: agg.measuredCount,
+            chat_response_metrics_json: JSON.stringify(metrics),
+          },
+        );
+
+        processed++;
+      } catch (e: any) {
+        errored++;
+        errors.push({
+          recordingId: row.recordingId,
+          message: e?.message ?? String(e),
+        });
+      }
+    }
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: effectiveFilter,
+      candidates: rows.length,
+      processed,
+      skipped,
+      errored,
+      errors: errors.slice(0, 25),
+      sla_threshold_seconds: this.CHAT_RESPONSE_SLA_SECONDS,
     };
   }
 
@@ -1969,6 +2223,22 @@ ${prompt}
             not_opportunity_reason: insight.not_opportunity_reason,
             detail: insight.opportunity_json ? safeParseJson(insight.opportunity_json) : null,
           },
+          chat_response:
+            insight.chat_response_measured_count !== null ||
+            insight.chat_response_metrics_json
+              ? {
+                  avg_seconds: insight.chat_response_avg_seconds,
+                  longest_seconds: insight.chat_response_longest_seconds,
+                  last_seconds: insight.chat_response_last_seconds,
+                  sla_breach_count: insight.chat_response_sla_breach_count,
+                  measured_count: insight.chat_response_measured_count,
+                  sla_threshold_seconds: this.CHAT_RESPONSE_SLA_SECONDS,
+                  sla_breached: (insight.chat_response_sla_breach_count ?? 0) > 0,
+                  pairs: insight.chat_response_metrics_json
+                    ? safeParseJson(insight.chat_response_metrics_json)?.pairs ?? null
+                    : null,
+                }
+              : null,
         };
       })() : null,
     };
