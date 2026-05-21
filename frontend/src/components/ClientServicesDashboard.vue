@@ -10,6 +10,8 @@ import ParityBar from "./ParityBar.vue";
 const campaignOptions = ref<string[]>([]);
 const agentOptions = ref<string[]>([]);
 const outcomeOptions = ref<string[]>([]);
+const vehicleMakeOptions = ref<string[]>([]);
+const vehicleModelOptions = ref<string[]>([]);
 const excludeOutcomes = ref<string[]>([]);
 
 const COMMON_EXCLUSIONS = [
@@ -74,6 +76,8 @@ type InteractionFilter = "all" | "calls" | "chats";
 const interactionFilter = ref<InteractionFilter>("chats");
 const campaign = ref("");
 const agent = ref("");
+const vehicleMake = ref("");
+const vehicleModel = ref("");
 
 const sharedParams = computed(() => ({
   from: from.value,
@@ -82,6 +86,8 @@ const sharedParams = computed(() => ({
   ...(campaign.value && { campaign: campaign.value }),
   ...(agent.value && { agent: agent.value }),
   ...(excludeOutcomes.value.length && { excludeOutcomes: excludeOutcomes.value.join(',') }),
+  ...(vehicleMake.value && { vehicleMake: vehicleMake.value }),
+  ...(vehicleModel.value && { vehicleModel: vehicleModel.value }),
 }));
 
 // ── Data state ───────────────────────────────────────────────────────────────
@@ -278,8 +284,12 @@ async function loadFilterOptions() {
     campaignOptions.value = res.data.campaigns ?? [];
     agentOptions.value = res.data.agents ?? [];
     outcomeOptions.value = res.data.outcomes ?? [];
+    vehicleMakeOptions.value = res.data.vehicleMakes ?? [];
+    vehicleModelOptions.value = res.data.vehicleModels ?? [];
     if (campaign.value && !campaignOptions.value.includes(campaign.value)) campaign.value = "";
     if (agent.value && !agentOptions.value.includes(agent.value)) agent.value = "";
+    if (vehicleMake.value && !vehicleMakeOptions.value.includes(vehicleMake.value)) vehicleMake.value = "";
+    if (vehicleModel.value && !vehicleModelOptions.value.includes(vehicleModel.value)) vehicleModel.value = "";
     excludeOutcomes.value = excludeOutcomes.value.filter((o) => outcomeOptions.value.includes(o));
   } catch { /* non-critical */ }
 }
@@ -626,6 +636,20 @@ onMounted(async () => {
             <select v-model="agent" class="select select--sm">
               <option value="">All</option>
               <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
+            </select>
+          </div>
+          <div v-if="vehicleMakeOptions.length" class="filter-group">
+            <label class="label">Make</label>
+            <select v-model="vehicleMake" class="select select--sm">
+              <option value="">All</option>
+              <option v-for="m in vehicleMakeOptions" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </div>
+          <div v-if="vehicleModelOptions.length" class="filter-group">
+            <label class="label">Model</label>
+            <select v-model="vehicleModel" class="select select--sm">
+              <option value="">All</option>
+              <option v-for="m in vehicleModelOptions" :key="m" :value="m">{{ m }}</option>
             </select>
           </div>
           <div v-if="outcomeOptions.length" class="filter-group">

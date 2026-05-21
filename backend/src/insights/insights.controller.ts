@@ -112,6 +112,7 @@ export class InsightsController {
     return this.svcSummary.getOpsDimensionComparison(
       fromDate, toDate, filter, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined,
       excludePartial === 'true',
     );
   }
@@ -248,6 +249,8 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     if (!interestLevel) throw new BadRequestException('interestLevel is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -257,6 +260,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      vehicleMake, vehicleModel,
     );
   }
 
@@ -281,6 +285,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined,
       opportunitiesOnly === 'true',
     );
   }
@@ -296,6 +301,8 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     if (!competitor) throw new BadRequestException('competitor is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -305,6 +312,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      vehicleMake, vehicleModel,
     );
   }
 
@@ -316,10 +324,12 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
+    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, vehicleModel);
   }
 
   @Get('ops/interactions-by-opportunity-reason')
@@ -333,6 +343,8 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     if (!reason) throw new BadRequestException('reason is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -342,6 +354,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      vehicleMake, vehicleModel,
     );
   }
 
@@ -360,6 +373,8 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -370,6 +385,8 @@ export class InsightsController {
       campaign,
       agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      vehicleMake,
+      vehicleModel,
     );
   }
 
@@ -393,6 +410,8 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -466,6 +485,8 @@ export class InsightsController {
       campaign,
       agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      vehicleMake,
+      vehicleModel,
     );
   }
 
@@ -503,6 +524,7 @@ export class InsightsController {
     return this.svcSummary.getOperationsMetrics(
       fromDate, toDate, filter, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined,
       excludePartial === 'true',
     );
   }
@@ -515,10 +537,12 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModel') vehicleModel?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
+    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, vehicleModel);
   }
 
   @Get('summary/objections')
@@ -547,7 +571,7 @@ export class InsightsController {
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getObjectionAssessmentMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), opportunitiesOnly === 'true');
+    return this.svcSummary.getObjectionAssessmentMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), undefined, undefined, opportunitiesOnly === 'true');
   }
 
   @Get('summary/compliance')

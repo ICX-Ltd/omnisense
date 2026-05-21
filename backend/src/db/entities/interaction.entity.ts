@@ -66,6 +66,12 @@ export class Interaction {
   @Column({ type: 'varchar', length: 200, nullable: true })
   outcome!: string | null;
 
+  @Column({ type: 'nvarchar', length: 100, nullable: true })
+  vehicleMake!: string | null;
+
+  @Column({ type: 'nvarchar', length: 100, nullable: true })
+  vehicleModel!: string | null;
+
   // Persisted computed column: COALESCE(interactionDateTime, createdAt)
   // Created by sql/create-indexes.sql — do not set manually
   @Column({ type: 'datetime2', nullable: true, insert: false, update: false })

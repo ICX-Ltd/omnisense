@@ -70,3 +70,9 @@ Updates
   (Client Services widgets, maturity-bucket analytics, four new /uiapi/insights/parity/*
   endpoints). APP_VERSION → 1.3.0.
 
+2026-05-21
+- Added vehicleMake / vehicleModel columns to app.interactions for filtering on
+  the Client Services dashboard. Migration: backend/sql/add-vehicle-make-model.sql.
+  Filter wired through all 7 dashboard endpoints (summary + drill-downs) via
+  applyFilters / buildRawFilters. APP_VERSION → 1.7.0.
+
