@@ -164,23 +164,40 @@ export class InsightsSummaryService {
         .andWhere("ia.vehicleMake != ''"),
     ).orderBy('ia.vehicleMake', 'ASC').getRawMany();
 
-    // Return DISTINCT make+model pairs (not bare models) so the dashboard can
-    // restrict the model dropdown to the models that belong to the chosen make.
-    const vehicleModels = await applyChannel(
+    // Return make+model pairs (not bare models) so the dashboard can restrict
+    // the model dropdown to the models that belong to the chosen make. We fetch
+    // the raw two-column rows (same shape as the makes query, plus one column)
+    // and dedupe / sort in JS — a SELECT DISTINCT … ORDER BY spanning two
+    // columns proved brittle across the MSSQL driver, and the row count here is
+    // tiny so the JS pass is negligible.
+    const vehicleModelRows = await applyChannel(
       this.recordingsRepo
         .createQueryBuilder('ia')
-        .select('DISTINCT ia.vehicleMake', 'make')
+        .select('ia.vehicleMake', 'make')
         .addSelect('ia.vehicleModel', 'model')
         .where('ia.vehicleModel IS NOT NULL')
         .andWhere("ia.vehicleModel != ''"),
-    ).orderBy('ia.vehicleMake', 'ASC').addOrderBy('ia.vehicleModel', 'ASC').getRawMany();
+    ).getRawMany<{ make: string | null; model: string }>();
+
+    const seenPairs = new Set<string>();
+    const vehicleModels: { make: string; model: string }[] = [];
+    for (const r of vehicleModelRows) {
+      const make = r.make ?? '';
+      const key = `${make}|${r.model}`;
+      if (seenPairs.has(key)) continue;
+      seenPairs.add(key);
+      vehicleModels.push({ make, model: r.model });
+    }
+    vehicleModels.sort(
+      (a, b) => a.make.localeCompare(b.make) || a.model.localeCompare(b.model),
+    );
 
     return {
       campaigns: campaigns.map((r) => r.campaign),
       agents: agents.map((r) => r.agent),
       outcomes: outcomes.map((r) => r.outcome),
       vehicleMakes: vehicleMakes.map((r) => r.vehicleMake),
-      vehicleModels: vehicleModels.map((r) => ({ make: r.make, model: r.model })),
+      vehicleModels,
     };
   }
 

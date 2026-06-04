@@ -103,4 +103,9 @@ Updates
   Exclude Outcomes). vehicleModel (single, "=") became vehicleModels (CSV, "IN (...)")
   across applyFilters / buildRawFilters and all 7 controller endpoints; the filter-options
   endpoint return shape changed from string[] to {make, model}[]. APP_VERSION → 1.9.0.
+- Fix: the new make+model pairs query in getFilterOptions used SELECT DISTINCT across two
+  columns + a two-column ORDER BY, which threw on the MSSQL driver — and because the
+  frontend swallows filter-load errors, the whole /summary/filters response failed and BOTH
+  the Make and Model filters silently disappeared. Reworked to fetch the two columns plainly
+  and dedupe/sort in JS. APP_VERSION → 1.9.1.
 
