@@ -11,8 +11,19 @@ const campaignOptions = ref<string[]>([]);
 const agentOptions = ref<string[]>([]);
 const outcomeOptions = ref<string[]>([]);
 const vehicleMakeOptions = ref<string[]>([]);
-const vehicleModelOptions = ref<string[]>([]);
+// All make+model pairs from the backend; the visible model list is derived
+// from these and the currently-selected make (see vehicleModelOptions).
+const vehicleModelPairs = ref<{ make: string; model: string }[]>([]);
 const excludeOutcomes = ref<string[]>([]);
+
+// Model options chained to the selected make: when a make is chosen, only its
+// models are offered; otherwise every distinct model is shown.
+const vehicleModelOptions = computed(() => {
+  const pairs = vehicleMake.value
+    ? vehicleModelPairs.value.filter((p) => p.make === vehicleMake.value)
+    : vehicleModelPairs.value;
+  return Array.from(new Set(pairs.map((p) => p.model))).sort((a, b) => a.localeCompare(b));
+});
 
 const COMMON_EXCLUSIONS = [
   "npcb", "noanswer", "agam", "test chat", "test chat - client",
@@ -77,7 +88,7 @@ const interactionFilter = ref<InteractionFilter>("chats");
 const campaign = ref("");
 const agent = ref("");
 const vehicleMake = ref("");
-const vehicleModel = ref("");
+const vehicleModels = ref<string[]>([]);
 
 const sharedParams = computed(() => ({
   from: from.value,
@@ -87,7 +98,7 @@ const sharedParams = computed(() => ({
   ...(agent.value && { agent: agent.value }),
   ...(excludeOutcomes.value.length && { excludeOutcomes: excludeOutcomes.value.join(',') }),
   ...(vehicleMake.value && { vehicleMake: vehicleMake.value }),
-  ...(vehicleModel.value && { vehicleModel: vehicleModel.value }),
+  ...(vehicleModels.value.length && { vehicleModels: vehicleModels.value.join(',') }),
 }));
 
 // ── Data state ───────────────────────────────────────────────────────────────
@@ -174,6 +185,8 @@ const compareParams = computed(() => {
     ...(campaign.value && { campaign: campaign.value }),
     ...(agent.value && { agent: agent.value }),
     ...(excludeOutcomes.value.length && { excludeOutcomes: excludeOutcomes.value.join(",") }),
+    ...(vehicleMake.value && { vehicleMake: vehicleMake.value }),
+    ...(vehicleModels.value.length && { vehicleModels: vehicleModels.value.join(",") }),
   };
 });
 
@@ -285,16 +298,21 @@ async function loadFilterOptions() {
     agentOptions.value = res.data.agents ?? [];
     outcomeOptions.value = res.data.outcomes ?? [];
     vehicleMakeOptions.value = res.data.vehicleMakes ?? [];
-    vehicleModelOptions.value = res.data.vehicleModels ?? [];
+    vehicleModelPairs.value = res.data.vehicleModels ?? [];
     if (campaign.value && !campaignOptions.value.includes(campaign.value)) campaign.value = "";
     if (agent.value && !agentOptions.value.includes(agent.value)) agent.value = "";
     if (vehicleMake.value && !vehicleMakeOptions.value.includes(vehicleMake.value)) vehicleMake.value = "";
-    if (vehicleModel.value && !vehicleModelOptions.value.includes(vehicleModel.value)) vehicleModel.value = "";
+    vehicleModels.value = vehicleModels.value.filter((m) => vehicleModelOptions.value.includes(m));
     excludeOutcomes.value = excludeOutcomes.value.filter((o) => outcomeOptions.value.includes(o));
   } catch { /* non-critical */ }
 }
 
 watch(interactionFilter, () => { loadFilterOptions(); });
+
+// When the make changes, drop any selected models that don't belong to it.
+watch(vehicleMake, () => {
+  vehicleModels.value = vehicleModels.value.filter((m) => vehicleModelOptions.value.includes(m));
+});
 
 async function loadAll() {
   loading.value = true;
@@ -369,10 +387,9 @@ async function toggleParity(
     competitorBrand?: string;
     competitorReason?: string;
     viewKey?: string;
-    viewSentiment?: string;
+    viewAnswer?: string;
     affordabilityAnswer?: string;
     lifestyleVehicleAnswer?: string;
-    lifestyleFinancialAnswer?: string;
   },
 ) {
   if (expandedParity.value === key) {
@@ -405,38 +422,34 @@ function parityAnswerChip(answer: string | null | undefined) {
   return "chip chip--secondary";
 }
 
+// Each view is now a yes/no "did the customer express a NEGATIVE view?" answer
+// (yes = a concern was raised). `rowField` maps to the projected drill-down column.
 const viewKeys = [
-  { key: "brand", label: "Brand" },
-  { key: "current_vehicle", label: "Current vehicle" },
-  { key: "dealer", label: "Dealer" },
-  { key: "finance_agreement", label: "Finance agreement" },
+  { key: "brand", label: "Brand", rowField: "view_brand_answer" },
+  { key: "current_vehicle", label: "Current vehicle", rowField: "view_vehicle_answer" },
+  { key: "dealer", label: "Dealer", rowField: "view_dealer_answer" },
+  { key: "finance_agreement", label: "Finance agreement", rowField: "view_finance_answer" },
 ] as const;
 
-const viewBuckets = [
-  "positive",
-  "negative",
-  "neutral",
-  "not_expressed",
-] as const;
+const viewBuckets = ["yes", "no"] as const;
 
-function viewSentimentChip(bucket: string | null | undefined) {
-  if (bucket === "positive") return "chip chip--success";
-  if (bucket === "negative") return "chip chip--danger";
-  if (bucket === "neutral") return "chip chip--info";
+// A negative view (yes) is the signal worth surfacing, so yes is red.
+function viewAnswerChip(bucket: string | null | undefined) {
+  if (bucket === "yes") return "chip chip--danger";
+  if (bucket === "no") return "chip chip--success";
   return "chip chip--secondary";
 }
 
-function viewSentimentColor(bucket: string) {
-  if (bucket === "positive") return "var(--success, #22c55e)";
-  if (bucket === "negative") return "var(--danger, #ef4444)";
-  if (bucket === "neutral") return "#0ea5e9";
+function viewAnswerColor(bucket: string) {
+  if (bucket === "yes") return "var(--danger, #ef4444)";
+  if (bucket === "no") return "var(--success, #22c55e)";
   return "#94a3b8";
 }
 
-function viewSentimentLabel(bucket: string | null | undefined) {
-  if (!bucket) return "not raised";
-  if (bucket === "not_expressed") return "not raised";
-  return bucket;
+function viewAnswerLabel(bucket: string | null | undefined) {
+  if (bucket === "yes") return "negative view";
+  if (bucket === "no") return "no concerns";
+  return "not raised";
 }
 
 // Customer Circumstances cards (affordability + lifestyle changes).
@@ -452,15 +465,9 @@ const situationKeys = [
   },
   {
     key: "lifestyle_change_vehicle",
-    label: "Lifestyle — vehicle",
+    label: "Lifestyle change",
     rowField: "lifestyle_vehicle_answer",
     buildCriteria: (b: string) => ({ lifestyleVehicleAnswer: b }),
-  },
-  {
-    key: "lifestyle_change_financial",
-    label: "Lifestyle — financial",
-    rowField: "lifestyle_financial_answer",
-    buildCriteria: (b: string) => ({ lifestyleFinancialAnswer: b }),
   },
 ] as const;
 
@@ -468,22 +475,6 @@ function situationBarColor(bucket: string) {
   if (bucket === "yes") return "var(--danger, #ef4444)";
   if (bucket === "no") return "var(--success, #22c55e)";
   return "#94a3b8";
-}
-
-// Derive the bucket label for a drill-down row, where the backend only sends
-// raw sentiment (no `expressed` flag). Null sentiment → "not raised".
-function viewSentimentFromRow(row: any, key: string): string {
-  const map: Record<string, string> = {
-    brand: "view_brand_sentiment",
-    current_vehicle: "view_vehicle_sentiment",
-    dealer: "view_dealer_sentiment",
-    finance_agreement: "view_finance_sentiment",
-  };
-  const field = map[key];
-  if (!field) return "not_expressed";
-  const v = row?.[field];
-  if (v === "positive" || v === "negative" || v === "neutral") return v;
-  return "not_expressed";
 }
 
 async function toggleInterest(level: string) {
@@ -646,9 +637,18 @@ onMounted(async () => {
             </select>
           </div>
           <div v-if="vehicleModelOptions.length" class="filter-group">
-            <label class="label">Model</label>
-            <select v-model="vehicleModel" class="select select--sm">
-              <option value="">All</option>
+            <label class="label">
+              Model
+              <span v-if="vehicleMake" style="font-weight: 400; opacity: 0.6">({{ vehicleMake }} only)</span>
+              <button
+                v-if="vehicleModels.length"
+                type="button"
+                class="btn-quick-exclude"
+                style="margin-left: 6px"
+                @click="vehicleModels = []"
+              >Clear ({{ vehicleModels.length }})</button>
+            </label>
+            <select v-model="vehicleModels" multiple class="select select--sm select--multi">
               <option v-for="m in vehicleModelOptions" :key="m" :value="m">{{ m }}</option>
             </select>
           </div>
@@ -1079,7 +1079,7 @@ onMounted(async () => {
             <span class="parity-section-divider-label">Customer Views</span>
           </div>
           <div class="parity-sub-desc" style="margin-bottom: 12px">
-            What the customer expressed about their current brand, vehicle, dealer and finance agreement.
+            Whether the customer raised a NEGATIVE view of their current brand, vehicle, dealer or finance agreement.
             Click a bucket to see the underlying interactions.
           </div>
 
@@ -1094,16 +1094,16 @@ onMounted(async () => {
                 v-for="bucket in viewBuckets"
                 :key="vk.key + '-' + bucket"
                 class="views-row"
-                @click="toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewSentiment: bucket })"
+                @click="toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewAnswer: bucket })"
               >
-                <span :class="viewSentimentChip(bucket)" style="font-size: 11px">
-                  {{ viewSentimentLabel(bucket) }}
+                <span :class="viewAnswerChip(bucket)" style="font-size: 11px">
+                  {{ viewAnswerLabel(bucket) }}
                 </span>
                 <ParityBar
                   variant="mini"
                   :current="parityData.views[vk.key][bucket]"
                   :total="parityData.total"
-                  :color="viewSentimentColor(bucket)"
+                  :color="viewAnswerColor(bucket)"
                   :compare-current="parityDataCompare?.views?.[vk.key]?.[bucket]"
                   :compare-total="parityDataCompare?.total"
                 />
@@ -1128,9 +1128,9 @@ onMounted(async () => {
                 >
                   <div class="drill-row-top">
                     <span
-                      :class="viewSentimentChip(viewSentimentFromRow(ix, vk.key))"
+                      :class="viewAnswerChip(ix[vk.rowField])"
                       style="font-size: 11px"
-                    >{{ vk.label }}: {{ viewSentimentLabel(viewSentimentFromRow(ix, vk.key)) }}</span>
+                    >{{ vk.label }}: {{ viewAnswerLabel(ix[vk.rowField]) }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>

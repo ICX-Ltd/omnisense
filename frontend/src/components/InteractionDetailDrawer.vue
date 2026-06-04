@@ -358,10 +358,10 @@
                     <div class="parity-row-label">{{ viewLabels[viewKey] }}</div>
                     <span
                       class="chip"
-                      :class="sentimentChip(campaignAnswers[viewKey])"
+                      :class="viewChip(campaignAnswers[viewKey])"
                       style="font-size: 11px"
-                    >{{ sentimentLabel(campaignAnswers[viewKey]) }}</span>
-                    <div v-if="campaignAnswers[viewKey]?.expressed && campaignAnswers[viewKey]?.summary" class="parity-detail">{{ campaignAnswers[viewKey].summary }}</div>
+                    >{{ viewLabel(campaignAnswers[viewKey]) }}</span>
+                    <div v-if="campaignAnswers[viewKey]?.answer === 'yes' && campaignAnswers[viewKey]?.summary" class="parity-detail">{{ campaignAnswers[viewKey].summary }}</div>
                     <div v-if="campaignAnswers[viewKey]?.quote" class="parity-quote">"{{ campaignAnswers[viewKey].quote }}"</div>
                   </div>
 
@@ -376,20 +376,12 @@
                     <div v-if="campaignAnswers.affordability_issues?.quote" class="parity-quote">"{{ campaignAnswers.affordability_issues.quote }}"</div>
                   </div>
                   <div class="parity-row">
-                    <div class="parity-row-label">Lifestyle change — vehicle</div>
+                    <div class="parity-row-label">Lifestyle change</div>
                     <span class="chip" :class="answerChip(campaignAnswers.lifestyle_change_vehicle?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.lifestyle_change_vehicle?.answer) }}
                     </span>
                     <div v-if="campaignAnswers.lifestyle_change_vehicle?.detail" class="parity-detail">{{ campaignAnswers.lifestyle_change_vehicle.detail }}</div>
                     <div v-if="campaignAnswers.lifestyle_change_vehicle?.quote" class="parity-quote">"{{ campaignAnswers.lifestyle_change_vehicle.quote }}"</div>
-                  </div>
-                  <div class="parity-row">
-                    <div class="parity-row-label">Lifestyle change — financial</div>
-                    <span class="chip" :class="answerChip(campaignAnswers.lifestyle_change_financial?.answer)" style="font-size: 11px">
-                      {{ formatAnswer(campaignAnswers.lifestyle_change_financial?.answer) }}
-                    </span>
-                    <div v-if="campaignAnswers.lifestyle_change_financial?.detail" class="parity-detail">{{ campaignAnswers.lifestyle_change_financial.detail }}</div>
-                    <div v-if="campaignAnswers.lifestyle_change_financial?.quote" class="parity-quote">"{{ campaignAnswers.lifestyle_change_financial.quote }}"</div>
                   </div>
                 </div>
 
@@ -679,19 +671,18 @@ function formatAnswer(answer: string | null | undefined) {
   return answer.charAt(0).toUpperCase() + answer.slice(1);
 }
 
-function sentimentChip(view: any) {
-  if (!view?.expressed) return "chip--secondary";
-  const s = view.sentiment;
-  if (s === "positive") return "chip--success";
-  if (s === "negative") return "chip--danger";
-  return "chip--info";
+// Views are now a yes/no "expressed a negative view?" answer. Yes (a concern
+// was raised) is the signal worth flagging, so it's shown in red.
+function viewChip(view: any) {
+  if (view?.answer === "yes") return "chip--danger";
+  if (view?.answer === "no") return "chip--success";
+  return "chip--secondary";
 }
 
-function sentimentLabel(view: any) {
-  if (!view?.expressed) return "Not raised";
-  const s = view.sentiment;
-  if (!s) return "Expressed";
-  return s.charAt(0).toUpperCase() + s.slice(1);
+function viewLabel(view: any) {
+  if (view?.answer === "yes") return "Negative view";
+  if (view?.answer === "no") return "No concerns";
+  return "Not raised";
 }
 
 // ─── scoring flags (partial / low-score alerts) ─────────────────────────────

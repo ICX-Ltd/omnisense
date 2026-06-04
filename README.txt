@@ -76,3 +76,31 @@ Updates
   Filter wired through all 7 dashboard endpoints (summary + drill-downs) via
   applyFilters / buildRawFilters. APP_VERSION → 1.7.0.
 
+2026-06-04
+- Fixed make/model filters not applying to the Parity campaign-analysis panel and its
+  drill-downs on the Client Services dashboard: getParityCampaignAnalysis /
+  getParityInteractions accepted vehicleMake/vehicleModel but dropped them when calling
+  buildRawFilters. Also added make/model to the dashboard's period-comparison query
+  (compareParams) so comparison columns filter consistently. APP_VERSION → 1.7.1.
+- Reworked the Parity call-campaign Q&A prompt (seed-fragments.ts) for clearer model
+  output: every item is now a yes/no answer with trigger/indicator lists, the four
+  "view" items ask "expressed a NEGATIVE view?" (yes/no) instead of capturing
+  positive/negative/neutral sentiment, and lifestyle_change_financial was dropped.
+  Added an advisor-perspective note to call.campaign.Parity (no finance discussed —
+  invite to a dealer account review / valuation / test drive).
+- Updated call.campaign.Parity.qa_schema to match, plus the dependent dashboard wiring:
+  getParityCampaignAnalysis now buckets views as yes/no; getParityInteractions filters
+  on viewAnswer (was viewSentiment) and drops lifestyleFinancialAnswer; controller param
+  renamed viewSentiment→viewAnswer. ClientServicesDashboard.vue + InteractionDetailDrawer.vue
+  render the yes/no negative-view model.
+- Migration: backend/sql/update-parity-qa-yesno.sql DELETEs the three call.campaign.Parity*
+  rows so they reseed on restart (seedIfMissing only inserts missing keys). Pre-rework
+  interactions keep the old shape and show views as "not raised" until re-processed.
+  APP_VERSION → 1.8.0.
+- Client Services make/model filters: (1) chained the model dropdown to the selected
+  make — getFilterOptions now returns DISTINCT make+model pairs and the dashboard derives
+  the model list from the chosen make; (2) made the model filter multi-select (like
+  Exclude Outcomes). vehicleModel (single, "=") became vehicleModels (CSV, "IN (...)")
+  across applyFilters / buildRawFilters and all 7 controller endpoints; the filter-options
+  endpoint return shape changed from string[] to {make, model}[]. APP_VERSION → 1.9.0.
+

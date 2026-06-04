@@ -303,6 +303,10 @@ About the campaign:
   all relevant — the agent's job is to qualify whether the customer is open
   to a review, and (if so) to capture consent to pass details to the dealer.
 
+  From the ADVISOR's perspective, no finance element is discussed — the call
+  is simply an invitation to an account review where the customer can discuss
+  a new car purchase. The dealer can value their car and organise a test drive.
+
 Compliance check for Parity:
   No campaign-specific compliance script applies — set all fields in
   campaign_compliance (itc_statement_read, dpa_3_elements_verified,
@@ -318,79 +322,101 @@ SECTION 2B — CAMPAIGN Q&A (PARITY)
 ═══════════════════════════════════════
 Extract the CUSTOMER's position on each item below from the transcript only.
 Listen for what the customer actually says — not what the agent claims on
-their behalf. If a topic is never raised, answer "n/a".
+their behalf.
+
+EVERY answer is "yes" or "no". If a topic is never raised, the answer is "no".
+For each item below the listed INDICATORS are signals that — when the customer
+raises them — make the answer "yes". They are examples to guide you, not an
+exhaustive checklist.
 
 For every item, return an object matching the campaign_answers schema below.
-Every "quote" field MUST be a verbatim, ≤12-word excerpt from the customer's
+Every "quote" field MUST be a verbatim, ≤20-word excerpt from the CUSTOMER's
 speech that justifies the answer. If no quote is available, set quote to "".
 
 Q&A items:
 
 1. consent_to_dealer
-   Did the customer AGREE to having their details passed on to the dealer?
-   answer: "yes" | "no" | "n/a"
+   Did the customer AGREE to have their details passed to the dealer?
+   answer: "yes" | "no"
 
 2. view_on_brand
-   Did the customer express a view on their CURRENT brand?
-   expressed: boolean
-   sentiment: "positive" | "negative" | "neutral" | null  (null if not expressed)
-   summary: ≤30 words capturing the view (or "" if not expressed)
+   Did the customer express a NEGATIVE view of their CURRENT brand?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): reliability issues; poor driving experience;
+   cost / value; warranty; recall and/or repair; poor part-exchange value.
+   summary: ≤30 words capturing the negative view (or "" if answer is "no")
 
 3. view_on_current_vehicle
-   Did the customer express a view on their CURRENT vehicle?
-   expressed / sentiment / summary as above.
+   Did the customer express a NEGATIVE view of their CURRENT vehicle?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): reliability issues / breakdowns; poor driving
+   experience; running cost / value; warranty; recall and/or repair; poor
+   part-exchange value.
+   summary: ≤30 words capturing the negative view (or "" if answer is "no")
 
 4. view_on_dealer
-   Did the customer express a view on their CURRENT dealer?
-   expressed / sentiment / summary as above.
+   Did the customer express a NEGATIVE view of their CURRENT dealer?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): poor customer experience; poor service; poor
+   communication; lack of a local dealer / location; general frustration.
+   summary: ≤30 words capturing the negative view (or "" if answer is "no")
 
 5. view_on_finance_agreement
-   Did the customer express a view on their CURRENT finance agreement?
-   expressed / sentiment / summary as above.
+   Did the customer express a NEGATIVE view of their CURRENT finance agreement?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): monthly payments too high / too expensive; poor
+   communication or customer experience; commission disclosure concerns;
+   negative press / information; future value / negative equity.
+   summary: ≤30 words capturing the negative view (or "" if answer is "no")
 
 6. decision_made
-   Has the customer ALREADY decided what they are going to do (keep, hand
-   back, change brand, buy outright, go elsewhere)?
-   answer: "yes" | "no" | "n/a"
-   detail: ≤30 words on what they have decided (or "")
+   Did the customer say they have ALREADY decided what they are going to do?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): keep the car; hand the car back; change brand;
+   buy the car outright / pay off existing finance; refinance; go elsewhere.
+   detail: ≤30 words on what they have decided (or "" if answer is "no")
 
 7. affordability_issues
-   Does the customer have AFFORDABILITY issues that affect their decision?
-   answer: "yes" | "no" | "n/a"
-   detail: ≤30 words.
+   Did the customer say they have AFFORDABILITY issues that have affected, or
+   will affect, their decision?
+   answer: "yes" | "no"
+   detail: ≤30 words (or "" if answer is "no")
 
 8. lifestyle_change_vehicle
-   Have there been LIFESTYLE changes that affect their VEHICLE decision
-   (e.g. growing family, retirement, new commute, work-from-home, mobility)?
-   answer: "yes" | "no" | "n/a"
-   detail: ≤30 words.
+   Have there been LIFESTYLE changes that affect the customer's vehicle or
+   financial position?
+   answer: "yes" | "no"
+   Indicators (any → "yes"): growing family / new dependants / children;
+   retirement; new commute / working from home; mobility needs; job change;
+   income change / redundancy.
+   detail: ≤30 words (or "" if answer is "no")
 
-9. lifestyle_change_financial
-   Have there been LIFESTYLE changes that affect their FINANCIAL position
-   (e.g. job change, income change, redundancy, new dependants, retirement)?
-   answer: "yes" | "no" | "n/a"
-   detail: ≤30 words.
+9. dealer_already_in_touch
+   Did the customer say the DEALER had ALREADY been in touch about their
+   agreement / upgrade ahead of this call?
+   answer: "yes" | "no"
+   quote required if "yes".
 
-10. dealer_already_in_touch
-    Has the DEALER already been in touch with this customer about the
-    agreement / upgrade ahead of this call?
-    answer: "yes" | "no" | "n/a"
-    quote required if "yes".
-
-11. competitor_vehicle
-    Is the customer considering / going with a COMPETITOR vehicle?
-    answer: "yes" | "no" | "n/a"
+10. competitor_vehicle
+    Did the customer disclose that they are CONSIDERING, or have already
+    purchased, a COMPETITOR brand's product?
+    answer: "yes" | "no"
     competitor_brand: <brand name> | null
     competitor_model: <model name> | null
+    Indicator (→ "yes"): any mention of a brand other than their current one
+    in relation to a recent or future purchase.
 
-12. competitor_reasons
-    If the customer is looking at a competitor (Q11 = "yes"), WHY are they
-    more interested in the competitor's product compared with this client's
-    brand and vehicles? This is the headline insight for this campaign.
+11. competitor_reasons
+    If the customer is looking at a competitor (Q10 = "yes"), WHY are they
+    more interested in the competitor's product than this client's brand and
+    vehicles? This is the headline insight for this campaign.
     reasons: a list drawn from
       ["price", "monthly_payment", "spec", "ev_or_hybrid", "incentives",
        "range_or_efficiency", "feature", "reliability", "brand_preference",
-       "dealer_experience", "timing", "availability", "other"]
+       "dealer_experience", "part_exchange_value", "timing", "availability",
+       "other"]
+      ("part_exchange_value" covers a better part-exchange offer from either
+       the competitor or dissatisfaction with the current brand's offer.)
     detail: ≤50 words synthesising the reasoning in the customer's own terms.
 
 Also produce a SHORT, RANKED list of headline competitor drivers across the call:
@@ -399,23 +425,22 @@ Also produce a SHORT, RANKED list of headline competitor drivers across the call
     {
       "driver": <short label, e.g. "Higher monthly cost">,
       "explanation": <≤30 words: why this drove the customer>,
-      "quote": <≤12 word verbatim customer quote>
+      "quote": <≤20 word verbatim customer quote>
     }
 
 If the customer is NOT considering a competitor, set key_competitor_drivers = [].`;
 
 const CALL_CAMPAIGN_PARITY_QA_SCHEMA = `"campaign_answers": {
-    "consent_to_dealer":          { "answer": string, "quote": string },
-    "view_on_brand":              { "expressed": boolean, "sentiment": string | null, "summary": string, "quote": string },
-    "view_on_current_vehicle":    { "expressed": boolean, "sentiment": string | null, "summary": string, "quote": string },
-    "view_on_dealer":             { "expressed": boolean, "sentiment": string | null, "summary": string, "quote": string },
-    "view_on_finance_agreement":  { "expressed": boolean, "sentiment": string | null, "summary": string, "quote": string },
-    "decision_made":              { "answer": string, "detail": string, "quote": string },
-    "affordability_issues":       { "answer": string, "detail": string, "quote": string },
-    "lifestyle_change_vehicle":   { "answer": string, "detail": string, "quote": string },
-    "lifestyle_change_financial": { "answer": string, "detail": string, "quote": string },
-    "dealer_already_in_touch":    { "answer": string, "quote": string },
-    "competitor_vehicle":         { "answer": string, "competitor_brand": string | null, "competitor_model": string | null, "quote": string },
+    "consent_to_dealer":          { "answer": "yes" | "no", "quote": string },
+    "view_on_brand":              { "answer": "yes" | "no", "summary": string, "quote": string },
+    "view_on_current_vehicle":    { "answer": "yes" | "no", "summary": string, "quote": string },
+    "view_on_dealer":             { "answer": "yes" | "no", "summary": string, "quote": string },
+    "view_on_finance_agreement":  { "answer": "yes" | "no", "summary": string, "quote": string },
+    "decision_made":              { "answer": "yes" | "no", "detail": string, "quote": string },
+    "affordability_issues":       { "answer": "yes" | "no", "detail": string, "quote": string },
+    "lifestyle_change_vehicle":   { "answer": "yes" | "no", "detail": string, "quote": string },
+    "dealer_already_in_touch":    { "answer": "yes" | "no", "quote": string },
+    "competitor_vehicle":         { "answer": "yes" | "no", "competitor_brand": string | null, "competitor_model": string | null, "quote": string },
     "competitor_reasons":         { "reasons": string[], "detail": string, "quote": string },
     "key_competitor_drivers": [
       { "driver": string, "explanation": string, "quote": string }

@@ -250,7 +250,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     if (!interestLevel) throw new BadRequestException('interestLevel is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -260,7 +260,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, vehicleModel,
+      vehicleMake, parseCsvParam(vehicleModelsRaw),
     );
   }
 
@@ -302,7 +302,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     if (!competitor) throw new BadRequestException('competitor is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -312,7 +312,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, vehicleModel,
+      vehicleMake, parseCsvParam(vehicleModelsRaw),
     );
   }
 
@@ -325,11 +325,11 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, vehicleModel);
+    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
   }
 
   @Get('ops/interactions-by-opportunity-reason')
@@ -344,7 +344,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     if (!reason) throw new BadRequestException('reason is required');
     const { fromDate, toDate } = parseDateRange(from, to);
@@ -354,7 +354,7 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, vehicleModel,
+      vehicleMake, parseCsvParam(vehicleModelsRaw),
     );
   }
 
@@ -374,7 +374,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -386,7 +386,7 @@ export class InsightsController {
       agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
       vehicleMake,
-      vehicleModel,
+      parseCsvParam(vehicleModelsRaw),
     );
   }
 
@@ -401,17 +401,16 @@ export class InsightsController {
     @Query('competitorBrand') competitorBrand?: string,
     @Query('competitorReason') competitorReason?: string,
     @Query('viewKey') viewKey?: string,
-    @Query('viewSentiment') viewSentiment?: string,
+    @Query('viewAnswer') viewAnswer?: string,
     @Query('affordabilityAnswer') affordabilityAnswer?: string,
     @Query('lifestyleVehicleAnswer') lifestyleVehicleAnswer?: string,
-    @Query('lifestyleFinancialAnswer') lifestyleFinancialAnswer?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -444,26 +443,6 @@ export class InsightsController {
       );
     };
 
-    const normalizeViewSentiment = (v?: string):
-      | 'positive'
-      | 'negative'
-      | 'neutral'
-      | 'not_expressed'
-      | undefined => {
-      if (!v) return undefined;
-      if (
-        v === 'positive' ||
-        v === 'negative' ||
-        v === 'neutral' ||
-        v === 'not_expressed'
-      ) {
-        return v;
-      }
-      throw new BadRequestException(
-        `viewSentiment must be one of: positive, negative, neutral, not_expressed`,
-      );
-    };
-
     return this.svcSummary.getParityInteractions(
       fromDate,
       toDate,
@@ -475,10 +454,9 @@ export class InsightsController {
         competitorBrand: competitorBrand || undefined,
         competitorReason: competitorReason || undefined,
         viewKey: normalizeViewKey(viewKey),
-        viewSentiment: normalizeViewSentiment(viewSentiment),
+        viewAnswer: normalizeAnswer(viewAnswer),
         affordabilityAnswer: normalizeAnswer(affordabilityAnswer),
         lifestyleVehicleAnswer: normalizeAnswer(lifestyleVehicleAnswer),
-        lifestyleFinancialAnswer: normalizeAnswer(lifestyleFinancialAnswer),
       },
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
@@ -486,7 +464,7 @@ export class InsightsController {
       agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
       vehicleMake,
-      vehicleModel,
+      parseCsvParam(vehicleModelsRaw),
     );
   }
 
@@ -538,11 +516,11 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('vehicleMake') vehicleMake?: string,
-    @Query('vehicleModel') vehicleModel?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, vehicleModel);
+    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
   }
 
   @Get('summary/objections')
@@ -677,6 +655,13 @@ function normalizeInteractionFilter(raw?: string): InteractionFilter {
 }
 
 function parseExcludeOutcomes(raw?: string): string[] | undefined {
+  if (!raw) return undefined;
+  const items = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return items.length ? items : undefined;
+}
+
+// Comma-separated query param → trimmed string array (e.g. multi-select model filter).
+function parseCsvParam(raw?: string): string[] | undefined {
   if (!raw) return undefined;
   const items = raw.split(',').map((s) => s.trim()).filter(Boolean);
   return items.length ? items : undefined;
