@@ -54,6 +54,15 @@ function toggleCommonExclusions() {
   }
 }
 
+const allOutcomesExcluded = computed(() =>
+  outcomeOptions.value.length > 0 &&
+  excludeOutcomes.value.length === outcomeOptions.value.length,
+);
+
+function toggleAllOutcomes() {
+  excludeOutcomes.value = allOutcomesExcluded.value ? [] : [...outcomeOptions.value];
+}
+
 function isoStartOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -425,10 +434,10 @@ function parityAnswerChip(answer: string | null | undefined) {
 // Each view is now a yes/no "did the customer express a NEGATIVE view?" answer
 // (yes = a concern was raised). `rowField` maps to the projected drill-down column.
 const viewKeys = [
-  { key: "brand", label: "Brand", rowField: "view_brand_answer" },
-  { key: "current_vehicle", label: "Current vehicle", rowField: "view_vehicle_answer" },
-  { key: "dealer", label: "Dealer", rowField: "view_dealer_answer" },
-  { key: "finance_agreement", label: "Finance agreement", rowField: "view_finance_answer" },
+  { key: "brand", label: "View on Brand", rowField: "view_brand_answer", summaryField: "view_brand_summary", quoteField: "view_brand_quote" },
+  { key: "current_vehicle", label: "View on Current Vehicle", rowField: "view_vehicle_answer", summaryField: "view_vehicle_summary", quoteField: "view_vehicle_quote" },
+  { key: "dealer", label: "View on Dealer", rowField: "view_dealer_answer", summaryField: "view_dealer_summary", quoteField: "view_dealer_quote" },
+  { key: "finance_agreement", label: "View on Finance Agreement", rowField: "view_finance_answer", summaryField: "view_finance_summary", quoteField: "view_finance_quote" },
 ] as const;
 
 const viewBuckets = ["yes", "no"] as const;
@@ -447,8 +456,8 @@ function viewAnswerColor(bucket: string) {
 }
 
 function viewAnswerLabel(bucket: string | null | undefined) {
-  if (bucket === "yes") return "negative view";
-  if (bucket === "no") return "no concerns";
+  if (bucket === "yes") return "negative";
+  if (bucket === "no") return "none";
   return "not raised";
 }
 
@@ -459,14 +468,18 @@ function viewAnswerLabel(bucket: string | null | undefined) {
 const situationKeys = [
   {
     key: "affordability_issues",
-    label: "Affordability",
+    label: "Affordability Issues",
     rowField: "affordability_answer",
+    detailField: "affordability_detail",
+    quoteField: "affordability_quote",
     buildCriteria: (b: string) => ({ affordabilityAnswer: b }),
   },
   {
     key: "lifestyle_change_vehicle",
     label: "Lifestyle change",
     rowField: "lifestyle_vehicle_answer",
+    detailField: "lifestyle_vehicle_detail",
+    quoteField: "lifestyle_vehicle_quote",
     buildCriteria: (b: string) => ({ lifestyleVehicleAnswer: b }),
   },
 ] as const;
@@ -475,6 +488,14 @@ function situationBarColor(bucket: string) {
   if (bucket === "yes") return "var(--danger, #ef4444)";
   if (bucket === "no") return "var(--success, #22c55e)";
   return "#94a3b8";
+}
+
+// For affordability / lifestyle, a "yes" is a concern — so yes is red, no green
+// (flipped from parityAnswerChip, which treats yes as positive).
+function situationAnswerChip(answer: string | null | undefined) {
+  if (answer === "yes") return "chip chip--danger";
+  if (answer === "no") return "chip chip--success";
+  return "chip chip--secondary";
 }
 
 async function toggleInterest(level: string) {
@@ -598,46 +619,64 @@ onMounted(async () => {
         </div>
       </div>
       <div class="tile-body">
-        <div class="filters-row">
-          <div class="filter-group">
-            <label class="label">From</label>
-            <input type="date" v-model="fromDateStr" class="input input--date" />
+        <div class="filters-panel">
+          <!-- Left: dates, channel, campaign, agent -->
+          <div class="filters-left">
+            <div class="filters-row">
+              <div class="filter-group">
+                <label class="label">From</label>
+                <input type="date" v-model="fromDateStr" class="input input--date" />
+              </div>
+              <div class="filter-group">
+                <label class="label">To</label>
+                <input type="date" v-model="toDateStr" class="input input--date" />
+              </div>
+              <div class="filter-group">
+                <label class="label">Channel</label>
+                <select v-model="interactionFilter" class="select select--sm">
+                  <option value="calls">Calls only</option>
+                  <option value="chats">Chats only</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
+            </div>
+            <div class="filters-row">
+              <div class="filter-group">
+                <label class="label">Campaign</label>
+                <select v-model="campaign" class="select select--sm">
+                  <option value="">All</option>
+                  <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="label">Agent</label>
+                <select v-model="agent" class="select select--sm">
+                  <option value="">All</option>
+                  <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="filters-row">
+              <button class="btn btn--primary" :disabled="loading" @click="loadAll">
+                {{ loading ? "Loading..." : "Load" }}
+              </button>
+            </div>
           </div>
-          <div class="filter-group">
-            <label class="label">To</label>
-            <input type="date" v-model="toDateStr" class="input input--date" />
-          </div>
-          <div class="filter-group">
-            <label class="label">Channel</label>
-            <select v-model="interactionFilter" class="select select--sm">
-              <option value="calls">Calls only</option>
-              <option value="chats">Chats only</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label class="label">Campaign</label>
-            <select v-model="campaign" class="select select--sm">
-              <option value="">All</option>
-              <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label class="label">Agent</label>
-            <select v-model="agent" class="select select--sm">
-              <option value="">All</option>
-              <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
-            </select>
-          </div>
-          <div v-if="vehicleMakeOptions.length" class="filter-group">
-            <label class="label">Make</label>
-            <select v-model="vehicleMake" class="select select--sm">
+
+          <!-- Right: Make/Model (col 1) and Outcomes (col 2) on a shared 4-row grid
+               so the controls line up across the columns:
+                 row 1 = Make heading        / Exclude-Outcomes heading
+                 row 2 = Make dropdown       / Select-all toggle
+                 row 3 = Model heading       / Exclude test/abandoned toggle
+                 row 4 = Model multi-select  / Outcomes multi-select -->
+          <div class="filters-right">
+            <!-- Column 1: Make + Model -->
+            <label v-if="vehicleMakeOptions.length" class="label fr-c1 fr-r1">Make</label>
+            <select v-if="vehicleMakeOptions.length" v-model="vehicleMake" class="select select--sm fr-c1 fr-r2">
               <option value="">All</option>
               <option v-for="m in vehicleMakeOptions" :key="m" :value="m">{{ m }}</option>
             </select>
-          </div>
-          <div v-if="vehicleModelOptions.length" class="filter-group">
-            <label class="label">
+            <label v-if="vehicleModelOptions.length" class="label fr-c1 fr-r3">
               Model
               <span v-if="vehicleMake" style="font-weight: 400; opacity: 0.6">({{ vehicleMake }} only)</span>
               <button
@@ -648,34 +687,36 @@ onMounted(async () => {
                 @click="vehicleModels = []"
               >Clear ({{ vehicleModels.length }})</button>
             </label>
-            <select v-model="vehicleModels" multiple class="select select--sm select--multi">
+            <select v-if="vehicleModelOptions.length" v-model="vehicleModels" multiple class="select select--sm select--multi fr-c1 fr-r4" style="height: 190px">
               <option v-for="m in vehicleModelOptions" :key="m" :value="m">{{ m }}</option>
             </select>
+
+            <!-- Column 2: Outcomes -->
+            <label v-if="outcomeOptions.length" class="label fr-c2 fr-r1">Exclude Outcomes</label>
+            <button
+              v-if="outcomeOptions.length"
+              type="button"
+              class="btn-quick-exclude fr-c2 fr-r2"
+              style="justify-self: start"
+              @click="toggleAllOutcomes"
+            >{{ allOutcomesExcluded ? "Clear all" : "Select all" }}</button>
+            <button
+              v-if="commonExclusionsAvailable.length"
+              type="button"
+              class="btn-quick-exclude fr-c2 fr-r3"
+              :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
+              style="justify-self: start"
+              @click="toggleCommonExclusions"
+            >{{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}</button>
+            <select v-if="outcomeOptions.length" v-model="excludeOutcomes" multiple class="select select--sm select--multi fr-c2 fr-r4" style="height: 190px">
+              <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
+                <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
+              </optgroup>
+              <optgroup label="All outcomes">
+                <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
+              </optgroup>
+            </select>
           </div>
-          <div v-if="outcomeOptions.length" class="filter-group">
-            <label class="label">Exclude Outcomes</label>
-            <div class="exclude-outcomes-wrap">
-              <button
-                v-if="commonExclusionsAvailable.length"
-                class="btn-quick-exclude"
-                :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
-                @click="toggleCommonExclusions"
-              >
-                {{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}
-              </button>
-              <select v-model="excludeOutcomes" multiple class="select select--sm select--multi">
-                <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
-                  <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
-                </optgroup>
-                <optgroup label="All outcomes">
-                  <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
-                </optgroup>
-              </select>
-            </div>
-          </div>
-          <button class="btn btn--primary" style="margin-top: 18px" :disabled="loading" @click="loadAll">
-            {{ loading ? "Loading..." : "Load" }}
-          </button>
         </div>
 
         <!-- Compare-to controls -->
@@ -889,7 +930,7 @@ onMounted(async () => {
                   <span class="chip chip--success" style="font-size: 11px">Opportunity</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
               </div>
@@ -924,7 +965,7 @@ onMounted(async () => {
                   <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
               </div>
@@ -955,8 +996,10 @@ onMounted(async () => {
         </div>
         <div class="tile-body">
 
-          <!-- Consent to dealer -->
-          <div class="parity-sub-title">Consent to dealer</div>
+          <!-- Consent + decision, shown side by side -->
+          <div class="parity-two-col">
+          <div class="parity-col">
+          <div class="parity-sub-title">Consent to Dealer Contact</div>
           <div class="parity-sub-desc">Did the customer agree to have their details passed to the dealer?</div>
 
           <div
@@ -1003,15 +1046,18 @@ onMounted(async () => {
                   <span :class="parityAnswerChip(ix.consent_answer)" style="font-size: 11px">consent: {{ ix.consent_answer || 'n/a' }}</span>
                   <span v-if="ix.outcome" class="chip chip--info" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.consent_quote" class="parity-drill-quote">"{{ ix.consent_quote }}"</div>
+                <div v-else class="drill-row-summary" style="opacity: 0.5">(no quote captured)</div>
               </div>
             </div>
           </div>
+          </div>
 
+          <div class="parity-col">
           <!-- Has the customer already decided? -->
-          <div class="parity-sub-title" style="margin-top: 18px">Has the customer already decided?</div>
+          <div class="parity-sub-title">Has the customer already decided?</div>
           <div class="parity-sub-desc">
             Drill-down rows show whether the dealer had already been in touch with the customer.
           </div>
@@ -1067,11 +1113,15 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.decision_detail" class="drill-row-summary">{{ ix.decision_detail }}</div>
+                <div v-else class="drill-row-summary" style="opacity: 0.5">(no decision detail)</div>
+                <div v-if="ix.decision_quote" class="parity-drill-quote">"{{ ix.decision_quote }}"</div>
               </div>
             </div>
+          </div>
+          </div>
           </div>
 
           <!-- Customer Views -->
@@ -1133,9 +1183,11 @@ onMounted(async () => {
                     >{{ vk.label }}: {{ viewAnswerLabel(ix[vk.rowField]) }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
-                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                  <div v-if="ix[vk.summaryField]" class="drill-row-summary">{{ ix[vk.summaryField] }}</div>
+                  <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                  <div v-if="ix[vk.quoteField]" class="parity-drill-quote">"{{ ix[vk.quoteField] }}"</div>
                 </div>
               </div>
             </div>
@@ -1162,7 +1214,7 @@ onMounted(async () => {
                 class="views-row"
                 @click="toggleParity('situation:' + sk.key + ':' + bucket, sk.buildCriteria(bucket))"
               >
-                <span :class="parityAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 11px">
+                <span :class="situationAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 11px">
                   {{ bucket === 'n_a' ? 'n/a' : bucket }}
                 </span>
                 <ParityBar
@@ -1193,14 +1245,16 @@ onMounted(async () => {
                   @click="openDetail(ix.recordingId)"
                 >
                   <div class="drill-row-top">
-                    <span :class="parityAnswerChip(ix[sk.rowField])" style="font-size: 11px">
+                    <span :class="situationAnswerChip(ix[sk.rowField])" style="font-size: 11px">
                       {{ sk.label }}: {{ ix[sk.rowField] || 'n/a' }}
                     </span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
-                  <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                  <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
+                  <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                  <div v-if="ix[sk.quoteField]" class="parity-drill-quote">"{{ ix[sk.quoteField] }}"</div>
                 </div>
               </div>
             </div>
@@ -1303,7 +1357,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
               </div>
@@ -1360,7 +1414,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
               </div>
@@ -1411,7 +1465,7 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
                 </div>
@@ -1473,7 +1527,7 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
                 </div>
@@ -1685,6 +1739,50 @@ onMounted(async () => {
   border-radius: var(--radius-lg);
 }
 
+/* ── Filters panel (two sides) ────────────────────────────────────────────── */
+.filters-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  align-items: flex-start;
+}
+.filters-left {
+  flex: 1 1 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.filters-right {
+  flex: 1 1 340px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 18px;
+  row-gap: 6px;
+  align-items: start;
+}
+/* Shared 4-row grid so each control lines up with its counterpart in the other
+   column: heading/heading, make-dropdown/select-all, model-heading/exclude-test,
+   multi-select/multi-select. */
+.fr-c1 { grid-column: 1; }
+.fr-c2 { grid-column: 2; }
+.fr-r1 { grid-row: 1; }
+.fr-r2 { grid-row: 2; }
+.fr-r3 { grid-row: 3; }
+.fr-r4 { grid-row: 4; }
+.filters-right .select {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .filters-right {
+    grid-template-columns: 1fr;
+  }
+  .filters-right > * {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+}
+
 /* ── Exclude outcomes ─────────────────────────────────────────────────────── */
 .exclude-outcomes-wrap {
   display: flex;
@@ -1744,10 +1842,22 @@ onMounted(async () => {
 }
 
 .drill-row {
+  position: relative;
   padding: 8px 10px;
+  padding-bottom: 18px;
   border-radius: var(--radius-md, 6px);
   cursor: pointer;
   transition: background 0.15s;
+}
+
+/* TPS id pinned to the bottom-right of each drill-down item */
+.drill-row-tps {
+  position: absolute;
+  right: 10px;
+  bottom: 5px;
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  opacity: 0.5;
 }
 
 .drill-row:hover {
@@ -2148,6 +2258,30 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 8px;
+}
+
+/* Consent + decision shown side by side */
+.parity-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 28px;
+  align-items: start;
+}
+.parity-col {
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .parity-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Section-specific quote shown inside a parity drill-down row */
+.parity-drill-quote {
+  font-style: italic;
+  opacity: 0.75;
+  font-size: 12px;
+  margin-top: 3px;
 }
 
 .parity-section-divider {

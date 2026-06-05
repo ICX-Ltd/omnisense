@@ -1305,7 +1305,7 @@ export class InsightsSummaryService {
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.objection_assessments_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionId
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId, ia.interactionId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ii.objection_assessments_json IS NOT NULL
@@ -1826,7 +1826,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ii.overall_score >= @${paramOffset} AND ii.overall_score < @${paramOffset + 1}
@@ -1858,7 +1858,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT DISTINCT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        CROSS APPLY OPENJSON(ii.coaching_json, '$.needs_improvement') j
@@ -1896,7 +1896,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ${outcomeCondition}
@@ -1951,7 +1951,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ${outcomeCondition}
@@ -2007,7 +2007,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.coaching_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ${agentCondition}
@@ -2045,7 +2045,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.interest_level,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ${condition}
@@ -2079,7 +2079,7 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.competitor_purchased,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ii.has_purchased_elsewhere = 1
@@ -2176,7 +2176,7 @@ ${prompt}
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.is_opportunity,
               ii.not_opportunity_reason, ii.opportunity_json,
-              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ${isOpportunityFilter}
@@ -2562,17 +2562,33 @@ ${prompt}
           ia.interactionDateTime,
           ia.campaign,
           ia.outcome,
+          ia.interactionTpsId,
           JSON_VALUE(ii.campaign_answers_json, '$.consent_to_dealer.answer') AS consent_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.consent_to_dealer.quote') AS consent_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.decision_made.answer') AS decision_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.decision_made.detail') AS decision_detail,
+          JSON_VALUE(ii.campaign_answers_json, '$.decision_made.quote') AS decision_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.dealer_already_in_touch.answer') AS dealer_touch_answer,
           JSON_VALUE(ii.campaign_answers_json, '$.competitor_vehicle.competitor_brand') AS competitor_brand,
           JSON_VALUE(ii.campaign_answers_json, '$.competitor_vehicle.competitor_model') AS competitor_model,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.answer') AS view_brand_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.summary') AS view_brand_summary,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.quote') AS view_brand_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_current_vehicle.answer') AS view_vehicle_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_current_vehicle.summary') AS view_vehicle_summary,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_current_vehicle.quote') AS view_vehicle_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_dealer.answer') AS view_dealer_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_dealer.summary') AS view_dealer_summary,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_dealer.quote') AS view_dealer_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_finance_agreement.answer') AS view_finance_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_finance_agreement.summary') AS view_finance_summary,
+          JSON_VALUE(ii.campaign_answers_json, '$.view_on_finance_agreement.quote') AS view_finance_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.affordability_issues.answer') AS affordability_answer,
-          JSON_VALUE(ii.campaign_answers_json, '$.lifestyle_change_vehicle.answer') AS lifestyle_vehicle_answer
+          JSON_VALUE(ii.campaign_answers_json, '$.affordability_issues.detail') AS affordability_detail,
+          JSON_VALUE(ii.campaign_answers_json, '$.affordability_issues.quote') AS affordability_quote,
+          JSON_VALUE(ii.campaign_answers_json, '$.lifestyle_change_vehicle.answer') AS lifestyle_vehicle_answer,
+          JSON_VALUE(ii.campaign_answers_json, '$.lifestyle_change_vehicle.detail') AS lifestyle_vehicle_detail,
+          JSON_VALUE(ii.campaign_answers_json, '$.lifestyle_change_vehicle.quote') AS lifestyle_vehicle_quote
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
        WHERE ii.campaign_answers_json IS NOT NULL

@@ -120,4 +120,15 @@ Updates
   + 11-item campaign_answers + competitor drivers) exceeded 8000 output tokens and the model
   truncated mid-JSON, failing as "Invalid JSON". Also logs a clear warning when a response
   stops on max_tokens. APP_VERSION → 1.9.2.
+- Client Services Parity panel + filters polish (frontend, plus drill-down backend fields):
+  * Consent + "already decided" now sit side by side; "Consent to Dealer Contact" relabel.
+  * View cards: "View on Brand/Current Vehicle/Dealer/Finance Agreement"; chips shortened to
+    negative / none; each section's drill-down now shows that section's own summary/detail +
+    customer quote (getParityInteractions projects per-section summary/detail/quote).
+  * Affordability/Lifestyle chips now red for "yes" (a concern), green for "no".
+  * Filters restructured into a two-side panel: left = From/To/Channel then Campaign/Agent
+    then Load; right = a 4-row grid lining up Make/Model (col 1) with Outcomes (col 2), with
+    a Select all / Clear all toggle on the outcomes list.
+  * interactionTpsId shown bottom-right of every drill-down item (added to all drill SELECTs).
+  APP_VERSION → 1.9.3. NOTE: backend redeploy needed for the per-section drill content + TPS id.
 
