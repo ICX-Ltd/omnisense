@@ -115,4 +115,9 @@ Updates
   stays empty (e.g. Parity) while every other field populates. DELETEs call.base only when
   it lacks the schema placeholder (idempotent); restart the backend to reseed the canonical
   base. No app code change — operational fix only.
+- Fix: raised AnthropicProvider max_tokens 8000 → 16000. Once call.base began injecting the
+  Parity Q&A, the full insights JSON (13 operations dimensions + coaching + client services
+  + 11-item campaign_answers + competitor drivers) exceeded 8000 output tokens and the model
+  truncated mid-JSON, failing as "Invalid JSON". Also logs a clear warning when a response
+  stops on max_tokens. APP_VERSION → 1.9.2.
 
