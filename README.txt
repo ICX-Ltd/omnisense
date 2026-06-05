@@ -108,4 +108,11 @@ Updates
   frontend swallows filter-load errors, the whole /summary/filters response failed and BOTH
   the Make and Model filters silently disappeared. Reworked to fetch the two columns plainly
   and dedupe/sort in JS. APP_VERSION → 1.9.1.
+- Migration: backend/sql/fix-call-base-qa-placeholders.sql — heals environments whose
+  call.base predates the {{campaign_qa_section}} / {{campaign_qa_schema}} placeholders.
+  Without those slots the composer resolves a campaign's .qa/.qa_schema fragments but has
+  nowhere to inject them, so campaign_answers is never requested and campaign_answers_json
+  stays empty (e.g. Parity) while every other field populates. DELETEs call.base only when
+  it lacks the schema placeholder (idempotent); restart the backend to reseed the canonical
+  base. No app code change — operational fix only.
 
