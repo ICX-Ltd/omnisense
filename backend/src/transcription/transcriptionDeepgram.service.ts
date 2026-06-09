@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { VEHICLE_KEYTERMS, VEHICLE_REPLACEMENTS } from './vehicle-vocab';
 
 type DiarizedTurn = {
   speaker: number;
@@ -45,14 +46,36 @@ export class TranscriptionDeepgramService {
   async transcribeUrl(url: string) {
     if (!this.apiKey) throw new Error('Missing DEEPGRAM_API_KEY');
 
-    //nova-2-phonecall
-    const endpoint =
-      'https://api.deepgram.com/v1/listen' +
-      '?model=nova-2-phonecall' +
-      '&diarize=true' +
-      '&utterances=true' +
-      '&smart_format=true' +
-      '&punctuate=true';
+    // Model is env-tunable so we can A/B nova-3 (keyterm prompting) against the
+    // phone-tuned nova-2-phonecall on real calls without redeploying.
+    const model = process.env.DEEPGRAM_MODEL || 'nova-2-phonecall';
+
+    const params = new URLSearchParams({
+      model,
+      // UK English nudges British vocabulary/pronunciation; env-overridable in
+      // case a model variant rejects the regional locale.
+      language: process.env.DEEPGRAM_LANGUAGE || 'en-GB',
+      diarize: 'true',
+      utterances: 'true',
+      smart_format: 'true',
+      punctuate: 'true',
+    });
+
+    // Bias recognition toward our vehicle vocabulary. nova-3 supports the newer,
+    // stronger keyterm prompting; nova-2 only supports keyword boosting.
+    if (model.startsWith('nova-3')) {
+      for (const term of VEHICLE_KEYTERMS) params.append('keyterm', term);
+    } else {
+      // :2 intensifier nudges weighting up without over-biasing.
+      for (const term of VEHICLE_KEYTERMS) params.append('keywords', `${term}:2`);
+    }
+
+    // Deterministic safety net for stubborn, well-known mishears (blind swap).
+    for (const [from, to] of VEHICLE_REPLACEMENTS) {
+      params.append('replace', `${from}:${to}`);
+    }
+
+    const endpoint = `https://api.deepgram.com/v1/listen?${params.toString()}`;
 
     const res = await fetch(endpoint, {
       method: 'POST',
