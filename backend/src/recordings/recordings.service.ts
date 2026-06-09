@@ -857,17 +857,32 @@ export class RecordingsService {
   ) {
     const errors: Array<{ id: string; error: string }> = [];
 
-    for (const id of ids) {
-      try {
-        await processor(id);
-      } catch (e: any) {
-        const msg: string = e?.message ?? String(e);
-        this.logger.error(`Batch job ${jobId} — item ${id} failed: ${msg}`);
-        errors.push({ id, error: msg });
-        await this.batchJobRepo.increment({ id: jobId }, 'errorCount', 1);
+    const concurrency = Math.max(
+      1,
+      parseInt(process.env.INSIGHTS_BATCH_CONCURRENCY ?? '5', 10) || 5,
+    );
+    let cursor = 0;
+    const runWorker = async () => {
+      for (;;) {
+        const idx = cursor++; // atomic under single-threaded event loop
+        if (idx >= ids.length) return;
+        const id = ids[idx];
+        try {
+          await processor(id);
+        } catch (e: any) {
+          const msg: string = e?.message ?? String(e);
+          this.logger.error(`Batch job ${jobId} — item ${id} failed: ${msg}`);
+          errors.push({ id, error: msg });
+          await this.batchJobRepo.increment({ id: jobId }, 'errorCount', 1);
+        }
+        await this.batchJobRepo.increment({ id: jobId }, 'progress', 1);
       }
-      await this.batchJobRepo.increment({ id: jobId }, 'progress', 1);
-    }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, ids.length) }, () =>
+        runWorker(),
+      ),
+    );
 
     await this.batchJobRepo.update(jobId, {
       status: 'completed',

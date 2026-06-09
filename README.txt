@@ -132,3 +132,10 @@ Updates
   * interactionTpsId shown bottom-right of every drill-down item (added to all drill SELECTs).
   APP_VERSION → 1.9.3. NOTE: backend redeploy needed for the per-section drill content + TPS id.
 
+2026-06-09
+- Insights batch processing now runs concurrently. runBatchBackground (recordings.service.ts)
+  replaces its serial for-loop with a bounded worker pool (default 5, tunable via
+  INSIGHTS_BATCH_CONCURRENCY); cursor++ hands out each id once and progress/errorCount stay
+  atomic, so a batch is bottlenecked on the slowest N in flight rather than the sum of all.
+  Backend redeploy needed to take effect. APP_VERSION → 1.9.4.
+
