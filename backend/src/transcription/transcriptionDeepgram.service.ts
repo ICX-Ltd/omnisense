@@ -130,6 +130,12 @@ export class TranscriptionDeepgramService {
       provider: 'deepgram',
       text: fullText,
       turns,
+      // Audio length (seconds) for per-minute cost tracking. Deepgram returns it
+      // in metadata.duration.
+      durationSeconds:
+        typeof json?.metadata?.duration === 'number'
+          ? json.metadata.duration
+          : null,
       // raw: json, // keep for testing; remove for production
     };
   }

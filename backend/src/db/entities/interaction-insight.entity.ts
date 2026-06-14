@@ -34,6 +34,23 @@ export class InteractionInsight {
   @Column({ type: 'varchar', length: 50, default: 'v3' })
   extractorVersion!: string;
 
+  // Token usage for cost tracking. Successful-attempt tokens, attempt count, and
+  // tokens burned on failed attempts (retry waste). Populated by generateInsights.
+  @Column({ type: 'int', nullable: true })
+  insight_input_tokens!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  insight_output_tokens!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  insight_attempts!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  insight_failed_input_tokens!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  insight_failed_output_tokens!: number | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

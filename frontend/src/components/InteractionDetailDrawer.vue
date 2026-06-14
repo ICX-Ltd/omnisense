@@ -66,6 +66,7 @@
                     <div v-if="detailData.interaction.interactionSource"><span class="drawer-label">Source</span><span class="drawer-value">{{ detailData.interaction.interactionSource }}</span></div>
                     <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
                     <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span class="chip chip--secondary">{{ detailData.interaction.outcome }}</span></div>
+                    <div v-if="detailData.insight?.dealer_name"><span class="drawer-label">Dealer</span><span class="chip chip--dealer" :title="detailData.insight.dealer_inferred ? 'Inferred from transcript (no source dealer)' : 'From source data'">&#127970; {{ detailData.insight.dealer_name }}<sup v-if="detailData.insight.dealer_inferred" class="chip-infer">*</sup></span></div>
                   </div>
                   <div v-if="detailData.interaction.recordingUrl && !isChat" class="audio-player">
                     <div class="drawer-label" style="margin-bottom: 6px">Recording</div>
@@ -440,6 +441,30 @@
                   </div>
                 </div>
 
+                <!-- Quote Grounding -->
+                <div v-if="quoteGrounding && quoteGrounding.checked" class="drawer-section">
+                  <div class="drawer-section-title">
+                    Quote Grounding
+                    <span class="chip chip--success" style="font-size: 10px; margin-left: 8px">{{ quoteGrounding.verified }}/{{ quoteGrounding.checked }} verified</span>
+                    <span v-if="quoteGrounding.missing" class="chip chip--danger" style="font-size: 10px; margin-left: 4px">{{ quoteGrounding.missing }} not found</span>
+                    <span v-if="quoteGrounding.weak" class="chip chip--warning" style="font-size: 10px; margin-left: 4px">{{ quoteGrounding.weak }} weak</span>
+                  </div>
+                  <div class="hint" style="margin-bottom: 8px">
+                    Checks each extracted verbatim quote against the transcript. <strong>Not found</strong> likely means the model fabricated or mis-attributed the quote.
+                  </div>
+                  <div v-if="!flaggedQuotes.length" class="hint" style="color: var(--success)">
+                    All {{ quoteGrounding.checked }} quote{{ quoteGrounding.checked === 1 ? '' : 's' }} verified against the transcript.
+                  </div>
+                  <div v-for="it in flaggedQuotes" :key="it.field" class="qg-row">
+                    <div class="qg-head">
+                      <span class="chip" :class="it.status === 'missing' ? 'chip--danger' : 'chip--warning'" style="font-size: 10px">{{ it.status }}</span>
+                      <span class="qg-label">{{ it.label }}</span>
+                      <span class="qg-score">{{ Math.round(it.score * 100) }}% match</span>
+                    </div>
+                    <div class="qg-quote">"{{ it.quote }}"</div>
+                  </div>
+                </div>
+
                 <!-- Risk Flags -->
                 <div v-if="detailData.insight?.risk_flags?.length" class="drawer-section">
                   <div class="drawer-section-title">Risk Flags</div>
@@ -643,6 +668,15 @@ const isChat = computed(
 // ─── campaign Q&A (e.g. Parity) ─────────────────────────────────────────────
 const campaignAnswers = computed<any>(
   () => detailData.value?.insight?.campaign_answers ?? null,
+);
+
+// ─── quote grounding (QA trust signal) ──────────────────────────────────────
+const quoteGrounding = computed<any>(
+  () => detailData.value?.insight?.quote_grounding ?? null,
+);
+// Only the suspicious ones need attention — verified quotes are the happy path.
+const flaggedQuotes = computed<any[]>(
+  () => (quoteGrounding.value?.items ?? []).filter((i: any) => i.status !== "verified"),
 );
 
 const viewKeys = [
@@ -1422,6 +1456,34 @@ const chatMessages = computed<ChatMessage[]>(() => {
 
 .parity-quote {
   grid-column: 1 / -1;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* Quote grounding — flagged (weak / missing) quotes */
+.qg-row {
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.qg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.qg-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.qg-score {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.qg-quote {
+  margin-top: 3px;
   font-size: 11px;
   font-style: italic;
   color: var(--muted);

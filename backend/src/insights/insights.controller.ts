@@ -523,6 +523,22 @@ export class InsightsController {
     return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
   }
 
+  @Get('usage')
+  async insightsUsage(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getInsightsUsage(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
+  }
+
   @Get('summary/objections')
   async summaryObjections(
     @Query('from') from?: string,

@@ -5,6 +5,7 @@ import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import ParityBar from "./ParityBar.vue";
+import OutcomeDonut from "./OutcomeDonut.vue";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
@@ -118,25 +119,37 @@ const csData = ref<any>(null);
 const opportunityData = ref<any>(null);
 
 // Interest level drill-down
-const expandedInterest = ref<string | null>(null);
-const interestInteractions = ref<any[]>([]);
-const loadingInterest = ref(false);
+// Each drill row tracks its own open state + interactions so multiple rows
+// (separate stats) can be open at once and toggle independently.
+const openInterest = ref<Record<string, boolean>>({});
+const interestInteractionsMap = ref<Record<string, any[]>>({});
+const loadingInterestMap = ref<Record<string, boolean>>({});
+function isInterestOpen(key: string) { return !!openInterest.value[key]; }
 
 // Competitor drill-down
-const expandedCompetitor = ref<string | null>(null);
-const competitorInteractions = ref<any[]>([]);
-const loadingCompetitor = ref(false);
+const openCompetitor = ref<Record<string, boolean>>({});
+const competitorInteractionsMap = ref<Record<string, any[]>>({});
+const loadingCompetitorMap = ref<Record<string, boolean>>({});
+function isCompetitorOpen(key: string) { return !!openCompetitor.value[key]; }
 
 // Opportunity drill-down
-const expandedOpportunityReason = ref<string | null>(null);
-const opportunityInteractions = ref<any[]>([]);
-const loadingOpportunityReason = ref(false);
+const openOpportunityReason = ref<Record<string, boolean>>({});
+const opportunityInteractionsMap = ref<Record<string, any[]>>({});
+const loadingOpportunityReasonMap = ref<Record<string, boolean>>({});
+function isOpportunityOpen(key: string) { return !!openOpportunityReason.value[key]; }
 
 // Parity campaign analysis
 const parityData = ref<any>(null);
-const expandedParity = ref<string | null>(null);
-const parityInteractions = ref<any[]>([]);
-const loadingParityInteractions = ref(false);
+// Parity drill-downs are independently toggleable: each drill key tracks its own
+// open state + interactions, so separate stats (e.g. the four negative-view cards)
+// open and close without affecting one another.
+const openParity = ref<Record<string, boolean>>({});
+const parityInteractionsMap = ref<Record<string, any[]>>({});
+const loadingParityMap = ref<Record<string, boolean>>({});
+
+function isParityOpen(key: string) {
+  return !!openParity.value[key];
+}
 
 // ── Period-vs-period comparison ──────────────────────────────────────────────
 type CompareMode = "previous" | "last_year" | "custom";
@@ -211,6 +224,42 @@ const compareWindowLabel = computed(() => {
     d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
   return `${fmt(f)} → ${fmt(t)}`;
 });
+
+// Share of customers (with Parity answers) who raised a negative view on at least
+// one of brand / vehicle / dealer / finance. Denominator is parityData.total — the
+// interactions that actually answered the views questions — so it matches the
+// per-view Customer Views cards. null when there's no Parity data in scope.
+const negativeViewRate = computed<number | null>(() => {
+  const d = parityData.value;
+  if (!d || !d.total) return null;
+  return Math.round((d.any_negative_view / d.total) * 100);
+});
+const negativeViewRateCompare = computed<number | null>(() => {
+  const d = parityDataCompare.value;
+  if (!d || !d.total) return null;
+  return Math.round((d.any_negative_view / d.total) * 100);
+});
+
+// Volume-by-outcome for the overview donut. Mapped to the chart's {label,count}
+// shape; compare data is null unless a comparison period is loaded.
+const outcomeChartData = computed(() =>
+  (csData.value?.by_outcome ?? []).map((o: any) => ({ label: o.outcome, count: o.count })),
+);
+const outcomeChartCompare = computed(() =>
+  csDataCompare.value
+    ? (csDataCompare.value.by_outcome ?? []).map((o: any) => ({ label: o.outcome, count: o.count }))
+    : null,
+);
+
+// Volume-by-vehicle-make for the overview donut, same shape/treatment as outcome.
+const vehicleMakeChartData = computed(() =>
+  (csData.value?.by_vehicle_make ?? []).map((m: any) => ({ label: m.vehicle_make, count: m.count })),
+);
+const vehicleMakeChartCompare = computed(() =>
+  csDataCompare.value
+    ? (csDataCompare.value.by_vehicle_make ?? []).map((m: any) => ({ label: m.vehicle_make, count: m.count }))
+    : null,
+);
 
 // Pretty delta between two numbers (returns label, sign, pct text).
 function compareDelta(current: number | null | undefined, prev: number | null | undefined) {
@@ -326,11 +375,18 @@ watch(vehicleMake, () => {
 async function loadAll() {
   loading.value = true;
   error.value = "";
-  expandedInterest.value = null;
-  expandedCompetitor.value = null;
-  expandedOpportunityReason.value = null;
-  expandedParity.value = null;
-  parityInteractions.value = [];
+  openInterest.value = {};
+  interestInteractionsMap.value = {};
+  loadingInterestMap.value = {};
+  openCompetitor.value = {};
+  competitorInteractionsMap.value = {};
+  loadingCompetitorMap.value = {};
+  openOpportunityReason.value = {};
+  opportunityInteractionsMap.value = {};
+  loadingOpportunityReasonMap.value = {};
+  openParity.value = {};
+  parityInteractionsMap.value = {};
+  loadingParityMap.value = {};
   detailId.value = null;
 
   const isParity = campaign.value === "Parity";
@@ -401,21 +457,23 @@ async function toggleParity(
     lifestyleVehicleAnswer?: string;
   },
 ) {
-  if (expandedParity.value === key) {
-    expandedParity.value = null;
+  // Toggle this key independently of any other open drill-down.
+  if (openParity.value[key]) {
+    delete openParity.value[key];
     return;
   }
-  expandedParity.value = key;
-  loadingParityInteractions.value = true;
+  openParity.value[key] = true;
+  // Re-fetch each open (avoids showing stale rows if filters changed since last open).
+  loadingParityMap.value[key] = true;
   try {
     const res = await axios.get(ApiPath.ParityInteractions, {
       params: { ...sharedParams.value, ...criteria, limit: 200 },
     });
-    parityInteractions.value = res.data;
+    parityInteractionsMap.value[key] = res.data;
   } catch {
-    parityInteractions.value = [];
+    parityInteractionsMap.value[key] = [];
   } finally {
-    loadingParityInteractions.value = false;
+    loadingParityMap.value[key] = false;
   }
 }
 
@@ -499,51 +557,51 @@ function situationAnswerChip(answer: string | null | undefined) {
 }
 
 async function toggleInterest(level: string) {
-  if (expandedInterest.value === level) {
-    expandedInterest.value = null;
+  if (openInterest.value[level]) {
+    delete openInterest.value[level];
     return;
   }
-  expandedInterest.value = level;
-  loadingInterest.value = true;
+  openInterest.value[level] = true;
+  loadingInterestMap.value[level] = true;
   try {
     const res = await axios.get(ApiPath.OpsInteractionsByInterestLevel, {
       params: { ...sharedParams.value, interestLevel: level, limit: 200 },
     });
-    interestInteractions.value = res.data;
-  } catch { interestInteractions.value = []; }
-  finally { loadingInterest.value = false; }
+    interestInteractionsMap.value[level] = res.data;
+  } catch { interestInteractionsMap.value[level] = []; }
+  finally { loadingInterestMap.value[level] = false; }
 }
 
 async function toggleCompetitor(competitor: string) {
-  if (expandedCompetitor.value === competitor) {
-    expandedCompetitor.value = null;
+  if (openCompetitor.value[competitor]) {
+    delete openCompetitor.value[competitor];
     return;
   }
-  expandedCompetitor.value = competitor;
-  loadingCompetitor.value = true;
+  openCompetitor.value[competitor] = true;
+  loadingCompetitorMap.value[competitor] = true;
   try {
     const res = await axios.get(ApiPath.OpsInteractionsByCompetitor, {
       params: { ...sharedParams.value, competitor, limit: 200 },
     });
-    competitorInteractions.value = res.data;
-  } catch { competitorInteractions.value = []; }
-  finally { loadingCompetitor.value = false; }
+    competitorInteractionsMap.value[competitor] = res.data;
+  } catch { competitorInteractionsMap.value[competitor] = []; }
+  finally { loadingCompetitorMap.value[competitor] = false; }
 }
 
 async function toggleOpportunityReason(reason: string) {
-  if (expandedOpportunityReason.value === reason) {
-    expandedOpportunityReason.value = null;
+  if (openOpportunityReason.value[reason]) {
+    delete openOpportunityReason.value[reason];
     return;
   }
-  expandedOpportunityReason.value = reason;
-  loadingOpportunityReason.value = true;
+  openOpportunityReason.value[reason] = true;
+  loadingOpportunityReasonMap.value[reason] = true;
   try {
     const res = await axios.get(ApiPath.OpsInteractionsByOpportunityReason, {
       params: { ...sharedParams.value, reason, limit: 200 },
     });
-    opportunityInteractions.value = res.data;
-  } catch { opportunityInteractions.value = []; }
-  finally { loadingOpportunityReason.value = false; }
+    opportunityInteractionsMap.value[reason] = res.data;
+  } catch { opportunityInteractionsMap.value[reason] = []; }
+  finally { loadingOpportunityReasonMap.value[reason] = false; }
 }
 
 function openDetail(recordingId: string) {
@@ -772,49 +830,28 @@ onMounted(async () => {
             </span>
           </div>
         </div>
-        <div class="stat">
-          <div class="stat-label">Dealer Leads</div>
-          <div class="stat-value chip chip--success">{{ csData.totals.leads }}</div>
-          <div v-if="csDataCompare" class="cmp-line">
-            <span>vs <strong>{{ fmtInt(csDataCompare.totals.leads) }}</strong></span>
-            <span :class="compareClass(compareDelta(csData.totals.leads, csDataCompare.totals.leads).dir)">
-              {{ compareArrow(compareDelta(csData.totals.leads, csDataCompare.totals.leads).dir) }}
-              {{ compareDelta(csData.totals.leads, csDataCompare.totals.leads).pctLabel }}
-            </span>
-          </div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">In-Market</div>
-          <div class="stat-value chip chip--info">{{ csData.totals.in_market }}</div>
-          <div v-if="csDataCompare" class="cmp-line">
-            <span>vs <strong>{{ fmtInt(csDataCompare.totals.in_market) }}</strong></span>
-            <span :class="compareClass(compareDelta(csData.totals.in_market, csDataCompare.totals.in_market).dir)">
-              {{ compareArrow(compareDelta(csData.totals.in_market, csDataCompare.totals.in_market).dir) }}
-              {{ compareDelta(csData.totals.in_market, csDataCompare.totals.in_market).pctLabel }}
-            </span>
-          </div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Lost Sales</div>
-          <div class="stat-value chip chip--danger">{{ csData.totals.lost_sales }}</div>
-          <div v-if="csDataCompare" class="cmp-line">
-            <span>vs <strong>{{ fmtInt(csDataCompare.totals.lost_sales) }}</strong></span>
-            <span :class="compareClass(compareDelta(csData.totals.lost_sales, csDataCompare.totals.lost_sales).dir)">
-              {{ compareArrow(compareDelta(csData.totals.lost_sales, csDataCompare.totals.lost_sales).dir) }}
-              {{ compareDelta(csData.totals.lost_sales, csDataCompare.totals.lost_sales).pctLabel }}
-            </span>
-          </div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Bought Elsewhere</div>
-          <div class="stat-value chip chip--warning">{{ csData.totals.purchased_elsewhere }}</div>
-          <div v-if="csDataCompare" class="cmp-line">
-            <span>vs <strong>{{ fmtInt(csDataCompare.totals.purchased_elsewhere) }}</strong></span>
-            <span :class="compareClass(compareDelta(csData.totals.purchased_elsewhere, csDataCompare.totals.purchased_elsewhere).dir)">
-              {{ compareArrow(compareDelta(csData.totals.purchased_elsewhere, csDataCompare.totals.purchased_elsewhere).dir) }}
-              {{ compareDelta(csData.totals.purchased_elsewhere, csDataCompare.totals.purchased_elsewhere).pctLabel }}
-            </span>
-          </div>
+        <!-- Negative View Rate — share of customers who raised ANY negative view
+             (brand / vehicle / dealer / finance). Sourced from the Parity campaign
+             answers, so it only has data when the Parity campaign is in scope. -->
+        <div class="stat stat--wide">
+          <div class="stat-label">Negative View Rate</div>
+          <template v-if="negativeViewRate !== null">
+            <div class="stat-value chip chip--danger">{{ negativeViewRate }}%</div>
+            <div class="stat-subnote">
+              {{ fmtInt(parityData.any_negative_view) }} of {{ fmtInt(parityData.total) }} — brand · vehicle · dealer · finance
+            </div>
+            <div v-if="negativeViewRateCompare !== null" class="cmp-line">
+              <span>vs <strong>{{ negativeViewRateCompare }}%</strong></span>
+              <span :class="compareClass(compareDelta(negativeViewRate, negativeViewRateCompare).dir)">
+                {{ compareArrow(compareDelta(negativeViewRate, negativeViewRateCompare).dir) }}
+                {{ compareDelta(negativeViewRate, negativeViewRateCompare).pctLabel }}
+              </span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="stat-value chip chip--secondary">—</div>
+            <div class="stat-subnote">Select the Parity campaign to populate</div>
+          </template>
         </div>
         <template v-if="opportunityData && opportunityData.classified > 0">
           <div class="stat">
@@ -838,6 +875,17 @@ onMounted(async () => {
             </div>
           </div>
         </template>
+
+        <!-- Volume breakdown donuts share the overview row with the stat cards.
+             Legend "vs N%" appears per slice when a compare period is loaded. -->
+        <div class="stat-chart">
+          <div class="stat-label">By Outcome</div>
+          <OutcomeDonut :data="outcomeChartData" :compare-data="outcomeChartCompare" :size="120" />
+        </div>
+        <div class="stat-chart">
+          <div class="stat-label">By Vehicle Make</div>
+          <OutcomeDonut :data="vehicleMakeChartData" :compare-data="vehicleMakeChartCompare" :size="120" />
+        </div>
       </div>
 
       <!-- Campaign comparison banner -->
@@ -913,15 +961,15 @@ onMounted(async () => {
               </div>
               <div class="metric-right">
                 <span class="count-pill">{{ opportunityData.opportunities }}</span>
-                <span class="expand-icon">{{ expandedOpportunityReason === '__opportunity' ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isOpportunityOpen('__opportunity') ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedOpportunityReason === '__opportunity'" class="drill-panel">
-              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
-              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isOpportunityOpen('__opportunity')" class="drill-panel">
+              <div v-if="loadingOpportunityReasonMap['__opportunity']" class="hint">Loading interactions...</div>
+              <div v-else-if="!(opportunityInteractionsMap['__opportunity'] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in opportunityInteractions"
+                v-for="ix in opportunityInteractionsMap['__opportunity']"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -930,6 +978,7 @@ onMounted(async () => {
                   <span class="chip chip--success" style="font-size: 11px">Opportunity</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -948,15 +997,15 @@ onMounted(async () => {
               </div>
               <div class="metric-right">
                 <span class="count-pill">{{ r.count }}</span>
-                <span class="expand-icon">{{ expandedOpportunityReason === r.reason ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isOpportunityOpen(r.reason) ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedOpportunityReason === r.reason" class="drill-panel">
-              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
-              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isOpportunityOpen(r.reason)" class="drill-panel">
+              <div v-if="loadingOpportunityReasonMap[r.reason]" class="hint">Loading interactions...</div>
+              <div v-else-if="!(opportunityInteractionsMap[r.reason] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in opportunityInteractions"
+                v-for="ix in opportunityInteractionsMap[r.reason]"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -965,6 +1014,7 @@ onMounted(async () => {
                   <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -1029,15 +1079,15 @@ onMounted(async () => {
                   </span>
                 </span>
                 <span class="count-pill">{{ parityData.consent[bucket] }}</span>
-                <span class="expand-icon">{{ expandedParity === 'consent:' + bucket ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isParityOpen('consent:' + bucket) ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedParity === 'consent:' + bucket" class="drill-panel">
-              <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-              <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isParityOpen('consent:' + bucket)" class="drill-panel">
+              <div v-if="loadingParityMap['consent:' + bucket]" class="hint">Loading interactions...</div>
+              <div v-else-if="!(parityInteractionsMap['consent:' + bucket] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in parityInteractions"
+                v-for="ix in parityInteractionsMap['consent:' + bucket]"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -1046,6 +1096,7 @@ onMounted(async () => {
                   <span :class="parityAnswerChip(ix.consent_answer)" style="font-size: 11px">consent: {{ ix.consent_answer || 'n/a' }}</span>
                   <span v-if="ix.outcome" class="chip chip--info" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.consent_quote" class="parity-drill-quote">"{{ ix.consent_quote }}"</div>
@@ -1089,15 +1140,15 @@ onMounted(async () => {
                   </span>
                 </span>
                 <span class="count-pill">{{ parityData.decision_made[bucket] }}</span>
-                <span class="expand-icon">{{ expandedParity === 'decision:' + bucket ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isParityOpen('decision:' + bucket) ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedParity === 'decision:' + bucket" class="drill-panel">
-              <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-              <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isParityOpen('decision:' + bucket)" class="drill-panel">
+              <div v-if="loadingParityMap['decision:' + bucket]" class="hint">Loading interactions...</div>
+              <div v-else-if="!(parityInteractionsMap['decision:' + bucket] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in parityInteractions"
+                v-for="ix in parityInteractionsMap['decision:' + bucket]"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -1113,6 +1164,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.decision_detail" class="drill-row-summary">{{ ix.decision_detail }}</div>
@@ -1143,51 +1195,55 @@ onMounted(async () => {
               <div
                 v-for="bucket in viewBuckets"
                 :key="vk.key + '-' + bucket"
-                class="views-row"
-                @click="toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewAnswer: bucket })"
               >
-                <span :class="viewAnswerChip(bucket)" style="font-size: 11px">
-                  {{ viewAnswerLabel(bucket) }}
-                </span>
-                <ParityBar
-                  variant="mini"
-                  :current="parityData.views[vk.key][bucket]"
-                  :total="parityData.total"
-                  :color="viewAnswerColor(bucket)"
-                  :compare-current="parityDataCompare?.views?.[vk.key]?.[bucket]"
-                  :compare-total="parityDataCompare?.total"
-                />
-                <span class="views-pct">{{ pctOfTotal(parityData.views[vk.key][bucket], parityData.total) }}%</span>
-                <span
-                  class="views-count"
-                  :title="parityDataCompare
-                    ? 'Compare period: ' + parityDataCompare.views[vk.key][bucket] + ' (' + compareDelta(parityData.views[vk.key][bucket], parityDataCompare.views[vk.key][bucket]).pctLabel + ')'
-                    : undefined"
-                >{{ parityData.views[vk.key][bucket] }}</span>
-                <span class="expand-icon views-expand">{{ expandedParity === 'view:' + vk.key + ':' + bucket ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-              <div v-if="expandedParity && expandedParity.startsWith('view:' + vk.key + ':')" class="drill-panel">
-                <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-                <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
                 <div
-                  v-else
-                  v-for="ix in parityInteractions"
-                  :key="ix.recordingId"
-                  class="drill-row"
-                  @click="openDetail(ix.recordingId)"
+                  class="views-row"
+                  @click="toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewAnswer: bucket })"
                 >
-                  <div class="drill-row-top">
-                    <span
-                      :class="viewAnswerChip(ix[vk.rowField])"
-                      style="font-size: 11px"
-                    >{{ vk.label }}: {{ viewAnswerLabel(ix[vk.rowField]) }}</span>
-                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
-                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span :class="viewAnswerChip(bucket)" style="font-size: 11px">
+                    {{ viewAnswerLabel(bucket) }}
+                  </span>
+                  <ParityBar
+                    variant="mini"
+                    :current="parityData.views[vk.key][bucket]"
+                    :total="parityData.total"
+                    :color="viewAnswerColor(bucket)"
+                    :compare-current="parityDataCompare?.views?.[vk.key]?.[bucket]"
+                    :compare-total="parityDataCompare?.total"
+                  />
+                  <span class="views-pct">{{ pctOfTotal(parityData.views[vk.key][bucket], parityData.total) }}%</span>
+                  <span
+                    class="views-count"
+                    :title="parityDataCompare
+                      ? 'Compare period: ' + parityDataCompare.views[vk.key][bucket] + ' (' + compareDelta(parityData.views[vk.key][bucket], parityDataCompare.views[vk.key][bucket]).pctLabel + ')'
+                      : undefined"
+                  >{{ parityData.views[vk.key][bucket] }}</span>
+                  <span class="expand-icon views-expand">{{ isParityOpen('view:' + vk.key + ':' + bucket) ? '&#9650;' : '&#9660;' }}</span>
+                </div>
+                <div v-if="isParityOpen('view:' + vk.key + ':' + bucket)" class="drill-panel">
+                  <div v-if="loadingParityMap['view:' + vk.key + ':' + bucket]" class="hint">Loading interactions...</div>
+                  <div v-else-if="!(parityInteractionsMap['view:' + vk.key + ':' + bucket] || []).length" class="hint">No interactions found.</div>
+                  <div
+                    v-else
+                    v-for="ix in parityInteractionsMap['view:' + vk.key + ':' + bucket]"
+                    :key="ix.recordingId"
+                    class="drill-row"
+                    @click="openDetail(ix.recordingId)"
+                  >
+                    <div class="drill-row-top">
+                      <span
+                        :class="viewAnswerChip(ix[vk.rowField])"
+                        style="font-size: 11px"
+                      >{{ vk.label }}: {{ viewAnswerLabel(ix[vk.rowField]) }}</span>
+                      <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
+                      <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
+                    </div>
+                    <div v-if="ix[vk.summaryField]" class="drill-row-summary">{{ ix[vk.summaryField] }}</div>
+                    <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                    <div v-if="ix[vk.quoteField]" class="parity-drill-quote">"{{ ix[vk.quoteField] }}"</div>
                   </div>
-                  <div v-if="ix[vk.summaryField]" class="drill-row-summary">{{ ix[vk.summaryField] }}</div>
-                  <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
-                  <div v-if="ix[vk.quoteField]" class="parity-drill-quote">"{{ ix[vk.quoteField] }}"</div>
                 </div>
               </div>
             </div>
@@ -1211,50 +1267,54 @@ onMounted(async () => {
               <div
                 v-for="bucket in (['yes','no','n_a'] as const)"
                 :key="sk.key + '-' + bucket"
-                class="views-row"
-                @click="toggleParity('situation:' + sk.key + ':' + bucket, sk.buildCriteria(bucket))"
               >
-                <span :class="situationAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 11px">
-                  {{ bucket === 'n_a' ? 'n/a' : bucket }}
-                </span>
-                <ParityBar
-                  variant="mini"
-                  :current="parityData.customer_situation[sk.key][bucket]"
-                  :total="parityData.total"
-                  :color="situationBarColor(bucket)"
-                  :compare-current="parityDataCompare?.customer_situation?.[sk.key]?.[bucket]"
-                  :compare-total="parityDataCompare?.total"
-                />
-                <span class="views-pct">{{ pctOfTotal(parityData.customer_situation[sk.key][bucket], parityData.total) }}%</span>
-                <span
-                  class="views-count"
-                  :title="parityDataCompare
-                    ? 'Compare period: ' + parityDataCompare.customer_situation[sk.key][bucket] + ' (' + compareDelta(parityData.customer_situation[sk.key][bucket], parityDataCompare.customer_situation[sk.key][bucket]).pctLabel + ')'
-                    : undefined"
-                >{{ parityData.customer_situation[sk.key][bucket] }}</span>
-                <span class="expand-icon views-expand">{{ expandedParity === 'situation:' + sk.key + ':' + bucket ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-              <div v-if="expandedParity && expandedParity.startsWith('situation:' + sk.key + ':')" class="drill-panel">
-                <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-                <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
                 <div
-                  v-else
-                  v-for="ix in parityInteractions"
-                  :key="ix.recordingId"
-                  class="drill-row"
-                  @click="openDetail(ix.recordingId)"
+                  class="views-row"
+                  @click="toggleParity('situation:' + sk.key + ':' + bucket, sk.buildCriteria(bucket))"
                 >
-                  <div class="drill-row-top">
-                    <span :class="situationAnswerChip(ix[sk.rowField])" style="font-size: 11px">
-                      {{ sk.label }}: {{ ix[sk.rowField] || 'n/a' }}
-                    </span>
-                    <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
-                    <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span :class="situationAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 11px">
+                    {{ bucket === 'n_a' ? 'n/a' : bucket }}
+                  </span>
+                  <ParityBar
+                    variant="mini"
+                    :current="parityData.customer_situation[sk.key][bucket]"
+                    :total="parityData.total"
+                    :color="situationBarColor(bucket)"
+                    :compare-current="parityDataCompare?.customer_situation?.[sk.key]?.[bucket]"
+                    :compare-total="parityDataCompare?.total"
+                  />
+                  <span class="views-pct">{{ pctOfTotal(parityData.customer_situation[sk.key][bucket], parityData.total) }}%</span>
+                  <span
+                    class="views-count"
+                    :title="parityDataCompare
+                      ? 'Compare period: ' + parityDataCompare.customer_situation[sk.key][bucket] + ' (' + compareDelta(parityData.customer_situation[sk.key][bucket], parityDataCompare.customer_situation[sk.key][bucket]).pctLabel + ')'
+                      : undefined"
+                  >{{ parityData.customer_situation[sk.key][bucket] }}</span>
+                  <span class="expand-icon views-expand">{{ isParityOpen('situation:' + sk.key + ':' + bucket) ? '&#9650;' : '&#9660;' }}</span>
+                </div>
+                <div v-if="isParityOpen('situation:' + sk.key + ':' + bucket)" class="drill-panel">
+                  <div v-if="loadingParityMap['situation:' + sk.key + ':' + bucket]" class="hint">Loading interactions...</div>
+                  <div v-else-if="!(parityInteractionsMap['situation:' + sk.key + ':' + bucket] || []).length" class="hint">No interactions found.</div>
+                  <div
+                    v-else
+                    v-for="ix in parityInteractionsMap['situation:' + sk.key + ':' + bucket]"
+                    :key="ix.recordingId"
+                    class="drill-row"
+                    @click="openDetail(ix.recordingId)"
+                  >
+                    <div class="drill-row-top">
+                      <span :class="situationAnswerChip(ix[sk.rowField])" style="font-size: 11px">
+                        {{ sk.label }}: {{ ix[sk.rowField] || 'n/a' }}
+                      </span>
+                      <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
+                      <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
+                    </div>
+                    <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
+                    <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                    <div v-if="ix[sk.quoteField]" class="parity-drill-quote">"{{ ix[sk.quoteField] }}"</div>
                   </div>
-                  <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
-                  <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
-                  <div v-if="ix[sk.quoteField]" class="parity-drill-quote">"{{ ix[sk.quoteField] }}"</div>
                 </div>
               </div>
             </div>
@@ -1337,15 +1397,15 @@ onMounted(async () => {
                   </span>
                 </span>
                 <span class="count-pill">{{ r.count }}</span>
-                <span class="expand-icon">{{ expandedParity === 'reason:' + r.reason ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isParityOpen('reason:' + r.reason) ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedParity === 'reason:' + r.reason" class="drill-panel">
-              <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-              <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isParityOpen('reason:' + r.reason)" class="drill-panel">
+              <div v-if="loadingParityMap['reason:' + r.reason]" class="hint">Loading interactions...</div>
+              <div v-else-if="!(parityInteractionsMap['reason:' + r.reason] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in parityInteractions"
+                v-for="ix in parityInteractionsMap['reason:' + r.reason]"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -1357,9 +1417,12 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.competitor_reasons_detail" class="drill-row-summary">{{ ix.competitor_reasons_detail }}</div>
+                <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.competitor_reasons_quote || ix.competitor_vehicle_quote" class="parity-drill-quote">"{{ ix.competitor_reasons_quote || ix.competitor_vehicle_quote }}"</div>
               </div>
             </div>
           </div>
@@ -1395,15 +1458,15 @@ onMounted(async () => {
                   </span>
                 </span>
                 <span class="count-pill">{{ b.count }}</span>
-                <span class="expand-icon">{{ expandedParity === 'brand:' + b.brand ? '&#9650;' : '&#9660;' }}</span>
+                <span class="expand-icon">{{ isParityOpen('brand:' + b.brand) ? '&#9650;' : '&#9660;' }}</span>
               </div>
             </div>
-            <div v-if="expandedParity === 'brand:' + b.brand" class="drill-panel">
-              <div v-if="loadingParityInteractions" class="hint">Loading interactions...</div>
-              <div v-else-if="!parityInteractions.length" class="hint">No interactions found.</div>
+            <div v-if="isParityOpen('brand:' + b.brand)" class="drill-panel">
+              <div v-if="loadingParityMap['brand:' + b.brand]" class="hint">Loading interactions...</div>
+              <div v-else-if="!(parityInteractionsMap['brand:' + b.brand] || []).length" class="hint">No interactions found.</div>
               <div
                 v-else
-                v-for="ix in parityInteractions"
+                v-for="ix in parityInteractionsMap['brand:' + b.brand]"
                 :key="ix.recordingId"
                 class="drill-row"
                 @click="openDetail(ix.recordingId)"
@@ -1414,9 +1477,12 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.competitor_reasons_detail" class="drill-row-summary">{{ ix.competitor_reasons_detail }}</div>
+                <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                <div v-if="ix.competitor_reasons_quote || ix.competitor_vehicle_quote" class="parity-drill-quote">"{{ ix.competitor_reasons_quote || ix.competitor_vehicle_quote }}"</div>
               </div>
             </div>
           </div>
@@ -1447,15 +1513,15 @@ onMounted(async () => {
                 </div>
                 <div class="metric-right">
                   <span class="count-pill">{{ r.count }}</span>
-                  <span class="expand-icon">{{ expandedInterest === r.interest_level ? '&#9650;' : '&#9660;' }}</span>
+                  <span class="expand-icon">{{ isInterestOpen(r.interest_level) ? '&#9650;' : '&#9660;' }}</span>
                 </div>
               </div>
-              <div v-if="expandedInterest === r.interest_level" class="drill-panel">
-                <div v-if="loadingInterest" class="hint">Loading interactions...</div>
-                <div v-else-if="!interestInteractions.length" class="hint">No interactions found.</div>
+              <div v-if="isInterestOpen(r.interest_level)" class="drill-panel">
+                <div v-if="loadingInterestMap[r.interest_level]" class="hint">Loading interactions...</div>
+                <div v-else-if="!(interestInteractionsMap[r.interest_level] || []).length" class="hint">No interactions found.</div>
                 <div
                   v-else
-                  v-for="ix in interestInteractions"
+                  v-for="ix in interestInteractionsMap[r.interest_level]"
                   :key="ix.recordingId"
                   class="drill-row"
                   @click="openDetail(ix.recordingId)"
@@ -1465,7 +1531,8 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
+                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
                 </div>
@@ -1496,11 +1563,11 @@ onMounted(async () => {
                 </div>
                 <div class="metric-right">
                   <span class="count-pill">{{ c.count }}</span>
-                  <span class="expand-icon">{{ expandedCompetitor === c.competitor ? '&#9650;' : '&#9660;' }}</span>
+                  <span class="expand-icon">{{ isCompetitorOpen(c.competitor) ? '&#9650;' : '&#9660;' }}</span>
                 </div>
               </div>
               <div
-                v-if="c.top_objections && c.top_objections.length && expandedCompetitor !== c.competitor"
+                v-if="c.top_objections && c.top_objections.length && !isCompetitorOpen(c.competitor)"
                 style="padding-left: 12px; margin-top: 3px"
               >
                 <div
@@ -1512,12 +1579,12 @@ onMounted(async () => {
                   <span class="count-pill" style="font-size: 11px; margin-left: 8px">{{ o.count }}</span>
                 </div>
               </div>
-              <div v-if="expandedCompetitor === c.competitor" class="drill-panel">
-                <div v-if="loadingCompetitor" class="hint">Loading interactions...</div>
-                <div v-else-if="!competitorInteractions.length" class="hint">No interactions found.</div>
+              <div v-if="isCompetitorOpen(c.competitor)" class="drill-panel">
+                <div v-if="loadingCompetitorMap[c.competitor]" class="hint">Loading interactions...</div>
+                <div v-else-if="!(competitorInteractionsMap[c.competitor] || []).length" class="hint">No interactions found.</div>
                 <div
                   v-else
-                  v-for="ix in competitorInteractions"
+                  v-for="ix in competitorInteractionsMap[c.competitor]"
                   :key="ix.recordingId"
                   class="drill-row"
                   @click="openDetail(ix.recordingId)"
@@ -1527,7 +1594,8 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
+                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
                 </div>
@@ -1582,6 +1650,7 @@ onMounted(async () => {
               <span class="chip chip--danger" style="font-size: 11px">lost sale</span>
               <span v-if="x.competitor_purchased" class="chip chip--warning" style="font-size: 11px">{{ x.competitor_purchased }}</span>
               <span class="chip chip--secondary" style="font-size: 11px">{{ x.campaign_detected || "unknown" }}</span>
+              <span v-if="x.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="x.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ x.dealer_name }}<sup v-if="x.dealer_inferred" class="chip-infer">*</sup></span>
               <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(x.interactionDateTime) }}</span>
             </div>
             <div class="drill-row-summary">{{ x.summary_short || "(no summary)" }}</div>
@@ -1730,13 +1799,34 @@ onMounted(async () => {
 /* ── Stats strip ──────────────────────────────────────────────────────────── */
 .stats-strip {
   display: flex;
-  gap: 16px;
+  gap: 16px 24px;
   flex-wrap: wrap;
+  align-items: flex-start;
   margin-top: 14px;
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+}
+/* Negative View Rate gets more room for its breakdown subnote. */
+.stat--wide {
+  min-width: 220px;
+}
+/* Donut breakdowns sit in the same overview row as the stat cards, set off by a
+   light divider. They wrap to the next line on narrow viewports. */
+.stat-chart {
+  flex: 1 1 320px;
+  min-width: 300px;
+  padding-left: 24px;
+  border-left: 1px solid var(--border);
+}
+.stat-chart .stat-label {
+  margin-bottom: 8px;
+}
+.stat-subnote {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* ── Filters panel (two sides) ────────────────────────────────────────────── */

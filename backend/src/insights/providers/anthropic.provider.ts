@@ -16,25 +16,32 @@ export class AnthropicProvider implements InsightsProvider {
 
   // Full call insights JSON (13 operations dimensions + coaching + client
   // services + the campaign Q&A blob for campaigns like Parity) can run well
-  // past 8k tokens. Cap high enough that the model never truncates mid-JSON —
-  // it only bills for tokens actually generated, so the ceiling is free.
-  private readonly maxTokens = 16000;
+  // past 16k tokens. Cap high enough that the model never truncates mid-JSON —
+  // it only bills for tokens actually generated, so the ceiling is effectively
+  // free. Haiku 4.5's output ceiling is 64k; tunable via env.
+  private readonly maxTokens =
+    parseInt(process.env.ANTHROPIC_INSIGHTS_MAX_TOKENS ?? '32000', 10) || 32000;
 
   async extract(prompt: string): Promise<InsightsProviderResult> {
-    const resp = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      temperature: 0.1,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    // Stream: above ~16k max_tokens a single non-streamed request risks an SDK
+    // HTTP timeout, and we want the headroom. finalMessage() reassembles the
+    // full message once the stream completes.
+    const resp = await this.client.messages
+      .stream({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        temperature: 0.1,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      .finalMessage();
 
-    // If the model stopped because it hit the token ceiling the JSON is
-    // truncated — surface that explicitly rather than letting it fail later as
-    // a generic "invalid JSON".
-    if (resp.stop_reason === 'max_tokens') {
+    // Hit the token ceiling → JSON is truncated. Flag it so the extraction
+    // layer re-rolls instead of failing later as a generic "invalid JSON".
+    const truncated = resp.stop_reason === 'max_tokens';
+    if (truncated) {
       this.logger.warn(
         `Response hit max_tokens (${this.maxTokens}) and was truncated — ` +
-          `insights JSON will be incomplete. Consider raising maxTokens.`,
+          `insights JSON is incomplete; extraction will retry.`,
       );
     }
 
@@ -45,6 +52,11 @@ export class AnthropicProvider implements InsightsProvider {
       text: text.trim(),
       model: this.model,
       provider: 'anthropic',
+      truncated,
+      usage: {
+        inputTokens: resp.usage?.input_tokens ?? 0,
+        outputTokens: resp.usage?.output_tokens ?? 0,
+      },
     };
   }
 }

@@ -13,12 +13,17 @@ import { Interaction } from '../db/entities/interaction.entity';
 import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
 import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { BatchJob } from '../db/entities/batch-job.entity';
+import { LlmUsageLog } from '../db/entities/llm-usage-log.entity';
+import { TranscriptionUsageLog } from '../db/entities/transcription-usage-log.entity';
 
 import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
 import {
   ChatResponseMetrics,
   InsightsService,
   cleanJsonText,
+  ExtractBudget,
+  ExtractAttemptLog,
+  makeExtractBudget,
 } from '../insights/insights.service';
 import {
   aggregateChatResponseMetrics,
@@ -136,6 +141,10 @@ export class RecordingsService {
     private insightsRepo: Repository<InteractionInsight>,
     @InjectRepository(BatchJob)
     private batchJobRepo: Repository<BatchJob>,
+    @InjectRepository(LlmUsageLog)
+    private llmUsageLogRepo: Repository<LlmUsageLog>,
+    @InjectRepository(TranscriptionUsageLog)
+    private transcriptionUsageLogRepo: Repository<TranscriptionUsageLog>,
     private readonly deepgram: TranscriptionDeepgramService,
     private readonly insights: InsightsService,
   ) {}
@@ -276,9 +285,12 @@ export class RecordingsService {
       lastError: null,
     });
 
+    let model = '';
+    let audioSeconds: number | null = null;
+    let txOutcome: 'success' | 'error' = 'error';
+
     try {
       let text = '';
-      let model = '';
 
       if (provider === 'deepgram') {
         const dg = await this.deepgram.transcribeUrl(rec.recordingUrl || '');
@@ -290,6 +302,8 @@ export class RecordingsService {
         }
 
         model = 'deepgram:nova-2-phonecall';
+        audioSeconds =
+          typeof dg.durationSeconds === 'number' ? dg.durationSeconds : null;
       } else if (provider === 'openai' || provider === 'manual') {
         const audio = await this.downloadAudio(rec.recordingUrl || '');
         const file = await toFile(audio.buffer, audio.filename);
@@ -301,6 +315,7 @@ export class RecordingsService {
 
         text = transcript.text ?? '';
         model = 'openai:gpt-4o-transcribe';
+        // gpt-4o-transcribe doesn't return audio duration — logged event-only.
       } else {
         throw new BadRequestException(`Unsupported provider: ${rec.provider}`);
       }
@@ -319,6 +334,7 @@ export class RecordingsService {
         lastError: null,
       });
 
+      txOutcome = 'success';
       return { recordingId: rec.id, provider, text, model };
     } catch (e: any) {
       await this.recordingsRepo.update(rec.id, {
@@ -326,10 +342,35 @@ export class RecordingsService {
         lastError: e?.message ?? String(e),
       });
       throw e;
+    } finally {
+      // Record transcription spend (priced per audio-minute) — success or failure.
+      if (provider === 'deepgram' || provider === 'openai' || provider === 'manual') {
+        try {
+          await this.transcriptionUsageLogRepo.insert({
+            recordingId: rec.id,
+            provider: provider === 'deepgram' ? 'deepgram' : 'openai',
+            model:
+              model ||
+              (provider === 'deepgram'
+                ? 'deepgram:nova-2-phonecall'
+                : 'openai:gpt-4o-transcribe'),
+            audioSeconds,
+            outcome: txOutcome,
+          });
+        } catch (logErr: any) {
+          this.logger.warn(
+            `Failed to write transcription_usage_log for ${rec.id}: ${logErr?.message ?? logErr}`,
+          );
+        }
+      }
     }
   }
 
-  async generateInsights(recordingId: string, provider?: InsightsProviderName) {
+  async generateInsights(
+    recordingId: string,
+    provider?: InsightsProviderName,
+    budget?: ExtractBudget,
+  ) {
     const rec = await this.recordingsRepo.findOne({
       where: { id: recordingId },
     });
@@ -342,15 +383,20 @@ export class RecordingsService {
       throw new BadRequestException('No transcript found for this recording');
     }
 
+    // Collected per-attempt and written (success or failure) in the finally below.
+    const attemptLogs: ExtractAttemptLog[] = [];
+
     try {
       const result = await this.insights.extractInsights(
         transcript.text,
         rec.interactionType,
         rec.campaign,
         provider,
+        budget,
+        (a) => attemptLogs.push(a),
       );
 
-      const { rawJsonText, parsed, providerUsed, model } = result;
+      const { rawJsonText, parsed, providerUsed, model, usage } = result;
       const cs = parsed.client_services;
       // Chat response-time metrics are computed deterministically from the
       // transcript text — the LLM is not asked for them. For calls we leave
@@ -369,6 +415,13 @@ export class RecordingsService {
         model,
         json: cleanJsonText(rawJsonText),
         extractorVersion: 'v3',
+
+        // Token usage / cost tracking
+        insight_input_tokens: usage.inputTokens,
+        insight_output_tokens: usage.outputTokens,
+        insight_attempts: usage.attempts,
+        insight_failed_input_tokens: usage.failedInputTokens,
+        insight_failed_output_tokens: usage.failedOutputTokens,
 
         // Shared scalars
         contact_disposition: parsed.contact_disposition ?? null,
@@ -494,6 +547,31 @@ export class RecordingsService {
         lastError: e?.message ?? String(e),
       });
       throw e;
+    } finally {
+      // Durably record every attempt's token spend — even when the record
+      // ultimately failed (so total cost includes failed extractions).
+      if (attemptLogs.length) {
+        try {
+          await this.llmUsageLogRepo.insert(
+            attemptLogs.map((a) => ({
+              recordingId,
+              provider: a.provider,
+              model: a.model,
+              interactionType: rec.interactionType,
+              campaign: rec.campaign,
+              attempt: a.attempt,
+              outcome: a.outcome,
+              truncated: a.truncated,
+              inputTokens: a.inputTokens,
+              outputTokens: a.outputTokens,
+            })),
+          );
+        } catch (logErr: any) {
+          this.logger.warn(
+            `Failed to write llm_usage_log for ${recordingId}: ${logErr?.message ?? logErr}`,
+          );
+        }
+      }
     }
   }
 
@@ -789,11 +867,12 @@ export class RecordingsService {
       }),
     );
 
+    const budget = makeExtractBudget();
     setImmediate(() => {
       this.runBatchBackground(
         job.id,
         items.map((r) => r.id),
-        (id) => this.generateInsights(id, selectedProvider),
+        (id) => this.generateInsights(id, selectedProvider, budget),
       ).catch((err) => {
         console.error('[BatchJob] insights background error:', err);
         this.batchJobRepo
@@ -834,11 +913,12 @@ export class RecordingsService {
       }),
     );
 
+    const budget = makeExtractBudget();
     setImmediate(() => {
       this.runBatchBackground(
         job.id,
         items.map((r) => r.id),
-        (id) => this.generateInsights(id, selectedProvider),
+        (id) => this.generateInsights(id, selectedProvider, budget),
       ).catch((err) => {
         console.error('[BatchJob] insights-chats background error:', err);
         this.batchJobRepo

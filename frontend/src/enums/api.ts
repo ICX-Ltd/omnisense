@@ -12,6 +12,7 @@ export const ApiPath = {
   InsightsSummaryNarrative: "/uiapi/insights/summary/narrative",
   InsightsSummaryNarratives: "/uiapi/insights/summary/narratives",
   InsightsSummaryFilters: "/uiapi/insights/summary/filters",
+  InsightsUsage: "/uiapi/insights/usage",
 
   OpsDimensions: "/uiapi/insights/ops/dimensions",
   OpsInteractionsByBucket: "/uiapi/insights/ops/interactions-by-bucket",

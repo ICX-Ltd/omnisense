@@ -144,11 +144,62 @@ export type ExtractedInsights = {
 
 export function cleanJsonText(text: string): string {
   let cleaned = text.trim();
+  // Strip ```json ... ``` fences.
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
     cleaned = cleaned.replace(/\s*```$/, '');
+    cleaned = cleaned.trim();
+  }
+  // Salvage: if the model wrapped the object in prose ("Here is the JSON: {...}
+  // Hope that helps!"), slice from the first brace to the last. Idempotent for a
+  // clean object; only changes anything when there's surrounding text.
+  const first = cleaned.indexOf('{');
+  const last = cleaned.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    cleaned = cleaned.slice(first, last + 1);
   }
   return cleaned.trim();
+}
+
+/**
+ * Shared, mutable spend guard for one batch run. extractInsights adds the tokens
+ * burned on FAILED attempts to `wastedTokens`; once that reaches
+ * `failedTokenBudget` (when > 0), further retries are skipped so a bad batch
+ * can't run away on cost. Pass the SAME instance to every record in a batch.
+ */
+export interface ExtractBudget {
+  failedTokenBudget: number;
+  wastedTokens: number;
+  tripped: boolean;
+}
+
+export interface ExtractUsage {
+  inputTokens: number; // successful attempt
+  outputTokens: number; // successful attempt
+  attempts: number;
+  failedInputTokens: number; // summed across failed attempts (retry waste)
+  failedOutputTokens: number;
+}
+
+// Reported once per attempt (success OR failure) so the caller can durably log
+// every token spent — including attempts on records that ultimately fail.
+export interface ExtractAttemptLog {
+  provider: string;
+  model: string;
+  attempt: number;
+  outcome: 'success' | 'invalid_json' | 'truncated' | 'empty';
+  truncated: boolean;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export function makeExtractBudget(): ExtractBudget {
+  return {
+    failedTokenBudget:
+      parseInt(process.env.INSIGHTS_BATCH_FAILED_TOKEN_BUDGET ?? '5000000', 10) || 0,
+    wastedTokens: 0,
+    tripped: false,
+  };
 }
 
 @Injectable()
@@ -162,11 +213,14 @@ export class InsightsService {
     interactionType: string | null,
     campaign: string | null,
     provider?: InsightsProviderName,
+    budget?: ExtractBudget,
+    onAttempt?: (a: ExtractAttemptLog) => void,
   ): Promise<{
     providerUsed: string;
     model: string;
     rawJsonText: string;
     parsed: ExtractedInsights;
+    usage: ExtractUsage;
   }> {
     const isChat = interactionType === 'chat';
     const prompt = isChat
@@ -174,30 +228,121 @@ export class InsightsService {
       : await this.promptsService.composeCallPrompt(transcript, campaign);
 
     const llmProvider = createProvider(provider);
-    const result = await llmProvider.extract(prompt);
-    const rawJsonText = result.text;
 
-    if (!rawJsonText) throw new Error('Empty insights response');
+    // Extraction is non-deterministic (temperature > 0) and the JSON is large,
+    // so a given transcript may truncate or emit invalid JSON on one sample and
+    // succeed on the next. Re-roll a bounded number of times rather than failing
+    // the record — this automates the manual "run the batch again" workaround.
+    const maxAttempts = Math.max(
+      1,
+      (parseInt(process.env.INSIGHTS_EXTRACT_RETRIES ?? '2', 10) || 0) + 1,
+    );
 
-    const cleanedJsonText = cleanJsonText(rawJsonText);
+    let lastReason = 'unknown';
+    let lastPreview = '';
+    let lastProvider = '';
+    let lastModel = '';
+    let failedInputTokens = 0;
+    let failedOutputTokens = 0;
 
-    let parsed: ExtractedInsights;
-    try {
-      parsed = JSON.parse(cleanedJsonText);
-    } catch {
-      this.logger.error(
-        `Invalid JSON from ${result.provider}/${result.model} ` +
-          `(interactionType=${interactionType}, campaign=${campaign ?? 'none'}) ` +
-          `— raw preview:\n${rawJsonText.slice(0, 4000)}`,
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const result = await llmProvider.extract(prompt);
+      lastProvider = result.provider;
+      lastModel = result.model;
+      const rawJsonText = result.text;
+      const inTok = result.usage?.inputTokens ?? 0;
+      const outTok = result.usage?.outputTokens ?? 0;
+
+      let parsed: ExtractedInsights | null = null;
+      if (!rawJsonText) {
+        lastReason = 'empty response';
+      } else {
+        lastPreview = rawJsonText.slice(0, 2000);
+        try {
+          parsed = JSON.parse(cleanJsonText(rawJsonText));
+        } catch {
+          lastReason = 'invalid JSON';
+        }
+        // A truncated response sometimes still parses but is incomplete — reject
+        // it so we don't persist a partial record.
+        if (parsed && result.truncated) {
+          lastReason = 'truncated (hit max_tokens)';
+          parsed = null;
+        }
+      }
+
+      // Report this attempt's usage regardless of outcome (durable cost log).
+      onAttempt?.({
+        provider: result.provider,
+        model: result.model,
+        attempt,
+        outcome: parsed
+          ? 'success'
+          : !rawJsonText
+            ? 'empty'
+            : result.truncated
+              ? 'truncated'
+              : 'invalid_json',
+        truncated: !!result.truncated,
+        inputTokens: inTok,
+        outputTokens: outTok,
+      });
+
+      if (parsed) {
+        if (attempt > 1) {
+          this.logger.log(
+            `Insights extraction recovered on attempt ${attempt}/${maxAttempts} ` +
+              `(${result.provider}/${result.model}).`,
+          );
+        }
+        return {
+          providerUsed: result.provider,
+          model: result.model,
+          rawJsonText,
+          parsed,
+          usage: {
+            inputTokens: inTok,
+            outputTokens: outTok,
+            attempts: attempt,
+            failedInputTokens,
+            failedOutputTokens,
+          },
+        };
+      }
+
+      // This attempt failed — its tokens are wasted spend.
+      failedInputTokens += inTok;
+      failedOutputTokens += outTok;
+      if (budget) {
+        budget.wastedTokens += inTok + outTok;
+        if (
+          budget.failedTokenBudget > 0 &&
+          budget.wastedTokens >= budget.failedTokenBudget &&
+          !budget.tripped
+        ) {
+          budget.tripped = true;
+          this.logger.error(
+            `Insights retry budget tripped: ${budget.wastedTokens} wasted tokens ` +
+              `>= ${budget.failedTokenBudget}. Disabling retries for the rest of this batch.`,
+          );
+        }
+      }
+
+      const stop = attempt >= maxAttempts || !!budget?.tripped;
+      this.logger.warn(
+        `Insights extraction failed [${lastReason}] from ${result.provider}/${result.model} ` +
+          `(interactionType=${interactionType}, campaign=${campaign ?? 'none'}) — ` +
+          (stop ? 'no further attempts' : `retrying ${attempt}/${maxAttempts}`),
       );
-      throw new BadRequestException('Insights model did not return valid JSON');
+      if (budget?.tripped) break;
     }
 
-    return {
-      providerUsed: result.provider,
-      model: result.model,
-      rawJsonText,
-      parsed,
-    };
+    this.logger.error(
+      `Insights extraction gave up [${lastReason}] from ${lastProvider}/${lastModel} ` +
+        `— raw preview:\n${lastPreview}`,
+    );
+    throw new BadRequestException(
+      `Insights model did not return valid JSON [${lastReason}]`,
+    );
   }
 }

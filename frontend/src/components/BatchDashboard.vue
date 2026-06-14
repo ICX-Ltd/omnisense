@@ -3,6 +3,7 @@ import axios from "axios";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
+import InsightsUsagePanel from "./InsightsUsagePanel.vue";
 
 type SectionKey = "summary" | "actions" | "lastRun" | "history";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
@@ -383,6 +384,9 @@ onUnmounted(stopPolling);
 
       <!-- Tiles -->
       <div class="grid">
+        <!-- Insights usage & cost -->
+        <InsightsUsagePanel />
+
         <!-- Summary tile -->
         <div class="tile tile--accent" @click="toggle('summary')">
           <div class="tile-head">

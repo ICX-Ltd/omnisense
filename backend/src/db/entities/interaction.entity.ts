@@ -72,6 +72,13 @@ export class Interaction {
   @Column({ type: 'nvarchar', length: 100, nullable: true })
   vehicleModel!: string | null;
 
+  // Dealer / dealership from the source data feed (imported upstream, like
+  // campaign / agent / vehicleMake). Source of truth for the dashboard's dealer
+  // column; reads COALESCE this with the LLM-extracted interaction_insights
+  // .dealer_name as a fallback when the source value is missing.
+  @Column({ type: 'nvarchar', length: 200, nullable: true })
+  dealer!: string | null;
+
   // Persisted computed column: COALESCE(interactionDateTime, createdAt)
   // Created by sql/create-indexes.sql — do not set manually
   @Column({ type: 'datetime2', nullable: true, insert: false, update: false })

@@ -477,6 +477,24 @@
   color: var(--danger);
 }
 
+/* Dealer chip — violet, distinct from the brand/status hues so the dealer
+   column reads as its own dimension across drill-downs and the detail drawer. */
+.chip--dealer {
+  background: color-mix(in srgb, #8b5cf6 14%, transparent);
+  border-color: color-mix(in srgb, #8b5cf6 38%, transparent);
+  color: #8b5cf6;
+}
+/* Asterisk marking a dealer value that was inferred from the transcript rather
+   than supplied by the source feed. Hover the chip for the explanation. */
+.chip-infer {
+  font-size: 1.1em;
+  font-weight: 900;
+  line-height: 0;
+  margin-left: 2px;
+  vertical-align: super;
+  cursor: help;
+}
+
 /* --- Row format for resolution/intents: chip + count pill --- */
 .metric-row {
   display: flex;

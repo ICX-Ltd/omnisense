@@ -19,10 +19,17 @@ export class GrokProvider implements InsightsProvider {
       temperature: 0.1,
     });
 
+    // x.ai's OpenAI-compatible surface doesn't reliably support json_object mode,
+    // so we lean on cleanJsonText salvage + retry instead. Still flag truncation.
     return {
       text: (resp.output_text ?? '').trim(),
       model: this.model,
       provider: 'grok',
+      truncated: resp.status === 'incomplete',
+      usage: {
+        inputTokens: resp.usage?.input_tokens ?? 0,
+        outputTokens: resp.usage?.output_tokens ?? 0,
+      },
     };
   }
 }

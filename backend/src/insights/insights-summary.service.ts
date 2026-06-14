@@ -10,6 +10,7 @@ import { SurveyResponse } from '../db/entities/survey-response.entity';
 
 import { createProvider } from './providers/provider.factory';
 import { InsightsProviderName } from './types/insights-provider.type';
+import { verifyCampaignQuotes } from './quote-grounding';
 import {
   buildNarrativeSummaryPrompt,
   buildCallsOperationsNarrativePrompt,
@@ -55,6 +56,51 @@ function safeParseJson(text: string): any {
     cleaned = cleaned.replace(/\s*```$/, '');
   }
   return JSON.parse(cleaned);
+}
+
+// Per-model prices in currency units per 1,000,000 tokens. Defaults are public
+// list prices (USD) at time of writing; override / extend (and switch currency)
+// via INSIGHTS_PRICES_JSON, e.g. {"claude-haiku-4-5":{"in":0.8,"out":4}}.
+const DEFAULT_MODEL_PRICES: Record<string, { in: number; out: number }> = {
+  'claude-haiku-4-5': { in: 1, out: 5 },
+  'gpt-4o-mini': { in: 0.15, out: 0.6 },
+  'gemini-1.5-flash': { in: 0.075, out: 0.3 },
+  // grok pricing intentionally omitted — set it via INSIGHTS_PRICES_JSON.
+};
+
+function loadModelPrices(): Record<string, { in: number; out: number }> {
+  const prices = { ...DEFAULT_MODEL_PRICES };
+  const raw = process.env.INSIGHTS_PRICES_JSON;
+  if (raw) {
+    try {
+      Object.assign(prices, JSON.parse(raw));
+    } catch {
+      /* ignore malformed override — fall back to defaults */
+    }
+  }
+  return prices;
+}
+
+// Transcription is priced per audio-MINUTE. Currency unit per minute, keyed by
+// the model string stored in the log. Defaults are public list prices (USD) at
+// time of writing — verify against your plan and override via
+// TRANSCRIPTION_PRICES_JSON, e.g. {"deepgram:nova-2-phonecall":0.0043}.
+const DEFAULT_TRANSCRIPTION_PRICES: Record<string, number> = {
+  'deepgram:nova-2-phonecall': 0.0058,
+  'openai:gpt-4o-transcribe': 0.006,
+};
+
+function loadTranscriptionPrices(): Record<string, number> {
+  const prices = { ...DEFAULT_TRANSCRIPTION_PRICES };
+  const raw = process.env.TRANSCRIPTION_PRICES_JSON;
+  if (raw) {
+    try {
+      Object.assign(prices, JSON.parse(raw));
+    } catch {
+      /* ignore malformed override */
+    }
+  }
+  return prices;
 }
 
 /**
@@ -387,7 +433,8 @@ export class InsightsSummaryService {
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
-        'ii.dealer_name AS dealer_name',
+        "COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name",
+        "CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred",
         'ii.campaign_detected AS campaign_detected',
       ])
       .andWhere('ii.lead_generated_for_dealer = 1')
@@ -1035,10 +1082,10 @@ export class InsightsSummaryService {
     );
 
     const topDealers = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
-      .select("COALESCE(ii.dealer_name, 'unknown')", 'dealer_name')
+      .select("COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name, 'unknown')", 'dealer_name')
       .addSelect('COUNT(1)', 'count')
       .andWhere('ii.lead_generated_for_dealer = 1')
-      .groupBy("COALESCE(ii.dealer_name, 'unknown')")
+      .groupBy("COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name, 'unknown')")
       .orderBy('count', 'DESC')
       .limit(10)
       .getRawMany<{ dealer_name: string; count: string }>();
@@ -1050,11 +1097,27 @@ export class InsightsSummaryService {
       .orderBy('count', 'DESC')
       .getRawMany<{ interest_level: string; count: string }>();
 
+    const byOutcome = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+      .select("COALESCE(ia.outcome, 'unknown')", 'outcome')
+      .addSelect('COUNT(1)', 'count')
+      .groupBy("COALESCE(ia.outcome, 'unknown')")
+      .orderBy('count', 'DESC')
+      .getRawMany<{ outcome: string; count: string }>();
+
+    const byVehicleMake = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+      .select("COALESCE(ia.vehicleMake, 'unknown')", 'vehicle_make')
+      .addSelect('COUNT(1)', 'count')
+      .groupBy("COALESCE(ia.vehicleMake, 'unknown')")
+      .orderBy('count', 'DESC')
+      .getRawMany<{ vehicle_make: string; count: string }>();
+
     const recentLostSales = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
         'ii.competitor_purchased AS competitor_purchased',
+        "COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name",
+        "CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred",
         'ii.campaign_detected AS campaign_detected',
         'COALESCE(ia.interactionDateTime, ia.createdAt) AS interactionDateTime',
       ])
@@ -1075,6 +1138,14 @@ export class InsightsSummaryService {
       },
       by_interest: byInterest.map((r) => ({
         interest_level: r.interest_level,
+        count: parseInt(r.count, 10),
+      })),
+      by_outcome: byOutcome.map((r) => ({
+        outcome: r.outcome,
+        count: parseInt(r.count, 10),
+      })),
+      by_vehicle_make: byVehicleMake.map((r) => ({
+        vehicle_make: r.vehicle_make,
         count: parseInt(r.count, 10),
       })),
       top_competitors: (() => {
@@ -2045,6 +2116,8 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.interest_level,
+              COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name,
+              CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred,
               ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
@@ -2079,6 +2152,8 @@ ${prompt}
     const rows = await this.insightsRepo.manager.query(
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.competitor_purchased,
+              COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name,
+              CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred,
               ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
@@ -2176,6 +2251,8 @@ ${prompt}
       `SELECT ii.recordingId, ii.summary_short, ii.overall_score, ii.contact_disposition,
               ii.campaign_detected, ii.sentiment_overall, ii.is_opportunity,
               ii.not_opportunity_reason, ii.opportunity_json,
+              COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name,
+              CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred,
               ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId
        FROM app.interaction_insights ii
        INNER JOIN app.interactions ia ON ia.id = ii.recordingId
@@ -2415,10 +2492,32 @@ ${prompt}
       {} as Record<string, ReturnType<typeof toBucket>>,
     );
 
+    // "Any negative view" — distinct interactions where the customer raised a
+    // negative view on AT LEAST ONE of brand / current vehicle / dealer / finance.
+    // Counted with OR (not summed) so a customer negative on multiple areas is
+    // counted once — i.e. a true rate of customers, not a count of flags.
+    const anyNegativeViewRows = await this.insightsRepo.manager.query<
+      Array<{ count: string }>
+    >(
+      `SELECT COUNT(1) AS count
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       ${baseWhere}
+         AND (
+           JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.answer') = 'yes'
+           OR JSON_VALUE(ii.campaign_answers_json, '$.view_on_current_vehicle.answer') = 'yes'
+           OR JSON_VALUE(ii.campaign_answers_json, '$.view_on_dealer.answer') = 'yes'
+           OR JSON_VALUE(ii.campaign_answers_json, '$.view_on_finance_agreement.answer') = 'yes'
+         )`,
+      [from, to, ...extraParams],
+    );
+    const anyNegativeView = parseInt(anyNegativeViewRows[0]?.count ?? '0', 10);
+
     return {
       window: { from: from.toISOString(), to: to.toISOString() },
       filter: filterKey,
       total,
+      any_negative_view: anyNegativeView,
       consent: toBucket(consentRows),
       decision_made: toBucket(decisionRows),
       dealer_already_in_touch: toBucket(dealerTouchRows),
@@ -2558,6 +2657,8 @@ ${prompt}
           ii.overall_score,
           ii.contact_disposition,
           ii.sentiment_overall,
+          COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name) AS dealer_name,
+          CASE WHEN NULLIF(ia.dealer, '') IS NULL THEN 1 ELSE 0 END AS dealer_inferred,
           ia.agent,
           ia.interactionDateTime,
           ia.campaign,
@@ -2571,6 +2672,9 @@ ${prompt}
           JSON_VALUE(ii.campaign_answers_json, '$.dealer_already_in_touch.answer') AS dealer_touch_answer,
           JSON_VALUE(ii.campaign_answers_json, '$.competitor_vehicle.competitor_brand') AS competitor_brand,
           JSON_VALUE(ii.campaign_answers_json, '$.competitor_vehicle.competitor_model') AS competitor_model,
+          JSON_VALUE(ii.campaign_answers_json, '$.competitor_vehicle.quote') AS competitor_vehicle_quote,
+          JSON_VALUE(ii.campaign_answers_json, '$.competitor_reasons.detail') AS competitor_reasons_detail,
+          JSON_VALUE(ii.campaign_answers_json, '$.competitor_reasons.quote') AS competitor_reasons_quote,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.answer') AS view_brand_answer,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.summary') AS view_brand_summary,
           JSON_VALUE(ii.campaign_answers_json, '$.view_on_brand.quote') AS view_brand_quote,
@@ -2604,6 +2708,259 @@ ${prompt}
     return rows;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // INSIGHTS TOKEN USAGE & COST
+  // Aggregates per-record token usage (captured at extraction time) so spend can
+  // be monitored in-app without logging into provider consoles. Surfaces the
+  // retry overhead (records that needed >1 attempt + the tokens those wasted).
+  // ─────────────────────────────────────────────────────────────────────────
+  async getInsightsUsage(
+    from: Date,
+    to: Date,
+    filterKey: InteractionFilter = 'calls',
+    campaign?: string,
+    agent?: string,
+    excludeOutcomes?: string[],
+    vehicleMake?: string,
+    vehicleModels?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(
+      filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels,
+    );
+
+    const rows = await this.insightsRepo.manager.query<
+      Array<{
+        provider: string | null;
+        model: string | null;
+        records: string;
+        measured_records: string;
+        retried_records: string;
+        input_tokens: string;
+        output_tokens: string;
+        failed_input_tokens: string;
+        failed_output_tokens: string;
+      }>
+    >(
+      `SELECT
+        ii.providerUsed AS provider,
+        ii.model AS model,
+        COUNT(1) AS records,
+        SUM(CASE WHEN ii.insight_output_tokens IS NOT NULL THEN 1 ELSE 0 END) AS measured_records,
+        SUM(CASE WHEN ii.insight_attempts > 1 THEN 1 ELSE 0 END) AS retried_records,
+        SUM(ISNULL(ii.insight_input_tokens, 0)) AS input_tokens,
+        SUM(ISNULL(ii.insight_output_tokens, 0)) AS output_tokens,
+        SUM(ISNULL(ii.insight_failed_input_tokens, 0)) AS failed_input_tokens,
+        SUM(ISNULL(ii.insight_failed_output_tokens, 0)) AS failed_output_tokens
+      FROM app.interaction_insights ii
+      INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+      WHERE COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+        AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+        ${filterClause}
+      GROUP BY ii.providerUsed, ii.model
+      ORDER BY SUM(ISNULL(ii.insight_output_tokens, 0)) DESC`,
+      [from, to, ...extraParams],
+    );
+
+    const prices = loadModelPrices();
+    const currency = process.env.INSIGHTS_PRICES_CURRENCY ?? 'USD';
+    const cost = (model: string | null, inTok: number, outTok: number) => {
+      const p = model ? prices[model] : undefined;
+      if (!p) return null;
+      return (inTok * p.in + outTok * p.out) / 1_000_000;
+    };
+
+    const unpricedModels = new Set<string>();
+    const byModel = rows.map((r) => {
+      const inTok = parseInt(r.input_tokens, 10) || 0;
+      const outTok = parseInt(r.output_tokens, 10) || 0;
+      const failInTok = parseInt(r.failed_input_tokens, 10) || 0;
+      const failOutTok = parseInt(r.failed_output_tokens, 10) || 0;
+      const estCost = cost(r.model, inTok, outTok);
+      const estWastedCost = cost(r.model, failInTok, failOutTok);
+      if (estCost === null && r.model) unpricedModels.add(r.model);
+      return {
+        provider: r.provider,
+        model: r.model,
+        records: parseInt(r.records, 10) || 0,
+        measured_records: parseInt(r.measured_records, 10) || 0,
+        retried_records: parseInt(r.retried_records, 10) || 0,
+        input_tokens: inTok,
+        output_tokens: outTok,
+        failed_input_tokens: failInTok,
+        failed_output_tokens: failOutTok,
+        total_tokens: inTok + outTok,
+        wasted_tokens: failInTok + failOutTok,
+        priced: estCost !== null,
+        est_cost: estCost,
+        est_wasted_cost: estWastedCost,
+      };
+    });
+
+    const sum = (k: keyof (typeof byModel)[number]) =>
+      byModel.reduce((a, b) => a + (Number(b[k]) || 0), 0);
+    const measured = sum('measured_records');
+    const retried = sum('retried_records');
+
+    // Complete spend from the per-attempt log — includes retries AND fully-failed
+    // records (which never produce an interaction_insights row). Joined to
+    // interactions so the date/filter window matches the per-record view. Guarded
+    // so the endpoint still works before the llm_usage_log migration is applied.
+    let allAttempts: {
+      records: number;
+      attempt_count: number;
+      failed_attempts: number;
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+      est_cost: number;
+    } | null = null;
+    try {
+      const logRows = await this.insightsRepo.manager.query<
+        Array<{
+          model: string | null;
+          input_tokens: string;
+          output_tokens: string;
+          attempt_count: string;
+          failed_attempts: string;
+          records: string;
+        }>
+      >(
+        `SELECT lg.model AS model,
+          SUM(lg.inputTokens) AS input_tokens,
+          SUM(lg.outputTokens) AS output_tokens,
+          COUNT(1) AS attempt_count,
+          SUM(CASE WHEN lg.outcome <> 'success' THEN 1 ELSE 0 END) AS failed_attempts,
+          COUNT(DISTINCT lg.recordingId) AS records
+        FROM app.llm_usage_log lg
+        INNER JOIN app.interactions ia ON ia.id = lg.recordingId
+        WHERE COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+          AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+          ${filterClause}
+        GROUP BY lg.model`,
+        [from, to, ...extraParams],
+      );
+      const agg = {
+        records: 0,
+        attempt_count: 0,
+        failed_attempts: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        est_cost: 0,
+      };
+      for (const r of logRows) {
+        const i = parseInt(r.input_tokens, 10) || 0;
+        const o = parseInt(r.output_tokens, 10) || 0;
+        agg.input_tokens += i;
+        agg.output_tokens += o;
+        agg.total_tokens += i + o;
+        agg.attempt_count += parseInt(r.attempt_count, 10) || 0;
+        agg.failed_attempts += parseInt(r.failed_attempts, 10) || 0;
+        agg.records += parseInt(r.records, 10) || 0;
+        const c = cost(r.model, i, o);
+        if (c !== null) agg.est_cost += c;
+      }
+      allAttempts = agg;
+    } catch {
+      allAttempts = null;
+    }
+
+    // Transcription spend (priced per audio-minute) from transcription_usage_log,
+    // joined to interactions for the same window/filters. Guarded so it returns
+    // null until that migration is applied.
+    const txPrices = loadTranscriptionPrices();
+    let transcription: {
+      transcriptions: number;
+      successes: number;
+      audio_seconds: number;
+      audio_minutes: number;
+      est_cost: number;
+      by_model: Array<Record<string, any>>;
+      unpriced_models: string[];
+    } | null = null;
+    try {
+      const txRows = await this.insightsRepo.manager.query<
+        Array<{
+          provider: string | null;
+          model: string | null;
+          transcriptions: string;
+          successes: string;
+          audio_seconds: string;
+          measured: string;
+        }>
+      >(
+        `SELECT t.provider AS provider, t.model AS model,
+          COUNT(1) AS transcriptions,
+          SUM(CASE WHEN t.outcome = 'success' THEN 1 ELSE 0 END) AS successes,
+          SUM(ISNULL(t.audioSeconds, 0)) AS audio_seconds,
+          SUM(CASE WHEN t.audioSeconds IS NOT NULL THEN 1 ELSE 0 END) AS measured
+        FROM app.transcription_usage_log t
+        INNER JOIN app.interactions ia ON ia.id = t.recordingId
+        WHERE COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+          AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+          ${filterClause}
+        GROUP BY t.provider, t.model`,
+        [from, to, ...extraParams],
+      );
+      const txUnpriced = new Set<string>();
+      const byModel = txRows.map((r) => {
+        const secs = parseFloat(r.audio_seconds) || 0;
+        const perMin = r.model ? txPrices[r.model] : undefined;
+        const estCost = perMin != null ? (secs / 60) * perMin : null;
+        if (perMin == null && r.model) txUnpriced.add(r.model);
+        return {
+          provider: r.provider,
+          model: r.model,
+          transcriptions: parseInt(r.transcriptions, 10) || 0,
+          successes: parseInt(r.successes, 10) || 0,
+          measured: parseInt(r.measured, 10) || 0,
+          audio_seconds: Math.round(secs),
+          audio_minutes: Math.round((secs / 60) * 10) / 10,
+          priced: estCost !== null,
+          est_cost: estCost,
+        };
+      });
+      const totSecs = byModel.reduce((a, b) => a + b.audio_seconds, 0);
+      transcription = {
+        transcriptions: byModel.reduce((a, b) => a + b.transcriptions, 0),
+        successes: byModel.reduce((a, b) => a + b.successes, 0),
+        audio_seconds: totSecs,
+        audio_minutes: Math.round((totSecs / 60) * 10) / 10,
+        est_cost: byModel.reduce((a, b) => a + (b.est_cost ?? 0), 0),
+        by_model: byModel,
+        unpriced_models: [...txUnpriced],
+      };
+    } catch {
+      transcription = null;
+    }
+
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      filter: filterKey,
+      currency,
+      totals: {
+        records: sum('records'),
+        measured_records: measured,
+        retried_records: retried,
+        retry_rate: measured ? Math.round((retried / measured) * 1000) / 10 : 0,
+        input_tokens: sum('input_tokens'),
+        output_tokens: sum('output_tokens'),
+        total_tokens: sum('total_tokens'),
+        wasted_tokens: sum('wasted_tokens'),
+        est_cost: byModel.reduce((a, b) => a + (b.est_cost ?? 0), 0),
+        est_wasted_cost: byModel.reduce((a, b) => a + (b.est_wasted_cost ?? 0), 0),
+      },
+      by_model: byModel,
+      // Complete spend incl. retries + fully-failed records (null until migration applied).
+      all_attempts: allAttempts,
+      // Transcription spend (Deepgram + OpenAI), priced per audio-minute. null
+      // until the transcription_usage_log migration is applied.
+      transcription,
+      // Models with no price in the table — their tokens count but cost is excluded.
+      unpriced_models: [...unpricedModels],
+    };
+  }
+
   async getInteractionDetail(recordingId: string) {
     const interaction = await this.recordingsRepo.findOne({ where: { id: recordingId } });
     if (!interaction) return null;
@@ -2633,6 +2990,14 @@ ${prompt}
         const raw = insight.json ? safeParseJson(insight.json) : null;
         const operationsFlags = raw?.operations?.scoring_flags ?? null;
 
+        // Source dealer (from interactions) wins; fall back to LLM-extracted.
+        // dealer_inferred flags when the shown value came from the model.
+        const sourceDealer = interaction.dealer?.trim() ? interaction.dealer : null;
+
+        const campaignAnswers = insight.campaign_answers_json
+          ? safeParseJson(insight.campaign_answers_json)
+          : null;
+
         return {
           summary_short: insight.summary_short,
           summary_detailed: insight.summary_detailed,
@@ -2642,6 +3007,8 @@ ${prompt}
           conversation_type: insight.conversation_type,
           interest_level: insight.interest_level,
           campaign_detected: insight.campaign_detected,
+          dealer_name: sourceDealer ?? insight.dealer_name,
+          dealer_inferred: !sourceDealer && !!insight.dealer_name,
           decision_timeline: insight.decision_timeline,
           next_step_agreed: insight.next_step_agreed,
           operations_scores: insight.operations_scores_json ? safeParseJson(insight.operations_scores_json) : null,
@@ -2657,9 +3024,9 @@ ${prompt}
             not_opportunity_reason: insight.not_opportunity_reason,
             detail: insight.opportunity_json ? safeParseJson(insight.opportunity_json) : null,
           },
-          campaign_answers: insight.campaign_answers_json
-            ? safeParseJson(insight.campaign_answers_json)
-            : null,
+          campaign_answers: campaignAnswers,
+          // QA trust signal: are the model's verbatim quotes actually in the transcript?
+          quote_grounding: verifyCampaignQuotes(transcript?.text ?? null, campaignAnswers),
           chat_response:
             insight.chat_response_measured_count !== null ||
             insight.chat_response_metrics_json

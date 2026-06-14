@@ -139,3 +139,115 @@ Updates
   atomic, so a batch is bottlenecked on the slowest N in flight rather than the sum of all.
   Backend redeploy needed to take effect. APP_VERSION → 1.9.4.
 
+2026-06-10
+- Client Services overview reworked. Dropped the redundant Dealer Leads / In-Market /
+  Lost Sales / Bought Elsewhere stat cards; replaced with a "Negative View Rate" card —
+  share of Parity customers who raised ANY negative view (brand/vehicle/dealer/finance),
+  with side-by-side period comparison. New backend aggregate any_negative_view in
+  getParityCampaignAnalysis (distinct-customer OR, not a sum of per-view flags);
+  denominator is parity-answered total. Card shows "—" outside the Parity campaign.
+- Added two volume-breakdown donuts in the overview strip: "By Outcome" and
+  "By Vehicle Make". New OutcomeDonut.vue (hand-rolled SVG, no chart lib) with a legend
+  + compare-period share. Backed by new by_outcome / by_vehicle_make aggregations in
+  getClientServicesMetrics (same applyFilters treatment as by_interest).
+- Added a "dealer" chip to every Client Services drill-down row and the detail drawer.
+  Source-of-truth change: dealer was LLM-extracted (interaction_insights.dealer_name);
+  now reads COALESCE(ia.dealer, ii.dealer_name) — new source column wins, LLM as fallback.
+  Migration: backend/sql/add-dealer-to-interactions.sql (adds app.interactions.dealer
+  NVARCHAR(200) + filtered index). RUN IT, and have the upstream loader populate the
+  column; rows with no source dealer keep showing the model's guess until then. New chip--dealer
+  variant in components.css.
+- Dealer chips show a "*" (with hover tooltip) when the value was inferred from the transcript
+  rather than supplied by the source feed. Backend emits a dealer_inferred flag on every
+  dealer-bearing row + the detail drawer; empty-string source values are treated as missing
+  (NULLIF) so they fall back and are marked inferred. NOTE: the dealer queries now reference
+  ia.dealer, so add-dealer-to-interactions.sql MUST be applied before deploying this backend.
+  APP_VERSION → 1.11.0.
+- Fix: the Parity "Why competitor wins" and "Competitor brands cited" drill-downs showed the
+  generic interaction summary_short instead of competitor-specific text. The model already
+  captures competitor_vehicle.quote, competitor_reasons.detail and competitor_reasons.quote in
+  campaign_answers_json, but getParityInteractions never projected them. Now projects all three;
+  the drills render competitor_reasons_detail as the summary (dimmed summary_short fallback) plus
+  a competitor_reasons_quote / competitor_vehicle_quote line — matching the Views/Situation
+  sections. Backend redeploy needed; older records without those JSON fields keep the fallback
+  until reprocessed.
+
+2026-06-13
+- Client Services drill-downs are now independently open/closeable — opening one no longer
+  collapses the others. Every section had a single "which row is open" value; the whole Parity
+  section shared ONE state, so the four negative-view cards (brand/vehicle/dealer/finance) and
+  every other parity drill were mutually exclusive. Replaced per-section single-state with
+  per-key maps (open flag + interactions + loading), keyed by each drill's id, across all
+  sections: Parity (consent, decision, the 4 views, circumstances, competitor reasons, competitor
+  brands), Customer Interest, Competitor Purchases, and Sales Opportunity reasons. The Views and
+  Circumstances cards were restructured so each yes/no bucket row owns its own drill panel
+  (was one shared panel per card via a startsWith match). Each open re-fetches its own rows.
+  Frontend-only. APP_VERSION → 1.12.0.
+- Quote grounding (QA trust signal). New backend/src/insights/quote-grounding.ts verifies that
+  the LLM's extracted verbatim campaign quotes (consent/decision/the 4 views/affordability/
+  lifestyle/dealer-in-touch/competitor/key_competitor_drivers) actually appear in the transcript —
+  deterministic, no extra model call. Normalizes text, fast-paths exact substring, else scores
+  best sliding-window token coverage; >=0.7 verified, >=0.45 weak, else "missing" (likely a
+  fabricated/mis-attributed quote). getInteractionDetail now returns insight.quote_grounding;
+  the detail drawer shows a "Quote Grounding" panel (verified/weak/not-found counts + the flagged
+  quotes). Unit-tested (quote-grounding.spec.ts, 6 cases). Frontend + backend; backend redeploy
+  needed. First slice of the QA data-trust toolkit. APP_VERSION → 1.13.0.
+- Insights extraction reliability (fixes the intermittent "Invalid JSON" failures that needed
+  manual batch re-runs). Root cause was output truncation: at temperature 0.1 the large insights
+  JSON occasionally ran past the token cap and got cut mid-structure, so the SAME record failed on
+  one sample and passed on a re-roll. Changes (insights.service.ts + providers/*):
+  * Bounded auto-retry in extractInsights — re-rolls on invalid-JSON OR truncation, default 2
+    retries (3 attempts), tunable via INSIGHTS_EXTRACT_RETRIES. Automates the manual re-run.
+  * Providers now report a `truncated` flag (stop_reason max_tokens / status incomplete /
+    finishReason MAX_TOKENS) so a truncated-but-parseable response is rejected, not persisted.
+  * Anthropic: raised max_tokens 16000 → 32000 (Haiku 4.5 ceiling is 64k; env
+    ANTHROPIC_INSIGHTS_MAX_TOKENS) and switched to streaming (required above ~16k to avoid SDK
+    HTTP timeouts).
+  * Structured output / JSON mode where supported: OpenAI responses text.format json_object,
+    Gemini responseMimeType application/json. Grok leans on salvage+retry (x.ai json-mode is
+    unreliable).
+  * cleanJsonText hardened to salvage the outermost {...} when the model wraps JSON in prose.
+  Unit tests: clean-json-text.spec.ts (7 cases). Backend-only; redeploy needed. NOTE: full
+  json_schema structured output for Anthropic was deferred — the payload is large and
+  campaign-variable; retry+streaming+salvage already removes the failure mode. APP_VERSION → 1.14.0.
+- Insights token-usage & cost tracking (monitor spend in-app, no provider console). Providers now
+  return per-call token usage; extractInsights accumulates it and also tracks tokens burned on
+  FAILED attempts (retry waste). generateInsights persists per-record:
+  insight_input_tokens / _output_tokens / _attempts / _failed_input_tokens / _failed_output_tokens.
+  Migration: backend/sql/add-insight-usage.sql (5 INT columns, idempotent — RUN IT).
+  New GET /uiapi/insights/usage (getInsightsUsage) aggregates totals + per provider/model, retry
+  rate, wasted tokens, and est cost via a price table (DEFAULT_MODEL_PRICES, USD; override/extend
+  + change currency via INSIGHTS_PRICES_JSON / INSIGHTS_PRICES_CURRENCY — unpriced models show
+  tokens but no cost). New InsightsUsagePanel.vue surfaced at the top of the Batch Dashboard
+  (date range + channel + per-model table).
+  SPEND GUARD: batch insight runs share an ExtractBudget circuit breaker — once cumulative wasted
+  tokens exceed INSIGHTS_BATCH_FAILED_TOKEN_BUDGET (default 5,000,000; 0 = off) the batch stops
+  retrying (one shot per remaining record) so a bad run can't run away on cost. Backend redeploy +
+  migration needed. NOTE: fully-failed records have no insight row, so their tokens are logged +
+  counted in the batch budget but not in the usage dashboard (which covers persisted records).
+  APP_VERSION → 1.15.0.
+- Per-attempt LLM usage log (captures EVERY attempt, incl. fully-failed records the per-record
+  view misses). New entity LlmUsageLog → table app.llm_usage_log (migration
+  backend/sql/add-llm-usage-log.sql — RUN IT; registered in app.module + recordings.module).
+  extractInsights gained an onAttempt callback fired once per attempt (success/invalid_json/
+  truncated/empty) with provider/model/tokens; generateInsights collects them and writes the log
+  in a finally (so failures are recorded too, best-effort, never masks the original error).
+  getInsightsUsage now returns an `all_attempts` block (joined to interactions for the same
+  date/filter window) = complete spend incl. retries + failed records, guarded so it returns null
+  until the migration is applied. InsightsUsagePanel shows an "All attempts (incl. retries &
+  failed records)" line beneath the per-record stats. Backend redeploy + migration needed.
+  APP_VERSION → 1.16.0.
+- Transcription usage & cost tracking (the insights tracker above did NOT cover transcription —
+  this adds it). Transcription is priced per audio-MINUTE, so it's a separate table
+  app.transcription_usage_log (entity TranscriptionUsageLog; migration
+  backend/sql/add-transcription-usage-log.sql — RUN IT; registered in app.module +
+  recordings.module). transcribeRecordingById logs every attempt (success/error) in a finally with
+  provider/model/audioSeconds. Deepgram duration captured from metadata.duration (transcribeUrl now
+  returns durationSeconds) = accurate per-minute cost; OpenAI gpt-4o-transcribe doesn't report
+  duration so it's logged event-only (no cost) — per decision. getInsightsUsage returns a
+  `transcription` block (per provider/model, minutes, est cost) via a per-minute price table
+  (DEFAULT_TRANSCRIPTION_PRICES, override TRANSCRIPTION_PRICES_JSON) + a combined insights+
+  transcription cost in the panel. Guarded → null until migration applied. Backend redeploy +
+  migration needed. FUTURE_SUGGESTIONS.md added (golden-set harness parked + other backlog).
+  APP_VERSION → 1.17.0.
+

@@ -19,6 +19,8 @@ import { BatchJob } from './db/entities/batch-job.entity';
 import { SurveyResponse } from './db/entities/survey-response.entity';
 import { PromptTemplate } from './db/entities/prompt-template.entity';
 import { PromptTemplateHistory } from './db/entities/prompt-template-history.entity';
+import { LlmUsageLog } from './db/entities/llm-usage-log.entity';
+import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.entity';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { PromptTemplateHistory } from './db/entities/prompt-template-history.ent
             SurveyResponse,
             PromptTemplate,
             PromptTemplateHistory,
+            LlmUsageLog,
+            TranscriptionUsageLog,
           ],
           synchronize: false,
           logging: false,
