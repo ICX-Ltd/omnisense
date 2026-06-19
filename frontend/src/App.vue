@@ -59,8 +59,8 @@
             </div>
           </div>
           <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Summary</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'clientservices' }" @click="tab = 'clientservices'">Client Services</button>
+          <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations (QC)</button>
+          <button class="tab" :class="{ 'tab--active': tab === 'clientservices' }" @click="tab = 'clientservices'">Campaign Insights</button>
           <button class="tab" :class="{ 'tab--active': tab === 'survey' }" @click="tab = 'survey'">Survey Analytics</button>
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
           <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'prompts' }" @click="tab = 'prompts'">Prompts</button>

@@ -274,4 +274,6 @@ Updates
     moved into the grid as the 3rd column of the Outcome Distribution row; Sales Opportunity moved
     beside Objection Handling as a two-visual row. Objection-handling totals restyled to reuse the
     Sales Opportunity summary-strip styles. Frontend + 1 backend tweak. APP_VERSION → 1.19.0.
+- Renamed nav tabs + page headers: "Operations" → "Operations (QC)", "Client Services" →
+  "Campaign Insights" (App.vue + the two dashboard hero titles). Frontend-only. APP_VERSION → 1.19.1.
 

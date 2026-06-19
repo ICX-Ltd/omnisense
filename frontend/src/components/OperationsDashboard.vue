@@ -658,7 +658,7 @@ onMounted(async () => {
     <div class="hero">
       <div class="hero-row">
         <div class="hero-left">
-          <h1 class="hero-title">Operations Dashboard</h1>
+          <h1 class="hero-title">Operations (QC)</h1>
           <div class="hero-subtitle">Agent performance, score distribution, coaching needs and drill-down.</div>
         </div>
       </div>

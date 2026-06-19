@@ -735,7 +735,7 @@ onMounted(async () => {
     <div class="hero">
       <div class="hero-row">
         <div class="hero-left">
-          <h1 class="hero-title">Client Services Dashboard</h1>
+          <h1 class="hero-title">Campaign Insights</h1>
           <div class="hero-subtitle">Lead generation, market intelligence, competitor activity and sales opportunity classification.</div>
         </div>
       </div>
