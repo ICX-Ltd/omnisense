@@ -851,11 +851,14 @@ export class InsightsSummaryService {
     // baseline so the UI can render comparison figures alongside.
     const comparisonSummary = agent ? await summaryFor(undefined) : null;
 
+    // Always the full cross-agent leaderboard — deliberately NOT filtered by the
+    // selected `agent` so the UI can show the ranking (and where the picked agent
+    // sits) even after the user drills into one agent.
     const worstByAgent = await this.applyFilters(
       baseQb(),
       filterKey,
       campaign,
-      agent,
+      undefined,
       excludeOutcomes,
     )
       .select("COALESCE(NULLIF(ia.agent, ''), 'unknown')", 'agent')

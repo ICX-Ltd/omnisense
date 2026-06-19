@@ -251,3 +251,27 @@ Updates
   migration needed. FUTURE_SUGGESTIONS.md added (golden-set harness parked + other backlog).
   APP_VERSION → 1.17.0.
 
+2026-06-19
+- Parity campaign-analysis visual redesign (ClientServicesDashboard.vue + new ParitySegmentBar.vue).
+  Replaced the stack of one bar-row-per-bucket with a single 100% segmented bar: negative/none read
+  red→green, three-way questions read yes·n/a·no, with stats + drill-downs below each segment.
+  Regrouped the Parity tile into two rows — Customer Decision (consent + decision) beside Customer
+  Circumstances, Customer Views below; Competitors is now a 3-column row (identified · why-wins ·
+  brands cited, with fixed-width truncating label chips). Period comparison adds a second ghost bar
+  with repeated per-period stats and a per-segment volume/percentage-point difference row. On the
+  Parity campaign the generic client-services sections (interest, competitor purchases/objections,
+  follow-ups, lost sales) are hidden, and the campaign-filter banner moved above the headline stats.
+  Frontend-only. APP_VERSION → 1.18.0.
+- Operations dashboard layout + chat-response fixes (OperationsDashboard.vue, plus one backend change).
+  * Slowest Agents / Slowest Chats reformatted as compact side-by-side tables. Slowest Agents is now
+    the FULL cross-agent leaderboard (no longer filtered to the selected agent — backend
+    insights-summary.service.ts worst_by_agent passes undefined for agent; REDEPLOY needed), with the
+    selected agent's row highlighted. Slowest Chats stays scoped to the selected agent.
+  * Chat Response Time tile no longer disappears when the selected agent has no measured chats — it
+    shows a "no measured chat responses" note and still renders the all-agents leaderboard. The
+    "Comparing <agent> vs overall" banner moved above the chat-response section.
+  * Dimension Averages + QA Assessment Averages now sit side by side (two columns). Lowest Scored
+    moved into the grid as the 3rd column of the Outcome Distribution row; Sales Opportunity moved
+    beside Objection Handling as a two-visual row. Objection-handling totals restyled to reuse the
+    Sales Opportunity summary-strip styles. Frontend + 1 backend tweak. APP_VERSION → 1.19.0.
+

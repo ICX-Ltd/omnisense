@@ -877,9 +877,19 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Chat response time (chats / all filters only) -->
+      <!-- Agent comparison banner — sits above the chat response section -->
+      <div v-if="agent" class="agent-banner" style="margin-top: 14px">
+        <div class="agent-banner-text">
+          Comparing <strong>{{ agent }}</strong> ({{ agentCount }} interactions) against overall average ({{ overallCount }} interactions)
+        </div>
+        <button class="btn btn--sm" @click="clearAgent">Clear agent filter</button>
+      </div>
+
+      <!-- Chat response time (chats / all filters only). Shown whenever chat data
+           was loaded — even if the current selection has no measured chats — so
+           picking an agent never makes the whole section vanish. -->
       <div
-        v-if="showChatResponse && chatResponseData && (chatResponseData.summary?.chats_measured ?? 0) > 0"
+        v-if="showChatResponse && chatResponseData"
         class="tile"
         style="margin-top: 14px"
       >
@@ -901,6 +911,7 @@ onMounted(async () => {
           </div>
         </div>
         <div class="tile-body">
+          <template v-if="(chatResponseData.summary?.chats_measured ?? 0) > 0">
           <div v-if="chatResponseComparison" class="dim-legend" style="margin-bottom: 12px">
             <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
             <span class="dim-legend-item"><span class="dim-swatch dim-swatch--overall" /> All agents</span>
@@ -988,80 +999,91 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-
-          <div
-            v-if="chatResponseData.worst_by_agent?.length"
-            style="margin-top: 14px"
-          >
-            <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Agents</div>
-            <div
-              v-for="row in chatResponseData.worst_by_agent"
-              :key="row.agent"
-              class="drill-row"
-            >
-              <div class="drill-row-top">
-                <strong>{{ row.agent }}</strong>
-                <span class="chip chip--secondary" style="font-size: 11px">{{ row.chats }} chat{{ row.chats === 1 ? '' : 's' }}</span>
-                <span
-                  :class="row.sla_breach_count > 0 ? 'chip bucket-chip--below5' : 'chip chip--secondary'"
-                  style="font-size: 11px"
-                >
-                  {{ row.sla_breach_count }} SLA breach{{ row.sla_breach_count === 1 ? '' : 'es' }}
-                </span>
-              </div>
-              <div class="drill-row-summary">
-                Avg
-                <span :class="responseTimeChip(row.avg_response_seconds)">{{ fmtSeconds(row.avg_response_seconds) }}</span>
-                &middot; Longest
-                <span :class="responseTimeChip(row.max_longest_seconds)">{{ fmtSeconds(row.max_longest_seconds) }}</span>
-              </div>
-            </div>
+          </template>
+          <div v-else class="hint" style="padding: 4px 0">
+            No measured chat responses for {{ agent ? agent : 'this selection' }} in this window
+            (auto-messages are excluded, and a chat needs at least one customer&rarr;agent reply gap to measure).
           </div>
 
           <div
-            v-if="chatResponseData.slowest_chats?.length"
+            v-if="chatResponseData.worst_by_agent?.length || chatResponseData.slowest_chats?.length"
+            class="slowest-row"
             style="margin-top: 14px"
           >
-            <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Chats</div>
-            <div
-              v-for="row in chatResponseData.slowest_chats"
-              :key="row.recordingId"
-              class="drill-row"
-              @click="detailId = row.recordingId"
-            >
-              <div class="drill-row-top">
-                <span :class="responseTimeChip(row.longest_seconds)" style="font-size: 11px">
-                  {{ fmtSeconds(row.longest_seconds) }} longest
-                </span>
-                <span class="chip chip--secondary" style="font-size: 11px">{{ row.agent || 'unknown' }}</span>
-                <span
-                  v-if="(row.sla_breach_count ?? 0) > 0"
-                  class="chip bucket-chip--below5"
-                  style="font-size: 11px"
-                >
-                  {{ row.sla_breach_count }} SLA breach{{ row.sla_breach_count === 1 ? '' : 'es' }}
-                </span>
-                <span class="mono" style="font-size: 11px; opacity: 0.6">{{ String(row.recordingId).slice(0, 8) }}</span>
-              </div>
-              <div class="drill-row-summary">{{ row.summary_short || '(no summary)' }}</div>
-              <div class="muted" style="margin-top: 3px; font-size: 12px">
-                Avg {{ fmtSeconds(row.avg_seconds) }} &middot; Last {{ fmtSeconds(row.last_seconds) }}
-              </div>
+            <!-- Slowest Agents — full cross-agent leaderboard, never filtered to the
+                 selected agent so you can still see the ranking (and where they sit). -->
+            <div v-if="chatResponseData.worst_by_agent?.length" class="slowest-col">
+              <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Agents</div>
+              <table class="slowest-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th class="num">Chats</th>
+                    <th class="num">SLA</th>
+                    <th class="num">Avg</th>
+                    <th class="num">Longest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in chatResponseData.worst_by_agent"
+                    :key="row.agent"
+                    :class="{ 'slowest-me': agent && row.agent === agent }"
+                  >
+                    <td class="slowest-name" :title="row.agent">{{ row.agent }}</td>
+                    <td class="num">{{ row.chats }}</td>
+                    <td class="num">
+                      <span v-if="row.sla_breach_count > 0" class="chip bucket-chip--below5">{{ row.sla_breach_count }}</span>
+                      <span v-else class="muted">0</span>
+                    </td>
+                    <td class="num"><span :class="responseTimeChip(row.avg_response_seconds)">{{ fmtSeconds(row.avg_response_seconds) }}</span></td>
+                    <td class="num"><span :class="responseTimeChip(row.max_longest_seconds)">{{ fmtSeconds(row.max_longest_seconds) }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Slowest Chats -->
+            <div v-if="chatResponseData.slowest_chats?.length" class="slowest-col">
+              <div class="tile-title" style="font-size: 13px; margin-bottom: 6px">Slowest Chats<template v-if="agent"> — {{ agent }}</template></div>
+              <table class="slowest-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th class="num">Longest</th>
+                    <th class="num">Avg</th>
+                    <th class="num">Last</th>
+                    <th class="num">SLA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in chatResponseData.slowest_chats"
+                    :key="row.recordingId"
+                    class="slowest-clickable"
+                    :title="row.summary_short || '(no summary)'"
+                    @click="detailId = row.recordingId"
+                  >
+                    <td class="slowest-name" :title="row.agent || 'unknown'">{{ row.agent || 'unknown' }}</td>
+                    <td class="num"><span :class="responseTimeChip(row.longest_seconds)">{{ fmtSeconds(row.longest_seconds) }}</span></td>
+                    <td class="num">{{ fmtSeconds(row.avg_seconds) }}</td>
+                    <td class="num">{{ fmtSeconds(row.last_seconds) }}</td>
+                    <td class="num">
+                      <span v-if="(row.sla_breach_count ?? 0) > 0" class="chip bucket-chip--below5">{{ row.sla_breach_count }}</span>
+                      <span v-else class="muted">0</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Agent comparison banner -->
-      <div v-if="agent" class="agent-banner" style="margin-top: 14px">
-        <div class="agent-banner-text">
-          Comparing <strong>{{ agent }}</strong> ({{ agentCount }} interactions) against overall average ({{ overallCount }} interactions)
-        </div>
-        <button class="btn btn--sm" @click="clearAgent">Clear agent filter</button>
-      </div>
-
+      <!-- Dimension Averages + QA Assessment Averages, side by side -->
+      <div class="dim-averages-row" style="margin-top: 14px">
       <!-- Dimension Averages -->
-      <div class="tile" style="margin-top: 14px">
+      <div class="tile dim-averages-tile">
         <div class="tile-head">
           <div class="tile-icon">&#128202;</div>
           <div class="tile-text">
@@ -1126,7 +1148,7 @@ onMounted(async () => {
       </div>
 
       <!-- QA Dimension Averages (RAC-style campaigns) -->
-      <div v-if="hasQaData" class="tile" style="margin-top: 14px">
+      <div v-if="hasQaData" class="tile dim-averages-tile">
         <div class="tile-head">
           <div class="tile-icon">&#9989;</div>
           <div class="tile-text">
@@ -1202,9 +1224,12 @@ onMounted(async () => {
           </template>
         </div>
       </div>
+      </div>
 
+      <!-- Objection Handling + Sales Opportunity — two-visual row -->
+      <div class="tile-pair" style="margin-top: 14px">
       <!-- Objection Handling Assessment Summary -->
-      <div v-if="objectionAssessData?.categories?.some((c: any) => c.raised_count > 0)" class="tile" style="margin-top: 14px">
+      <div v-if="objectionAssessData?.categories?.some((c: any) => c.raised_count > 0)" class="tile">
         <div class="tile-head" style="flex-wrap: wrap">
           <div class="tile-icon">&#128172;</div>
           <div class="tile-text" style="flex: 1">
@@ -1225,42 +1250,42 @@ onMounted(async () => {
             <span class="dim-legend-item"><span class="dim-swatch dim-swatch--agent" /> {{ agent }}</span>
           </div>
 
-          <!-- Totals summary -->
-          <div style="display: flex; gap: 20px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap">
-            <div class="objection-stat">
-              <div class="objection-stat-value">{{ objectionAssessData.totals.assessed }}</div>
-              <div class="objection-stat-label">Assessed</div>
+          <!-- Totals summary — same boxed strip style as Sales Opportunity -->
+          <div class="opp-summary-strip">
+            <div class="opp-stat">
+              <div class="opp-stat-value">{{ objectionAssessData.totals.assessed }}</div>
+              <div class="opp-stat-label">Assessed</div>
               <template v-if="agent && objectionAssessData.agent">
                 <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.assessed }}</div>
-                <div class="objection-stat-label">{{ agent }}</div>
+                <div class="opp-stat-label">{{ agent }}</div>
               </template>
             </div>
-            <div class="objection-stat">
-              <div class="objection-stat-value">{{ objectionAssessData.totals.with_objections }}</div>
-              <div class="objection-stat-label">With Objections</div>
+            <div class="opp-stat">
+              <div class="opp-stat-value">{{ objectionAssessData.totals.with_objections }}</div>
+              <div class="opp-stat-label">With Objections</div>
               <template v-if="agent && objectionAssessData.agent">
                 <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.with_objections }}</div>
-                <div class="objection-stat-label">{{ agent }}</div>
+                <div class="opp-stat-label">{{ agent }}</div>
               </template>
             </div>
-            <div class="objection-stat">
-              <div class="objection-stat-value">{{ objectionAssessData.totals.total_objections_raised }}</div>
-              <div class="objection-stat-label">Total Objections</div>
+            <div class="opp-stat">
+              <div class="opp-stat-value">{{ objectionAssessData.totals.total_objections_raised }}</div>
+              <div class="opp-stat-label">Total Objections</div>
               <template v-if="agent && objectionAssessData.agent">
                 <div class="objection-stat-agent">{{ objectionAssessData.agent.totals.total_objections_raised }}</div>
-                <div class="objection-stat-label">{{ agent }}</div>
+                <div class="opp-stat-label">{{ agent }}</div>
               </template>
             </div>
-            <div class="objection-stat">
-              <div class="objection-stat-value" :style="{ color: rateColorSolid(objectionAssessData.totals.avg_checklist_score) }">
+            <div class="opp-stat">
+              <div class="opp-stat-value" :style="{ color: rateColorSolid(objectionAssessData.totals.avg_checklist_score) }">
                 {{ objectionAssessData.totals.avg_checklist_score != null ? (objectionAssessData.totals.avg_checklist_score * 100).toFixed(0) + '%' : 'n/a' }}
               </div>
-              <div class="objection-stat-label">Avg Checklist Score</div>
+              <div class="opp-stat-label">Avg Checklist Score</div>
               <template v-if="agent && objectionAssessData.agent">
                 <div class="objection-stat-agent" :style="{ color: rateColorSolid(objectionAssessData.agent.totals.avg_checklist_score) }">
                   {{ objectionAssessData.agent.totals.avg_checklist_score != null ? (objectionAssessData.agent.totals.avg_checklist_score * 100).toFixed(0) + '%' : 'n/a' }}
                 </div>
-                <div class="objection-stat-label">{{ agent }}</div>
+                <div class="opp-stat-label">{{ agent }}</div>
               </template>
             </div>
           </div>
@@ -1349,6 +1374,147 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Sales Opportunity Classification (paired with Objection Handling) -->
+      <div
+        v-if="opportunityData && (opportunityData.classified > 0 || opportunityData.unclassified > 0)"
+        class="tile"
+      >
+        <div class="tile-head">
+          <div class="tile-icon">&#128176;</div>
+          <div class="tile-text">
+            <div class="tile-title">Sales Opportunity Classification</div>
+            <div class="tile-desc">Breakdown of records classified as opportunities vs not — click a reason to view individual records</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <!-- Summary strip -->
+          <div class="opp-summary-strip">
+            <div class="opp-stat">
+              <div class="opp-stat-value">{{ opportunityData.classified }}</div>
+              <div class="opp-stat-label">Classified</div>
+            </div>
+            <div class="opp-stat opp-stat--opportunity">
+              <div class="opp-stat-value">{{ opportunityData.opportunities }}</div>
+              <div class="opp-stat-label">Opportunities</div>
+            </div>
+            <div class="opp-stat opp-stat--not">
+              <div class="opp-stat-value">{{ opportunityData.not_opportunities }}</div>
+              <div class="opp-stat-label">Not Opportunities</div>
+            </div>
+            <div class="opp-stat opp-stat--unclassified">
+              <div class="opp-stat-value">{{ opportunityData.unclassified || 0 }}</div>
+              <div class="opp-stat-label">Unable to Classify</div>
+            </div>
+            <div class="opp-stat">
+              <div class="opp-stat-value">{{ opportunityData.classified > 0 ? Math.round(opportunityData.opportunities / opportunityData.classified * 100) : 0 }}%</div>
+              <div class="opp-stat-label">Opportunity Rate</div>
+            </div>
+          </div>
+
+          <!-- Opportunity row (clickable) -->
+          <div v-if="opportunityData.opportunities > 0">
+            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__opportunity')">
+              <div class="metric-left">
+                <span class="chip chip--success" style="font-size: 12px">Opportunity to Sell</span>
+              </div>
+              <div class="metric-right">
+                <span class="count-pill">{{ opportunityData.opportunities }}</span>
+                <span class="expand-icon">{{ expandedOpportunityReason === '__opportunity' ? '&#9650;' : '&#9660;' }}</span>
+              </div>
+            </div>
+            <div v-if="expandedOpportunityReason === '__opportunity'" class="drill-panel">
+              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
+              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+              <div
+                v-else
+                v-for="ix in opportunityInteractions"
+                :key="ix.recordingId"
+                class="drill-row"
+                @click="openDetail(ix.recordingId)"
+              >
+                <div class="drill-row-top">
+                  <span class="chip chip--success" style="font-size: 11px">Opportunity</span>
+                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                </div>
+                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reason breakdown (not opportunities) -->
+          <div
+            v-for="r in opportunityData.reason_breakdown"
+            :key="r.reason"
+          >
+            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason(r.reason)">
+              <div class="metric-left">
+                <span class="chip chip--danger" style="font-size: 12px">{{ opportunityReasonLabel(r.reason) }}</span>
+              </div>
+              <div class="metric-right">
+                <span class="count-pill">{{ r.count }}</span>
+                <span class="expand-icon">{{ expandedOpportunityReason === r.reason ? '&#9650;' : '&#9660;' }}</span>
+              </div>
+            </div>
+
+            <div v-if="expandedOpportunityReason === r.reason" class="drill-panel">
+              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
+              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+              <div
+                v-else
+                v-for="ix in opportunityInteractions"
+                :key="ix.recordingId"
+                class="drill-row"
+                @click="openDetail(ix.recordingId)"
+              >
+                <div class="drill-row-top">
+                  <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
+                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                </div>
+                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unable to classify (attempted but ambiguous) -->
+          <div v-if="opportunityData.unclassified > 0">
+            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__unclassified')">
+              <div class="metric-left">
+                <span class="chip chip--secondary" style="font-size: 12px">{{ opportunityReasonLabel('__unclassified') }}</span>
+                <span class="hint" style="font-size: 11px; margin-left: 8px">Classification attempted but intent could not be determined</span>
+              </div>
+              <div class="metric-right">
+                <span class="count-pill">{{ opportunityData.unclassified }}</span>
+                <span class="expand-icon">{{ expandedOpportunityReason === '__unclassified' ? '&#9650;' : '&#9660;' }}</span>
+              </div>
+            </div>
+            <div v-if="expandedOpportunityReason === '__unclassified'" class="drill-panel">
+              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
+              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
+              <div
+                v-else
+                v-for="ix in opportunityInteractions"
+                :key="ix.recordingId"
+                class="drill-row"
+                @click="openDetail(ix.recordingId)"
+              >
+                <div class="drill-row-top">
+                  <span class="chip chip--secondary" style="font-size: 11px">Unable to Classify</span>
+                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
+                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
+                </div>
+                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       </div>
 
       <div class="grid grid-3" style="margin-top: 14px">
@@ -1627,155 +1793,12 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Opportunity Classification -->
-      <div
-        v-if="opportunityData && (opportunityData.classified > 0 || opportunityData.unclassified > 0)"
-        class="tile"
-        style="margin-top: 14px"
-      >
-        <div class="tile-head">
-          <div class="tile-icon">&#128176;</div>
-          <div class="tile-text">
-            <div class="tile-title">Sales Opportunity Classification</div>
-            <div class="tile-desc">Breakdown of records classified as opportunities vs not — click a reason to view individual records</div>
-          </div>
-        </div>
-        <div class="tile-body">
-          <!-- Summary strip -->
-          <div class="opp-summary-strip">
-            <div class="opp-stat">
-              <div class="opp-stat-value">{{ opportunityData.classified }}</div>
-              <div class="opp-stat-label">Classified</div>
-            </div>
-            <div class="opp-stat opp-stat--opportunity">
-              <div class="opp-stat-value">{{ opportunityData.opportunities }}</div>
-              <div class="opp-stat-label">Opportunities</div>
-            </div>
-            <div class="opp-stat opp-stat--not">
-              <div class="opp-stat-value">{{ opportunityData.not_opportunities }}</div>
-              <div class="opp-stat-label">Not Opportunities</div>
-            </div>
-            <div class="opp-stat opp-stat--unclassified">
-              <div class="opp-stat-value">{{ opportunityData.unclassified || 0 }}</div>
-              <div class="opp-stat-label">Unable to Classify</div>
-            </div>
-            <div class="opp-stat">
-              <div class="opp-stat-value">{{ opportunityData.classified > 0 ? Math.round(opportunityData.opportunities / opportunityData.classified * 100) : 0 }}%</div>
-              <div class="opp-stat-label">Opportunity Rate</div>
-            </div>
-          </div>
-
-          <!-- Opportunity row (clickable) -->
-          <div v-if="opportunityData.opportunities > 0">
-            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__opportunity')">
-              <div class="metric-left">
-                <span class="chip chip--success" style="font-size: 12px">Opportunity to Sell</span>
-              </div>
-              <div class="metric-right">
-                <span class="count-pill">{{ opportunityData.opportunities }}</span>
-                <span class="expand-icon">{{ expandedOpportunityReason === '__opportunity' ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-            </div>
-            <div v-if="expandedOpportunityReason === '__opportunity'" class="drill-panel">
-              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
-              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
-              <div
-                v-else
-                v-for="ix in opportunityInteractions"
-                :key="ix.recordingId"
-                class="drill-row"
-                @click="openDetail(ix.recordingId)"
-              >
-                <div class="drill-row-top">
-                  <span class="chip chip--success" style="font-size: 11px">Opportunity</span>
-                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Reason breakdown (not opportunities) -->
-          <div
-            v-for="r in opportunityData.reason_breakdown"
-            :key="r.reason"
-          >
-            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason(r.reason)">
-              <div class="metric-left">
-                <span class="chip chip--danger" style="font-size: 12px">{{ opportunityReasonLabel(r.reason) }}</span>
-              </div>
-              <div class="metric-right">
-                <span class="count-pill">{{ r.count }}</span>
-                <span class="expand-icon">{{ expandedOpportunityReason === r.reason ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-            </div>
-
-            <div v-if="expandedOpportunityReason === r.reason" class="drill-panel">
-              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
-              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
-              <div
-                v-else
-                v-for="ix in opportunityInteractions"
-                :key="ix.recordingId"
-                class="drill-row"
-                @click="openDetail(ix.recordingId)"
-              >
-                <div class="drill-row-top">
-                  <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
-                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Unable to classify (attempted but ambiguous) -->
-          <div v-if="opportunityData.unclassified > 0">
-            <div class="metric-row metric-row--clickable" @click="toggleOpportunityReason('__unclassified')">
-              <div class="metric-left">
-                <span class="chip chip--secondary" style="font-size: 12px">{{ opportunityReasonLabel('__unclassified') }}</span>
-                <span class="hint" style="font-size: 11px; margin-left: 8px">Classification attempted but intent could not be determined</span>
-              </div>
-              <div class="metric-right">
-                <span class="count-pill">{{ opportunityData.unclassified }}</span>
-                <span class="expand-icon">{{ expandedOpportunityReason === '__unclassified' ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-            </div>
-            <div v-if="expandedOpportunityReason === '__unclassified'" class="drill-panel">
-              <div v-if="loadingOpportunityReason" class="hint">Loading interactions...</div>
-              <div v-else-if="!opportunityInteractions.length" class="hint">No interactions found.</div>
-              <div
-                v-else
-                v-for="ix in opportunityInteractions"
-                :key="ix.recordingId"
-                class="drill-row"
-                @click="openDetail(ix.recordingId)"
-              >
-                <div class="drill-row-top">
-                  <span class="chip chip--secondary" style="font-size: 11px">Unable to Classify</span>
-                  <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span>
-                </div>
-                <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Lowest scored (quick view) -->
-      <div
-        v-if="opsData.lowest_scored.length"
-        class="tile"
-        style="margin-top: 14px"
-      >
+        <!-- Lowest Scored — 3rd column of the Outcome Distribution row -->
+        <div
+          v-if="opsData.lowest_scored.length"
+          class="tile"
+        >
         <div class="tile-head">
           <div class="tile-icon">&#9888;</div>
           <div class="tile-text">
@@ -1805,6 +1828,7 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </template>
 
@@ -2819,26 +2843,9 @@ onMounted(async () => {
   gap: 6px;
 }
 
-.objection-stat {
-  text-align: center;
-  min-width: 80px;
-}
-
-.objection-stat-value {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--ink);
-  line-height: 1.2;
-}
-
-.objection-stat-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: 0.03em;
-}
-
+/* Objection-handling totals reuse the Sales Opportunity strip styles
+   (.opp-summary-strip / .opp-stat*); only the agent comparison sub-value is
+   bespoke. */
 .objection-stat-agent {
   font-size: 16px;
   font-weight: 700;
@@ -2876,5 +2883,92 @@ onMounted(async () => {
 .drawer-enter-from,
 .drawer-leave-to {
   transform: translateX(100%);
+}
+
+/* ── Slowest Agents / Slowest Chats — compact side-by-side tables ──────────── */
+.slowest-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 24px;
+}
+.slowest-col {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+.slowest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.slowest-table th {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.slowest-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.slowest-table th.num,
+.slowest-table td.num {
+  text-align: right;
+}
+.slowest-table .chip {
+  font-size: 11px;
+}
+.slowest-name {
+  font-weight: 600;
+  color: var(--ink);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slowest-clickable {
+  cursor: pointer;
+}
+.slowest-clickable:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+/* Highlight the currently-selected agent's row in the leaderboard. */
+.slowest-me {
+  background: color-mix(in srgb, var(--brand, #6366f1) 12%, transparent);
+}
+.slowest-me .slowest-name {
+  color: var(--brand, #6366f1);
+}
+
+/* Dimension Averages + QA Assessment Averages side by side; each stretches to
+   full width when the other is absent, and they stack on narrow screens. */
+.dim-averages-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.dim-averages-tile {
+  flex: 1 1 440px;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* Generic two-visual row (Objection Handling + Sales Opportunity); each tile
+   stretches full width when the other is hidden, and they stack when narrow. */
+.tile-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.tile-pair > .tile {
+  flex: 1 1 440px;
+  min-width: 0;
+  margin-top: 0;
 }
 </style>

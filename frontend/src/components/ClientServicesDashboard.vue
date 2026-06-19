@@ -5,6 +5,7 @@ import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import ParityBar from "./ParityBar.vue";
+import ParitySegmentBar from "./ParitySegmentBar.vue";
 import OutcomeDonut from "./OutcomeDonut.vue";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -140,6 +141,10 @@ function isOpportunityOpen(key: string) { return !!openOpportunityReason.value[k
 
 // Parity campaign analysis
 const parityData = ref<any>(null);
+// True when the user has selected the Parity campaign. The Parity tile then
+// carries the full picture, so the generic client-services sections (interest,
+// competitor purchases/objections, follow-ups, lost sales) are hidden.
+const isParityCampaign = computed(() => campaign.value === "Parity");
 // Parity drill-downs are independently toggleable: each drill key tracks its own
 // open state + interactions, so separate stats (e.g. the four negative-view cards)
 // open and close without affecting one another.
@@ -389,7 +394,7 @@ async function loadAll() {
   loadingParityMap.value = {};
   detailId.value = null;
 
-  const isParity = campaign.value === "Parity";
+  const isParity = isParityCampaign.value;
   const compareP = compareParams.value;
 
   try {
@@ -554,6 +559,75 @@ function situationAnswerChip(answer: string | null | undefined) {
   if (answer === "yes") return "chip chip--danger";
   if (answer === "no") return "chip chip--success";
   return "chip chip--secondary";
+}
+
+// ── Segment builders for the consolidated ParitySegmentBar ──────────────────
+// Each card renders ONE segmented bar instead of one row per bucket. These map
+// the per-bucket counts into the {key,label,chipClass,color,count,...} shape the
+// bar expects, carrying the open state so chevrons reflect which drill is shown.
+function viewSegments(vk: (typeof viewKeys)[number]) {
+  return viewBuckets.map((bucket) => ({
+    key: bucket,
+    label: viewAnswerLabel(bucket),
+    chipClass: viewAnswerChip(bucket),
+    color: viewAnswerColor(bucket),
+    count: parityData.value.views[vk.key][bucket],
+    compareCount: parityDataCompare.value?.views?.[vk.key]?.[bucket] ?? null,
+    open: isParityOpen("view:" + vk.key + ":" + bucket),
+  }));
+}
+
+// n/a sits in the MIDDLE so the bar reads concern (left) · n/a · clear (right).
+function situationSegments(sk: (typeof situationKeys)[number]) {
+  return (["yes", "n_a", "no"] as const).map((bucket) => ({
+    key: bucket,
+    label: bucket === "n_a" ? "n/a" : bucket,
+    chipClass: situationAnswerChip(bucket === "n_a" ? "n_a" : bucket),
+    color: situationBarColor(bucket),
+    count: parityData.value.customer_situation[sk.key][bucket],
+    compareCount: parityDataCompare.value?.customer_situation?.[sk.key]?.[bucket] ?? null,
+    open: isParityOpen("situation:" + sk.key + ":" + bucket),
+  }));
+}
+
+// Consent: yes (agreed) is green, no is red, n/a grey — n/a in the middle.
+function consentSegments() {
+  return (["yes", "n_a", "no"] as const).map((bucket) => ({
+    key: bucket,
+    label: bucket === "n_a" ? "n/a" : bucket,
+    chipClass: parityAnswerChip(bucket === "n_a" ? "n_a" : bucket),
+    color: bucket === "yes" ? "var(--success, #22c55e)" : bucket === "no" ? "var(--danger, #ef4444)" : "#94a3b8",
+    count: parityData.value.consent[bucket],
+    compareCount: parityDataCompare.value?.consent?.[bucket] ?? null,
+    open: isParityOpen("consent:" + bucket),
+  }));
+}
+
+// Decision: yes (already decided) is blue, no grey — chip colours track the bar
+// so the legend swatch and segment agree.
+function decisionSegments() {
+  return (["yes", "n_a", "no"] as const).map((bucket) => ({
+    key: bucket,
+    label: bucket === "n_a" ? "n/a" : bucket,
+    chipClass: bucket === "yes" ? "chip chip--info" : "chip chip--secondary",
+    color: bucket === "yes" ? "#0ea5e9" : bucket === "no" ? "#a3a3a3" : "#94a3b8",
+    count: parityData.value.decision_made[bucket],
+    compareCount: parityDataCompare.value?.decision_made?.[bucket] ?? null,
+    open: isParityOpen("decision:" + bucket),
+  }));
+}
+
+// Competitor identified: yes is amber (a competitor in play), no green, n/a grey.
+// Display-only — there is no per-bucket drill-down for this breakdown.
+function competitorSegments() {
+  return (["yes", "n_a", "no"] as const).map((bucket) => ({
+    key: bucket,
+    label: bucket === "n_a" ? "n/a" : bucket,
+    chipClass: bucket === "yes" ? "chip chip--warning" : bucket === "no" ? "chip chip--success" : "chip chip--secondary",
+    color: bucket === "yes" ? "#f59e0b" : bucket === "no" ? "var(--success, #22c55e)" : "#94a3b8",
+    count: parityData.value.competitors.breakdown[bucket],
+    compareCount: parityDataCompare.value?.competitors?.breakdown?.[bucket] ?? null,
+  }));
 }
 
 async function toggleInterest(level: string) {
@@ -817,6 +891,14 @@ onMounted(async () => {
     </div>
 
     <template v-if="csData">
+      <!-- Campaign filter banner — sits above the headline stats -->
+      <div v-if="campaign" class="campaign-banner" style="margin-bottom: 14px">
+        <div class="campaign-banner-text">
+          Filtering by campaign: <strong>{{ campaign }}</strong>
+        </div>
+        <button class="btn btn--sm" @click="clearCampaign">Clear campaign filter</button>
+      </div>
+
       <!-- Overview strip -->
       <div class="stats-strip">
         <div class="stat">
@@ -886,14 +968,6 @@ onMounted(async () => {
           <div class="stat-label">By Vehicle Make</div>
           <OutcomeDonut :data="vehicleMakeChartData" :compare-data="vehicleMakeChartCompare" :size="120" />
         </div>
-      </div>
-
-      <!-- Campaign comparison banner -->
-      <div v-if="campaign" class="campaign-banner" style="margin-top: 14px">
-        <div class="campaign-banner-text">
-          Filtering by campaign: <strong>{{ campaign }}</strong>
-        </div>
-        <button class="btn btn--sm" @click="clearCampaign">Clear campaign filter</button>
       </div>
 
       <!-- Campaigns in Dataset -->
@@ -1046,42 +1120,27 @@ onMounted(async () => {
         </div>
         <div class="tile-body">
 
-          <!-- Consent + decision, shown side by side -->
-          <div class="parity-two-col">
-          <div class="parity-col">
-          <div class="parity-sub-title">Consent to Dealer Contact</div>
-          <div class="parity-sub-desc">Did the customer agree to have their details passed to the dealer?</div>
+          <!-- Row 1: Customer Decision (consent + decision) beside Customer Circumstances -->
+          <div class="parity-row">
+          <div class="parity-row-group">
+          <div class="parity-section-divider parity-section-divider--first">
+            <span class="parity-section-divider-label">Customer Decision</span>
+          </div>
+          <div class="views-grid views-grid--pair">
+          <div class="views-card">
+          <div class="views-card-title">Consent to Dealer Contact</div>
 
-          <div
+          <ParitySegmentBar
+            :segments="consentSegments()"
+            :total="parityData.total"
+            :compare-total="parityDataCompare?.total"
+            detailed-compare
+            @toggle="(bucket) => toggleParity('consent:' + bucket, { consentAnswer: bucket })"
+          />
+          <template
             v-for="bucket in (['yes','no','n_a'] as const)"
             :key="'consent-' + bucket"
           >
-            <div class="metric-row metric-row--clickable" @click="toggleParity('consent:' + bucket, { consentAnswer: bucket })">
-              <div class="metric-left">
-                <span :class="parityAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 12px">
-                  {{ bucket === 'n_a' ? 'n/a' : bucket }}
-                </span>
-                <ParityBar
-                  :current="parityData.consent[bucket]"
-                  :total="parityData.total"
-                  :color="bucket === 'yes' ? 'var(--success, #22c55e)' : bucket === 'no' ? 'var(--danger, #ef4444)' : '#94a3b8'"
-                  :compare-current="parityDataCompare?.consent[bucket]"
-                  :compare-total="parityDataCompare?.total"
-                />
-                <span class="parity-pct">{{ pctOfTotal(parityData.consent[bucket], parityData.total) }}%</span>
-              </div>
-              <div class="metric-right">
-                <span v-if="parityDataCompare" class="cmp-pill">
-                  vs <strong>{{ parityDataCompare.consent[bucket] }}</strong>
-                  <span :class="compareClass(compareDelta(parityData.consent[bucket], parityDataCompare.consent[bucket]).dir)">
-                    {{ compareArrow(compareDelta(parityData.consent[bucket], parityDataCompare.consent[bucket]).dir) }}
-                    {{ compareDelta(parityData.consent[bucket], parityDataCompare.consent[bucket]).pctLabel }}
-                  </span>
-                </span>
-                <span class="count-pill">{{ parityData.consent[bucket] }}</span>
-                <span class="expand-icon">{{ isParityOpen('consent:' + bucket) ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-            </div>
             <div v-if="isParityOpen('consent:' + bucket)" class="drill-panel">
               <div v-if="loadingParityMap['consent:' + bucket]" class="hint">Loading interactions...</div>
               <div v-else-if="!(parityInteractionsMap['consent:' + bucket] || []).length" class="hint">No interactions found.</div>
@@ -1103,46 +1162,23 @@ onMounted(async () => {
                 <div v-else class="drill-row-summary" style="opacity: 0.5">(no quote captured)</div>
               </div>
             </div>
-          </div>
-          </div>
-
-          <div class="parity-col">
-          <!-- Has the customer already decided? -->
-          <div class="parity-sub-title">Has the customer already decided?</div>
-          <div class="parity-sub-desc">
-            Drill-down rows show whether the dealer had already been in touch with the customer.
+          </template>
           </div>
 
-          <div
+          <div class="views-card">
+          <div class="views-card-title">Has the customer already decided?</div>
+
+          <ParitySegmentBar
+            :segments="decisionSegments()"
+            :total="parityData.total"
+            :compare-total="parityDataCompare?.total"
+            detailed-compare
+            @toggle="(bucket) => toggleParity('decision:' + bucket, { decisionAnswer: bucket })"
+          />
+          <template
             v-for="bucket in (['yes','no','n_a'] as const)"
             :key="'decision-' + bucket"
           >
-            <div class="metric-row metric-row--clickable" @click="toggleParity('decision:' + bucket, { decisionAnswer: bucket })">
-              <div class="metric-left">
-                <span :class="parityAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 12px">
-                  {{ bucket === 'n_a' ? 'n/a' : bucket }}
-                </span>
-                <ParityBar
-                  :current="parityData.decision_made[bucket]"
-                  :total="parityData.total"
-                  :color="bucket === 'yes' ? '#0ea5e9' : bucket === 'no' ? '#a3a3a3' : '#94a3b8'"
-                  :compare-current="parityDataCompare?.decision_made[bucket]"
-                  :compare-total="parityDataCompare?.total"
-                />
-                <span class="parity-pct">{{ pctOfTotal(parityData.decision_made[bucket], parityData.total) }}%</span>
-              </div>
-              <div class="metric-right">
-                <span v-if="parityDataCompare" class="cmp-pill">
-                  vs <strong>{{ parityDataCompare.decision_made[bucket] }}</strong>
-                  <span :class="compareClass(compareDelta(parityData.decision_made[bucket], parityDataCompare.decision_made[bucket]).dir)">
-                    {{ compareArrow(compareDelta(parityData.decision_made[bucket], parityDataCompare.decision_made[bucket]).dir) }}
-                    {{ compareDelta(parityData.decision_made[bucket], parityDataCompare.decision_made[bucket]).pctLabel }}
-                  </span>
-                </span>
-                <span class="count-pill">{{ parityData.decision_made[bucket] }}</span>
-                <span class="expand-icon">{{ isParityOpen('decision:' + bucket) ? '&#9650;' : '&#9660;' }}</span>
-              </div>
-            </div>
             <div v-if="isParityOpen('decision:' + bucket)" class="drill-panel">
               <div v-if="loadingParityMap['decision:' + bucket]" class="hint">Loading interactions...</div>
               <div v-else-if="!(parityInteractionsMap['decision:' + bucket] || []).length" class="hint">No interactions found.</div>
@@ -1172,6 +1208,59 @@ onMounted(async () => {
                 <div v-if="ix.decision_quote" class="parity-drill-quote">"{{ ix.decision_quote }}"</div>
               </div>
             </div>
+          </template>
+          </div>
+          </div>
+          </div>
+
+          <div class="parity-row-group">
+          <div class="parity-section-divider parity-section-divider--first">
+            <span class="parity-section-divider-label">Customer Circumstances</span>
+          </div>
+          <div class="views-grid views-grid--pair">
+            <div
+              v-for="sk in situationKeys"
+              :key="sk.key"
+              class="views-card"
+            >
+              <div class="views-card-title">{{ sk.label }}</div>
+              <ParitySegmentBar
+                :segments="situationSegments(sk)"
+                :total="parityData.total"
+                :compare-total="parityDataCompare?.total"
+                detailed-compare
+                @toggle="(bucket) => toggleParity('situation:' + sk.key + ':' + bucket, sk.buildCriteria(bucket))"
+              />
+              <template
+                v-for="bucket in (['yes','no','n_a'] as const)"
+                :key="sk.key + '-' + bucket"
+              >
+                <div v-if="isParityOpen('situation:' + sk.key + ':' + bucket)" class="drill-panel">
+                  <div v-if="loadingParityMap['situation:' + sk.key + ':' + bucket]" class="hint">Loading interactions...</div>
+                  <div v-else-if="!(parityInteractionsMap['situation:' + sk.key + ':' + bucket] || []).length" class="hint">No interactions found.</div>
+                  <div
+                    v-else
+                    v-for="ix in parityInteractionsMap['situation:' + sk.key + ':' + bucket]"
+                    :key="ix.recordingId"
+                    class="drill-row"
+                    @click="openDetail(ix.recordingId)"
+                  >
+                    <div class="drill-row-top">
+                      <span :class="situationAnswerChip(ix[sk.rowField])" style="font-size: 11px">
+                        {{ sk.label }}: {{ ix[sk.rowField] || 'n/a' }}
+                      </span>
+                      <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
+                      <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
+                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
+                    </div>
+                    <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
+                    <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
+                    <div v-if="ix[sk.quoteField]" class="parity-drill-quote">"{{ ix[sk.quoteField] }}"</div>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
           </div>
           </div>
@@ -1192,34 +1281,17 @@ onMounted(async () => {
               class="views-card"
             >
               <div class="views-card-title">{{ vk.label }}</div>
-              <div
+              <ParitySegmentBar
+                :segments="viewSegments(vk)"
+                :total="parityData.total"
+                :compare-total="parityDataCompare?.total"
+                detailed-compare
+                @toggle="(bucket) => toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewAnswer: bucket })"
+              />
+              <template
                 v-for="bucket in viewBuckets"
                 :key="vk.key + '-' + bucket"
               >
-                <div
-                  class="views-row"
-                  @click="toggleParity('view:' + vk.key + ':' + bucket, { viewKey: vk.key, viewAnswer: bucket })"
-                >
-                  <span :class="viewAnswerChip(bucket)" style="font-size: 11px">
-                    {{ viewAnswerLabel(bucket) }}
-                  </span>
-                  <ParityBar
-                    variant="mini"
-                    :current="parityData.views[vk.key][bucket]"
-                    :total="parityData.total"
-                    :color="viewAnswerColor(bucket)"
-                    :compare-current="parityDataCompare?.views?.[vk.key]?.[bucket]"
-                    :compare-total="parityDataCompare?.total"
-                  />
-                  <span class="views-pct">{{ pctOfTotal(parityData.views[vk.key][bucket], parityData.total) }}%</span>
-                  <span
-                    class="views-count"
-                    :title="parityDataCompare
-                      ? 'Compare period: ' + parityDataCompare.views[vk.key][bucket] + ' (' + compareDelta(parityData.views[vk.key][bucket], parityDataCompare.views[vk.key][bucket]).pctLabel + ')'
-                      : undefined"
-                  >{{ parityData.views[vk.key][bucket] }}</span>
-                  <span class="expand-icon views-expand">{{ isParityOpen('view:' + vk.key + ':' + bucket) ? '&#9650;' : '&#9660;' }}</span>
-                </div>
                 <div v-if="isParityOpen('view:' + vk.key + ':' + bucket)" class="drill-panel">
                   <div v-if="loadingParityMap['view:' + vk.key + ':' + bucket]" class="hint">Loading interactions...</div>
                   <div v-else-if="!(parityInteractionsMap['view:' + vk.key + ':' + bucket] || []).length" class="hint">No interactions found.</div>
@@ -1245,78 +1317,7 @@ onMounted(async () => {
                     <div v-if="ix[vk.quoteField]" class="parity-drill-quote">"{{ ix[vk.quoteField] }}"</div>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Customer Circumstances -->
-          <div class="parity-section-divider">
-            <span class="parity-section-divider-label">Customer Circumstances</span>
-          </div>
-          <div class="parity-sub-desc" style="margin-bottom: 12px">
-            Affordability concerns and lifestyle changes that influence the customer's vehicle or financial position.
-          </div>
-
-          <div class="views-grid">
-            <div
-              v-for="sk in situationKeys"
-              :key="sk.key"
-              class="views-card"
-            >
-              <div class="views-card-title">{{ sk.label }}</div>
-              <div
-                v-for="bucket in (['yes','no','n_a'] as const)"
-                :key="sk.key + '-' + bucket"
-              >
-                <div
-                  class="views-row"
-                  @click="toggleParity('situation:' + sk.key + ':' + bucket, sk.buildCriteria(bucket))"
-                >
-                  <span :class="situationAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 11px">
-                    {{ bucket === 'n_a' ? 'n/a' : bucket }}
-                  </span>
-                  <ParityBar
-                    variant="mini"
-                    :current="parityData.customer_situation[sk.key][bucket]"
-                    :total="parityData.total"
-                    :color="situationBarColor(bucket)"
-                    :compare-current="parityDataCompare?.customer_situation?.[sk.key]?.[bucket]"
-                    :compare-total="parityDataCompare?.total"
-                  />
-                  <span class="views-pct">{{ pctOfTotal(parityData.customer_situation[sk.key][bucket], parityData.total) }}%</span>
-                  <span
-                    class="views-count"
-                    :title="parityDataCompare
-                      ? 'Compare period: ' + parityDataCompare.customer_situation[sk.key][bucket] + ' (' + compareDelta(parityData.customer_situation[sk.key][bucket], parityDataCompare.customer_situation[sk.key][bucket]).pctLabel + ')'
-                      : undefined"
-                  >{{ parityData.customer_situation[sk.key][bucket] }}</span>
-                  <span class="expand-icon views-expand">{{ isParityOpen('situation:' + sk.key + ':' + bucket) ? '&#9650;' : '&#9660;' }}</span>
-                </div>
-                <div v-if="isParityOpen('situation:' + sk.key + ':' + bucket)" class="drill-panel">
-                  <div v-if="loadingParityMap['situation:' + sk.key + ':' + bucket]" class="hint">Loading interactions...</div>
-                  <div v-else-if="!(parityInteractionsMap['situation:' + sk.key + ':' + bucket] || []).length" class="hint">No interactions found.</div>
-                  <div
-                    v-else
-                    v-for="ix in parityInteractionsMap['situation:' + sk.key + ':' + bucket]"
-                    :key="ix.recordingId"
-                    class="drill-row"
-                    @click="openDetail(ix.recordingId)"
-                  >
-                    <div class="drill-row-top">
-                      <span :class="situationAnswerChip(ix[sk.rowField])" style="font-size: 11px">
-                        {{ sk.label }}: {{ ix[sk.rowField] || 'n/a' }}
-                      </span>
-                      <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
-                      <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
-                    <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
-                    </div>
-                    <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
-                    <div v-else class="drill-row-summary" style="opacity: 0.5">{{ ix.summary_short || "(no summary)" }}</div>
-                    <div v-if="ix[sk.quoteField]" class="parity-drill-quote">"{{ ix[sk.quoteField] }}"</div>
-                  </div>
-                </div>
-              </div>
+              </template>
             </div>
           </div>
 
@@ -1325,6 +1326,8 @@ onMounted(async () => {
             <span class="parity-section-divider-label">Competitors</span>
           </div>
 
+          <div class="parity-row parity-row--thirds">
+          <div class="parity-row-group">
           <div class="parity-sub-title">Competitor identified?</div>
           <div class="parity-sub-desc">
             <strong>{{ parityData.competitors.total_with_competitor }}</strong>
@@ -1333,38 +1336,18 @@ onMounted(async () => {
             mentioned a competitor vehicle.
           </div>
 
-          <div
-            v-for="bucket in (['yes','no','n_a'] as const)"
-            :key="'competitor-' + bucket"
-            class="metric-row"
-          >
-            <div class="metric-left">
-              <span :class="parityAnswerChip(bucket === 'n_a' ? 'n_a' : bucket)" style="font-size: 12px">
-                {{ bucket === 'n_a' ? 'n/a' : bucket }}
-              </span>
-              <ParityBar
-                :current="parityData.competitors.breakdown[bucket]"
-                :total="parityData.total"
-                :color="bucket === 'yes' ? '#f59e0b' : bucket === 'no' ? 'var(--success, #22c55e)' : '#94a3b8'"
-                :compare-current="parityDataCompare?.competitors?.breakdown[bucket]"
-                :compare-total="parityDataCompare?.total"
-              />
-              <span class="parity-pct">{{ pctOfTotal(parityData.competitors.breakdown[bucket], parityData.total) }}%</span>
-            </div>
-            <div class="metric-right">
-              <span v-if="parityDataCompare" class="cmp-pill">
-                vs <strong>{{ parityDataCompare.competitors.breakdown[bucket] }}</strong>
-                <span :class="compareClass(compareDelta(parityData.competitors.breakdown[bucket], parityDataCompare.competitors.breakdown[bucket]).dir)">
-                  {{ compareArrow(compareDelta(parityData.competitors.breakdown[bucket], parityDataCompare.competitors.breakdown[bucket]).dir) }}
-                  {{ compareDelta(parityData.competitors.breakdown[bucket], parityDataCompare.competitors.breakdown[bucket]).pctLabel }}
-                </span>
-              </span>
-              <span class="count-pill">{{ parityData.competitors.breakdown[bucket] }}</span>
-            </div>
+          <ParitySegmentBar
+            :segments="competitorSegments()"
+            :total="parityData.total"
+            :compare-total="parityDataCompare?.total"
+            :interactive="false"
+            detailed-compare
+          />
           </div>
 
+          <div class="parity-row-group">
           <!-- Competitor reasons (focus of this section) -->
-          <div class="parity-sub-title" style="margin-top: 18px">Why competitor wins</div>
+          <div class="parity-sub-title">Why competitor wins</div>
           <div class="parity-sub-desc">
             Reasons cited across the {{ parityData.competitors.total_with_competitor }} interaction{{ parityData.competitors.total_with_competitor === 1 ? '' : 's' }} where a competitor was identified.
           </div>
@@ -1378,7 +1361,7 @@ onMounted(async () => {
               @click="toggleParity('reason:' + r.reason, { competitorReason: r.reason })"
             >
               <div class="metric-left">
-                <span class="chip chip--info" style="font-size: 12px">{{ String(r.reason).replace(/_/g, ' ') }}</span>
+                <span class="chip chip--info metric-chip--fixed" style="font-size: 12px" :title="String(r.reason).replace(/_/g, ' ')">{{ String(r.reason).replace(/_/g, ' ') }}</span>
                 <ParityBar
                   :current="r.count"
                   :total="parityData.competitors.total_with_competitor"
@@ -1427,8 +1410,14 @@ onMounted(async () => {
             </div>
           </div>
 
+          </div>
+
+          <div class="parity-row-group">
           <!-- Competitor brand breakdown (secondary view) -->
-          <div class="parity-sub-title" style="margin-top: 18px">Competitor brands cited</div>
+          <div class="parity-sub-title">Competitor brands cited</div>
+          <div class="parity-sub-desc">
+            Rival makes named where a competitor was identified.
+          </div>
           <div v-if="!parityData.competitors.competitor_brands.length" class="hint">No competitor brand named.</div>
           <div
             v-for="b in parityData.competitors.competitor_brands"
@@ -1439,7 +1428,7 @@ onMounted(async () => {
               @click="toggleParity('brand:' + b.brand, { competitorBrand: b.brand })"
             >
               <div class="metric-left">
-                <span class="chip chip--warning" style="font-size: 12px">{{ b.brand }}</span>
+                <span class="chip chip--warning metric-chip--fixed" style="font-size: 12px" :title="b.brand">{{ b.brand }}</span>
                 <ParityBar
                   :current="b.count"
                   :total="parityData.competitors.total_with_competitor"
@@ -1486,12 +1475,14 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+          </div>
+          </div>
 
         </div>
       </div>
 
-      <!-- Client Services Metrics -->
-      <div class="grid grid-2" style="margin-top: 14px">
+      <!-- Client Services Metrics — hidden on Parity (the Parity tile covers it) -->
+      <div v-if="!isParityCampaign" class="grid grid-2" style="margin-top: 14px">
         <!-- Customer Interest -->
         <div class="tile">
           <div class="tile-head">
@@ -1606,7 +1597,7 @@ onMounted(async () => {
       </div>
 
       <!-- Top Dealer Follow-ups -->
-      <div v-if="csData.top_dealers.length" class="tile" style="margin-top: 14px">
+      <div v-if="!isParityCampaign && csData.top_dealers.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <div class="tile-icon">&#127970;</div>
           <div class="tile-text">
@@ -1631,7 +1622,7 @@ onMounted(async () => {
       </div>
 
       <!-- Recent Lost Sales -->
-      <div v-if="csData.recent_lost_sales.length" class="tile" style="margin-top: 14px">
+      <div v-if="!isParityCampaign && csData.recent_lost_sales.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <div class="tile-icon">&#9888;</div>
           <div class="tile-text">
@@ -2423,6 +2414,45 @@ onMounted(async () => {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
   margin-bottom: 8px;
+}
+
+/* Two section-groups (Customer Decision + Customer Circumstances) sharing one
+   row; each wraps to its own line on narrow screens. */
+.parity-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+}
+.parity-row-group {
+  flex: 1 1 380px;
+  min-width: 0;
+}
+/* Three columns (Competitors: identified · why-wins · brands-cited). */
+.parity-row--thirds .parity-row-group {
+  flex-basis: 240px;
+}
+
+/* Fixed-width label chip for the competitor reason/brand rows: truncates with
+   an ellipsis so the bars, %s and counts beside it all line up. Full text is in
+   the title tooltip and the drill-down rows. */
+.metric-chip--fixed {
+  flex: 0 0 96px;
+  max-width: 96px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  box-sizing: border-box;
+}
+/* The paired cards inside a half-width group are compact (single segment bar),
+   so allow a tighter min-width than the full-row views-grid. */
+.views-grid--pair {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+/* Row-1 dividers sit at the top of the tile body — drop the usual top margin. */
+.parity-section-divider--first {
+  margin-top: 0;
 }
 
 .views-card {
