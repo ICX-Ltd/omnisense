@@ -79,7 +79,7 @@ const loadingCompetitor = ref(false);
 const competitorModels = ref<any[]>([]);
 
 // Detail drawer
-const detailId = ref<number | null>(null);
+const detailId = ref<string | null>(null);
 const detailData = ref<any>(null);
 const loadingDetail = ref(false);
 
@@ -277,7 +277,7 @@ async function toggleCompetitor(make: string) {
   finally { loadingCompetitor.value = false; }
 }
 
-async function openDetail(id: number) {
+async function openDetail(id: string) {
   detailId.value = id;
   detailData.value = null;
   loadingDetail.value = true;
@@ -307,6 +307,37 @@ async function openDrill(key: string, title: string, params: Record<string, any>
   finally { loadingDrill.value = false; }
 }
 function closeDrill() { drillKey.value = null; drillRecords.value = []; }
+
+// Flatten the full campaign_answers_json into readable groups for the drawer,
+// so every stored survey answer is visible (skipping empty / false / null).
+function prettifyKey(k: string) {
+  return k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function fmtAnswerVal(v: any): string {
+  if (v === true) return "Yes";
+  if (Array.isArray(v)) return v.map((x) => fmtAnswerVal(x)).join(", ");
+  return String(v);
+}
+const answerGroups = computed(() => {
+  const a = detailData.value?.answers;
+  if (!a || typeof a !== "object") return [];
+  const groups: Array<{ title: string | null; fields: Array<{ label: string; value: string }> }> = [];
+  const scalars: Array<{ label: string; value: string }> = [];
+  const keep = (v: any) => v !== null && v !== undefined && v !== "" && v !== false;
+  for (const [k, v] of Object.entries(a)) {
+    if (!keep(v)) continue;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      const fields = Object.entries(v as Record<string, any>)
+        .filter(([, vv]) => keep(vv))
+        .map(([kk, vv]) => ({ label: prettifyKey(kk), value: fmtAnswerVal(vv) }));
+      if (fields.length) groups.push({ title: prettifyKey(k), fields });
+    } else {
+      scalars.push({ label: prettifyKey(k), value: fmtAnswerVal(v) });
+    }
+  }
+  if (scalars.length) groups.unshift({ title: null, fields: scalars });
+  return groups;
+});
 
 // ── Narrative generation ─────────────────────────────────────────────────────
 const narrativeProvider = ref("openai");
@@ -448,7 +479,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <div v-if="expandedCategory === c.category" class="drill-panel">
                 <div v-if="loadingCategory" class="hint">Loading...</div>
                 <div v-else-if="!categoryRecords.length" class="hint">No records.</div>
-                <div v-else v-for="r in categoryRecords" :key="r.id_opportunity" class="drill-row" @click="openDetail(r.id_opportunity)">
+                <div v-else v-for="r in categoryRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
                   <div class="drill-row-top">
                     <span class="chip chip--secondary" style="font-size: 11px">{{ r.model || 'n/a' }}</span>
                     <span class="chip chip--secondary" style="font-size: 11px">{{ r.dealer || 'n/a' }}</span>
@@ -571,7 +602,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                   </div>
                   <!-- Individual records -->
                   <div v-if="!competitorRecords.length" class="hint">No records.</div>
-                  <div v-else v-for="r in competitorRecords" :key="r.id_opportunity" class="drill-row" @click="openDetail(r.id_opportunity)">
+                  <div v-else v-for="r in competitorRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
                     <div class="drill-row-top">
                       <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
                       <span class="chip chip--warning" style="font-size: 11px">Bought: {{ r.purchased_model || r.purchased_other_model || 'n/a' }}</span>
@@ -924,7 +955,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         <div class="tile-body">
           <div v-if="loadingDrill" class="hint">Loading…</div>
           <div v-else-if="!drillRecords.length" class="hint">No matching records.</div>
-          <div v-else v-for="r in drillRecords" :key="r.id_opportunity" class="drill-row" @click="openDetail(r.id_opportunity)">
+          <div v-else v-for="r in drillRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
             <div class="drill-row-top">
               <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
               <span v-if="r.dealer" class="chip chip--secondary" style="font-size: 11px">{{ r.dealer }}</span>
@@ -1037,6 +1068,18 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 </div>
 
                 <div class="drawer-col drawer-col--right">
+                  <!-- All survey answers (complete, from campaign_answers_json) -->
+                  <div v-if="answerGroups.length" class="drawer-section">
+                    <div class="drawer-section-title">All Survey Answers</div>
+                    <div v-for="(g, gi) in answerGroups" :key="gi" class="answer-group">
+                      <div v-if="g.title" class="answer-group-title">{{ g.title }}</div>
+                      <div class="answer-row" v-for="(f, fi) in g.fields" :key="fi">
+                        <span class="answer-label">{{ f.label }}</span>
+                        <span class="answer-value">{{ f.value }}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <!-- Not Purchase Reasons -->
                   <div v-if="detailData.survey_flow_status === 'Survey Taken'" class="drawer-section">
                     <div class="drawer-section-title">Not-Purchase Reasons</div>
@@ -1241,6 +1284,19 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
 /* ── Clickable bar rows (competitive panels) ─────────────────────────────── */
 .bar-row--click { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: 0 -4px 8px; transition: background 0.15s; }
 .bar-row--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+
+/* ── All survey answers (drawer) ─────────────────────────────────────────── */
+.answer-group { margin-bottom: 12px; }
+.answer-group-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); margin: 6px 0 4px;
+}
+.answer-row {
+  display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+  font-size: 12px; border-bottom: 1px dotted var(--border);
+}
+.answer-label { color: var(--muted); flex-shrink: 0; }
+.answer-value { color: var(--ink); font-weight: 600; text-align: right; word-break: break-word; }
 
 /* ── Line charts ─────────────────────────────────────────────────────────── */
 .chart-scroll { width: 100%; overflow-x: auto; }

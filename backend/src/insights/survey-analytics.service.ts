@@ -340,7 +340,8 @@ export class SurveyAnalyticsService {
   // ── Individual records by category (interaction outcome) ──────────────────
 
   private recordSelect() {
-    return `TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS id_opportunity,
+    return `CAST(ia.id AS VARCHAR(36)) AS interaction_id,
+      TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS id_opportunity,
       ia.vehicleMake AS manufacture, ia.vehicleModel AS model, ia.dealer AS dealer,
       ia.outcome AS result_code_desc, ia.outcome AS category, ${EFF_DATE} AS allocation_date,
       ${CA('$.meta.flow_status')} AS survey_flow_status,
@@ -456,7 +457,7 @@ export class SurveyAnalyticsService {
 
   // ── Single record detail (projected from campaign_answers_json) ───────────
 
-  async getRecordDetail(id: number) {
+  async getRecordDetail(id: string) {
     const rows = await this.repo.manager.query<Array<{
       caj: string; manufacture: string | null; model: string | null; dealer: string | null;
       campaign: string | null; outcome: string | null; recordingUrl: string | null; allocation_date: Date | null;
@@ -468,7 +469,7 @@ export class SurveyAnalyticsService {
         ${EFF_DATE} AS allocation_date
       ${FROM_SURVEY}
       WHERE ii.conversation_type = 'survey' AND ii.campaign_answers_json IS NOT NULL
-        AND TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) = @0`,
+        AND ia.id = @0`,
       [id],
     );
 
@@ -536,6 +537,9 @@ export class SurveyAnalyticsService {
       improve_follow_up: a.improvements?.follow_up ?? null,
       agent_notes: a.agent_notes ?? null,
       call_recording_url: row.recordingUrl,
+      // Full parsed survey answers, so the drawer can render every stored field
+      // regardless of the projected shape above.
+      answers: a,
     };
   }
 

@@ -260,7 +260,7 @@ export class SurveyAnalyticsController {
 
   @Get('record/:id')
   async recordDetail(@Param('id') id: string) {
-    const record = await this.svc.getRecordDetail(parseInt(id, 10));
+    const record = await this.svc.getRecordDetail(id);
     if (!record) throw new NotFoundException('Survey record not found');
     return record;
   }
