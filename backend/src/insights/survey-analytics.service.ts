@@ -36,12 +36,13 @@ const isSet = (p: string) => `${CA(p)} IS NOT NULL AND ${CA(p)} <> ''`;
 // ── Defection vs retention ───────────────────────────────────────────────────
 // P4 Q5 (competitor_purchase.make) is populated even when the customer bought
 // the CLIENT'S OWN brand — that's a retained sale, not a loss. A defection means
-// they bought a make DIFFERENT from the one they enquired about (ia.vehicleMake)
-// and did not buy the make of interest. Own-brand purchases are "won".
-const PURCHASED_MOI = `(${CA('$.influenced_by.purchased_moi_on_record')} IN ${TRUTHY} OR ${CA('$.not_purchased_reasons.purchased_moi_on_record')} IN ${TRUTHY})`;
+// they bought a make DIFFERENT from the one they enquired about (ia.vehicleMake);
+// buying the enquired brand is "won". We deliberately do NOT gate on the
+// "purchased make of interest" flag — in this data it is set broadly and would
+// wrongly exclude genuine competitor purchases.
 const OWN_BRAND_MATCH = `UPPER(LTRIM(RTRIM(${CA('$.competitor_purchase.make')}))) = UPPER(LTRIM(RTRIM(COALESCE(ia.vehicleMake, ''))))`;
-const DEFECTED = `(${isSet('$.competitor_purchase.make')} AND NOT (${OWN_BRAND_MATCH}) AND NOT ${PURCHASED_MOI})`;
-const WON = `(${PURCHASED_MOI} OR (${isSet('$.competitor_purchase.make')} AND ${OWN_BRAND_MATCH}))`;
+const DEFECTED = `(${isSet('$.competitor_purchase.make')} AND NOT (${OWN_BRAND_MATCH}))`;
+const WON = `(${isSet('$.competitor_purchase.make')} AND ${OWN_BRAND_MATCH})`;
 
 function truthy(v: unknown): boolean {
   if (v === true) return true;
