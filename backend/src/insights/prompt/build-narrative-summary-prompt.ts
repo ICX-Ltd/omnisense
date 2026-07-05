@@ -116,37 +116,66 @@ ${JSON.stringify(metrics, null, 2)}
 
 export function buildSurveyAnalyticsNarrativePrompt(metrics: unknown, freeTextSamples: unknown): string {
   return `
-You are writing an executive narrative for a client services manager at a UK automotive manufacturer.
-You have structured survey data from outbound follow-up calls to customers who enquired about vehicles.
+You are preparing a DIRECTOR-LEVEL executive briefing for Nissan (a UK automotive
+manufacturer) on competitive loss. The data comes from post-enquiry survey calls to
+customers who considered a Nissan vehicle. A "defection" is a customer who bought a
+vehicle from another manufacturer instead of Nissan.
 
 You have TWO data sources:
-1. AGGREGATED METRICS — counts, percentages, cross-tabulations from survey answers
-2. FREE-TEXT SAMPLES — verbatim customer and agent comments from the same dataset
-
-Your job is to find actionable insights: competitor threats, dealership issues, pricing concerns,
-test drive barriers, and any patterns in why customers are not converting.
+1. AGGREGATED METRICS — counts, percentages and cross-tabulations from the survey answers.
+   Key blocks: totals, competitor_purchases (each tagged chinese:true/false),
+   chinese_oem (share of defections to Chinese / Chinese-owned OEMs — MG, BYD, OMODA,
+   JAECOO, GWM, ORA, XPENG, Leapmotor, Smart, Volvo, Polestar, Lotus, Zeekr, Lynk & Co),
+   quarterly_trend (defections and Chinese share by quarter), not_purchase_reasons,
+   purchase_influence_factors (what pulled the customer to the competitor),
+   model_performance (per enquired Nissan model), dealer_ratings, interest_factors.
+2. FREE-TEXT SAMPLES — verbatim customer and agent comments from the same dataset.
 
 Return ONLY valid JSON with this schema:
 {
-  "headline": string,
-  "period_summary": string,
-  "key_findings": Array<{ "finding": string, "evidence": string, "impact": "high"|"medium"|"low" }>,
-  "competitor_threats": Array<{ "competitor": string, "insight": string, "evidence": string }>,
-  "dealership_issues": Array<{ "issue": string, "dealers_affected": string[], "evidence": string, "suggested_action": string }>,
-  "conversion_barriers": Array<{ "barrier": string, "frequency_signal": string, "suggested_action": string }>,
-  "positive_signals": Array<{ "signal": string, "evidence": string }>,
-  "free_text_themes": Array<{ "theme": string, "sample_quotes": string[], "frequency_hint": string }>,
-  "recommended_actions": Array<{ "action": string, "priority": "high"|"medium"|"low", "owner": "client_services"|"dealer_network"|"product"|"marketing"|"pricing" }>,
+  "headline": string,                                // one-line punchy summary of the competitive picture
+  "period_summary": string,                          // one sentence naming the period and dataset size
+  "executive_summary": string,                       // one-paragraph, director-level overview
+  "headline_metrics": Array<{ "label": string, "value": string }>,  // the 3-5 numbers that matter
+  "competitive_landscape": {
+    "summary": string,                               // who Nissan is losing customers to
+    "top_competitors": Array<{ "brand": string, "losses": string, "is_chinese": boolean, "note": string }>
+  },
+  "chinese_oem_threat": {
+    "summary": string,                               // evidence of increasing consideration
+    "current_share": string,                         // e.g. "22% of defections"
+    "trajectory": "accelerating"|"stable"|"declining"|"insufficient_data",
+    "quarter_on_quarter": Array<{ "quarter": string, "chinese_share": string, "note": string }>,
+    "models_most_affected": string[]
+  },
+  "why_customers_choose_competitors": {
+    "overall_reasons": Array<{ "reason": string, "evidence": string }>,
+    "chinese_specific_reasons": Array<{ "reason": string, "evidence": string }>,
+    "comparison": string                             // how Chinese-OEM reasons differ from the rest
+  },
+  "model_risk": Array<{ "model": string, "risk": "high"|"medium"|"low", "evidence": string, "top_competitor": string }>,
+  "emerging_themes": Array<{ "theme": string, "direction": "increasing"|"decreasing"|"stable", "evidence": string, "sample_quotes": string[] }>,
+  "what_nissan_does_well": Array<{ "strength": string, "evidence": string }>,
+  "key_risks": Array<{ "risk": string, "commercial_implication": string }>,
+  "recommendations": Array<{ "action": string, "rationale": string, "priority": "high"|"medium"|"low", "owner": "product"|"pricing"|"marketing"|"dealer_network"|"client_services" }>,
   "notes_on_data_quality": string[]
 }
 
 Rules:
-- Use ONLY the provided data; do not invent numbers or quotes.
-- For free_text_themes, cluster similar comments into themes and include 2-3 verbatim sample quotes per theme.
-- Highlight any competitor that appears in 3+ lost sales as a threat.
-- Flag any dealer with a rating below 3 or negative feedback patterns.
-- Keep concise and actionable.
-- Return JSON only. No markdown. No explanation.
+- "headline" and "period_summary" are REQUIRED string fields — always include both.
+- Use ONLY the provided data; do not invent numbers, brands or quotes.
+- Ground every claim in a metric or a verbatim quote. Quote free text exactly.
+- competitive_landscape.top_competitors: rank by loss count; set is_chinese from the data's chinese flag.
+- chinese_oem_threat.trajectory: judge from quarterly_trend. If fewer than 2 quarters have
+  data, use "insufficient_data" and say so — do not imply a trend that isn't evidenced.
+- emerging_themes: IGNORE competitor brand names. Surface underlying themes only
+  (e.g. EV/charging concerns, price sensitivity, finance affordability, wanting more
+  equipment, delivery times, trust, perceived value). Judge direction from the quarterly
+  data and the free-text volume; say "stable" if you cannot evidence a change.
+- what_nissan_does_well: draw from interest_factors, high dealer_ratings and positive free text.
+- recommendations: 3 to 5, specific and actionable.
+- Provide 2-3 verbatim sample_quotes per emerging theme where free text supports it.
+- Keep it concise and board-ready. Return JSON only. No markdown. No explanation.
 
 AGGREGATED METRICS (JSON):
 ${JSON.stringify(metrics, null, 2)}

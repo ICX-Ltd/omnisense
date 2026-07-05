@@ -1,0 +1,103 @@
+DNS already set up
+	wrong certificate
+	
+
+APPO1
+
+create folders
+APP-AI-Agent-Assist
+APP-AI-Agent-Assist-Backend
+APP-AI-Omni-Sense
+APP-AI-Omni-Sense-Backend
+
+copy content from DEV server
+APP-AI-Agent-Assist
+APP-AI-Omni-Sense
+APP-AI-Agent-Assist-Backend
+APP-AI_Omni-Sense-Backend
+
+SQL01
+create DB backs on DEV01
+copy to SQL01
+restore backups
+NOTE: these are not yet encrypted!!!!!!!!!!
+
+configure db connections
+configure users? COPIED ACROSS?
+CREATE LOGIN [ai_app_login] WITH PASSWORD=N'dAPDixxxNE3', DEFAULT_DATABASE=[master], DEFAULT_LANGUAGE=[us_english], CHECK_EXPIRATION=OFF, CHECK_POLICY=ON
+GO
+
+CREATE LOGIN [ai_insight_app] WITH PASSWORD=N'ZFgaNnEPJ=', DEFAULT_DATABASE=[master], DEFAULT_LANGUAGE=[us_english], CHECK_EXPIRATION=OFF, CHECK_POLICY=ON
+GO
+
+ALTER USER ai_insight_app WITH LOGIN = ai_insight_app;  !!!!
+
+
+sqlcmd -S SQL01,<port> -U ai_insight_app -P "ZFgaNnEPJ=" -d ai_assist -Q "SELECT 1"
+
+$cs = "Server=SQL01,57943;Database=ai_assist;User Id=ai_insight_app;Password=ZFgaNnEPJ=;Encrypt=True;TrustServerCertificate=True"
+$conn = New-Object System.Data.SqlClient.SqlConnection $cs
+try {
+    $conn.Open()
+    Write-Host "SUCCESS - connected as ai_insight_app to ai_assist" -ForegroundColor Green
+} catch {
+    Write-Host "FAILED:" $_.Exception.Message -ForegroundColor Red
+} finally {
+    $conn.Close()
+}
+
+"USER:    " + [Environment]::GetEnvironmentVariable("DATABASE_PASSWORD","User")
+"MACHINE: " + [Environment]::GetEnvironmentVariable("DATABASE_PASSWORD","Machine")
+"USER-U:  " + [Environment]::GetEnvironmentVariable("DATABASE_USER","Machine")
+
+Get-Content "C:\Websites\APP-AI-Omni-Sense-Backend\.env" | Where-Object {$_ -match 'DATABASE_'} | ForEach-Object { "[$_]" }
+https://www.iis.net/downloads/microsoft/application-request-routing
+
+ <env name="NODE_ENV" value="production" />
+  <env name="DATABASE_HOST" value="SQL01" />
+  <env name="DATABASE_PORT" value="57943" />
+  <env name="DATABASE_USER" value="ai_insight_app" />
+  <env name="DATABASE_PASSWORD" value="ZFgaNnEPJ=" />
+we have a redirect or something on icx.co.uk???
+ > icxsolutions?
+
+so we need the 
+
+
+
+ai-insight
+DB clean up
+drop table [temp].[interaction_rac]
+drop table [temp].[interaction_rac_2]
+drop table [temp].[interaction_staging]
+drop table [temp].[liveperson_conversation_info_202602]
+drop table [temp].[liveperson_conversation_info_202603]
+drop table [temp].[liveperson_conversation_messages_202602]
+drop table [temp].[liveperson_conversation_messages_202603]
+drop table [temp].[mfs_imports_202606]
+drop table [temp].[test.csv]
+drop table [temp].[interaction_survey]
+
+select * from [app].[survey_responses]
+select * from [app].[prompt_templates]
+select * from [app].[prompt_template_history]
+select * from [app].[llm_usage_log]
+select * from [app].[interactions]
+select * from [app].[interaction_transcripts]
+select * from [app].[interaction_insights]
+select * from [app].[insight_summaries]
+select * from [app].[batch_jobs]
+select * from [app].[account]
+
+truncate table [app].[survey_responses]
+truncate table [app].[prompt_templates]
+truncate table [app].[prompt_template_history]
+truncate table [app].[llm_usage_log]
+truncate table [app].[interaction_transcripts]
+truncate table [app].[interaction_insights]
+truncate table [app].[insight_summaries]
+truncate table [app].[batch_jobs]
+--truncate table [app].[interactions]  FK constraing wont work
+
+delete from [app].[interactions]
+delete from  [app].[account] where email not in ('steven.sykes@icx.co.uk','jack.bass@icx.co.uk')

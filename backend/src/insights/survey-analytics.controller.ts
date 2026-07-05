@@ -167,6 +167,97 @@ export class SurveyAnalyticsController {
     );
   }
 
+  @Get('competitor-analysis')
+  async competitorAnalysis(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getCompetitorAnalysis(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('quarterly-trends')
+  async quarterlyTrends(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getQuarterlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('monthly-trends')
+  async monthlyTrends(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getMonthlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('model-risk')
+  async modelRisk(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getModelRisk(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('why-we-lose')
+  async whyWeLose(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getWhyWeLose(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('whats-working')
+  async whatsWorking(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getWhatWorking(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  @Get('drill-records')
+  async drillRecords(
+    @Query('competitorMake') competitorMake?: string,
+    @Query('chineseOnly') chineseOnly?: string,
+    @Query('excludeChinese') excludeChinese?: string,
+    @Query('notPurchaseReason') notPurchaseReason?: string,
+    @Query('drillModel') drillModel?: string,
+    @Query('defectedOnly') defectedOnly?: string,
+    @Query('wonOnly') wonOnly?: string,
+    @Query('limit') limit?: string, @Query('offset') offset?: string,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getDrillRecords(
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      {
+        competitorMake: competitorMake || undefined,
+        chineseOnly: chineseOnly === 'true',
+        excludeChinese: excludeChinese === 'true',
+        notPurchaseReason: notPurchaseReason || undefined,
+        model: drillModel || undefined,
+        defectedOnly: defectedOnly === 'true',
+        wonOnly: wonOnly === 'true',
+      },
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+    );
+  }
+
   @Get('record/:id')
   async recordDetail(@Param('id') id: string) {
     const record = await this.svc.getRecordDetail(parseInt(id, 10));

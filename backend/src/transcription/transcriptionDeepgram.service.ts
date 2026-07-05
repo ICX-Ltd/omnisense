@@ -67,7 +67,8 @@ export class TranscriptionDeepgramService {
       for (const term of VEHICLE_KEYTERMS) params.append('keyterm', term);
     } else {
       // :2 intensifier nudges weighting up without over-biasing.
-      for (const term of VEHICLE_KEYTERMS) params.append('keywords', `${term}:2`);
+      for (const term of VEHICLE_KEYTERMS)
+        params.append('keywords', `${term}:2`);
     }
 
     // Deterministic safety net for stubborn, well-known mishears (blind swap).
@@ -75,7 +76,8 @@ export class TranscriptionDeepgramService {
       params.append('replace', `${from}:${to}`);
     }
 
-    const endpoint = `https://api.deepgram.com/v1/listen?${params.toString()}`;
+    //const endpoint = `https://api.deepgram.com/v1/listen?${params.toString()}`;
+    const endpoint = `https://api.eu.deepgram.com/v1/listen?${params.toString()}`;
 
     const res = await fetch(endpoint, {
       method: 'POST',

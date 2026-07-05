@@ -61,6 +61,12 @@ const competitorPurchases = ref<any[]>([]);
 const dealershipRatings = ref<any>(null);
 const dealerVisits = ref<any[]>([]);
 const modelPerformance = ref<any[]>([]);
+const competitorAnalysis = ref<any>(null);
+const quarterlyTrends = ref<any[]>([]);
+const monthlyTrends = ref<any>(null);
+const modelRisk = ref<any[]>([]);
+const whyWeLose = ref<any>(null);
+const whatsWorking = ref<any>(null);
 
 // Drill-down
 const expandedCategory = ref<string | null>(null);
@@ -77,6 +83,12 @@ const detailId = ref<number | null>(null);
 const detailData = ref<any>(null);
 const loadingDetail = ref(false);
 
+// Competitive-panel drill-down (shared results list → detail drawer)
+const drillKey = ref<string | null>(null);
+const drillTitle = ref("");
+const drillRecords = ref<any[]>([]);
+const loadingDrill = ref(false);
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtDate(iso: string | null) {
   if (!iso) return "n/a";
@@ -87,6 +99,92 @@ function pct(n: number, total: number) {
   if (!total) return "0";
   return Math.round(n / total * 100).toString();
 }
+
+// Width as a share of a max value (for bars where the denominator is the
+// largest bar rather than a total).
+function barPct(n: number, max: number) {
+  if (!max) return "0";
+  return Math.round(n / max * 100).toString();
+}
+
+function maxCount(rows: Array<{ count: number }> | undefined) {
+  if (!rows?.length) return 0;
+  return Math.max(...rows.map((r) => r.count));
+}
+
+function riskColor(rate: number) {
+  if (rate >= 40) return "#dc2626";
+  if (rate >= 25) return "#ea580c";
+  if (rate >= 12) return "#d97706";
+  return "#059669";
+}
+
+// Panel size: collapsed panels show only the top few rows; each can be expanded.
+const PANEL_LIMIT = 6;
+const expandedPanels = ref<Record<string, boolean>>({});
+function panelVisible(list: any[] | undefined, key: string): any[] {
+  const arr = list ?? [];
+  return expandedPanels.value[key] ? arr : arr.slice(0, PANEL_LIMIT);
+}
+function togglePanel(key: string) { expandedPanels.value[key] = !expandedPanels.value[key]; }
+
+// ── Monthly trend line charts (hand-rolled inline SVG, no chart lib) ─────────
+const LINE_COLORS = [
+  "#dc2626", "#ea580c", "#d97706", "#059669", "#0284c7", "#7c3aed",
+  "#db2777", "#0d9488", "#4f46e5", "#65a30d", "#c026d3", "#0891b2",
+];
+
+function fmtMonth(key: string) {
+  const [y, m] = key.split("-").map(Number);
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[(m || 1) - 1]} ${String(y).slice(2)}`;
+}
+
+function buildLineChart(
+  series: Array<{ label: string; color: string; points: number[] }>,
+  months: string[],
+) {
+  const width = 840, height = 260, padL = 34, padR = 12, padT = 12, padB = 46;
+  const innerW = width - padL - padR, innerH = height - padT - padB;
+  const n = months.length;
+  let max = 0;
+  for (const s of series) for (const v of s.points) if (v > max) max = v;
+  if (max <= 0) max = 1;
+  const xAt = (i: number) => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yAt = (v: number) => padT + innerH - (v / max) * innerH;
+  const lines = series.map((s) => {
+    const pts = s.points.map((v, i) => ({ x: xAt(i), y: yAt(v), val: v }));
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    return { label: s.label, color: s.color, d, pts };
+  });
+  const step = Math.max(1, Math.ceil(n / 12));
+  const xLabels = months
+    .map((m, i) => ({ x: xAt(i), label: fmtMonth(m), show: i % step === 0 || i === n - 1 }))
+    .filter((l) => l.show);
+  const yTicks = [0, 0.5, 1].map((f) => ({ y: padT + innerH - f * innerH, val: Math.round(max * f) }));
+  return { width, height, padL, padR, padT, innerH, lines, xLabels, yTicks, max, n };
+}
+
+const chineseBrandChart = computed(() => {
+  const d = monthlyTrends.value;
+  if (!d?.months?.length || !d.brands?.length) return null;
+  const series = d.brands.map((b: any, i: number) => ({
+    label: b.brand, color: LINE_COLORS[i % LINE_COLORS.length], points: b.points,
+  }));
+  return buildLineChart(series, d.months);
+});
+
+const overallTrendChart = computed(() => {
+  const d = monthlyTrends.value;
+  if (!d?.months?.length) return null;
+  return buildLineChart(
+    [
+      { label: "All defections", color: "#0284c7", points: d.overall.total_defections },
+      { label: "Chinese OEM", color: "#dc2626", points: d.overall.chinese_defections },
+    ],
+    d.months,
+  );
+});
 
 function ratingColor(v: number) {
   if (v >= 4) return "#059669";
@@ -112,10 +210,11 @@ async function loadAll() {
   expandedCategory.value = null;
   expandedCompetitor.value = null;
   detailId.value = null;
+  drillKey.value = null;
 
   try {
     const p = sharedParams.value;
-    const [ovRes, catRes, intRes, nprRes, compRes, drRes, dvRes, mpRes] = await Promise.all([
+    const [ovRes, catRes, intRes, nprRes, compRes, drRes, dvRes, mpRes, caRes, qtRes, mtRes, mrRes, wwlRes, wwRes] = await Promise.all([
       axios.get(ApiPath.SurveyOverview, { params: p }),
       axios.get(ApiPath.SurveyCategories, { params: p }),
       axios.get(ApiPath.SurveyInterestFactors, { params: p }),
@@ -124,6 +223,12 @@ async function loadAll() {
       axios.get(ApiPath.SurveyDealershipRatings, { params: p }),
       axios.get(ApiPath.SurveyDealerVisits, { params: p }),
       axios.get(ApiPath.SurveyModelPerformance, { params: p }),
+      axios.get(ApiPath.SurveyCompetitorAnalysis, { params: p }),
+      axios.get(ApiPath.SurveyQuarterlyTrends, { params: p }),
+      axios.get(ApiPath.SurveyMonthlyTrends, { params: p }),
+      axios.get(ApiPath.SurveyModelRisk, { params: p }),
+      axios.get(ApiPath.SurveyWhyWeLose, { params: p }),
+      axios.get(ApiPath.SurveyWhatsWorking, { params: p }),
     ]);
     overview.value = ovRes.data;
     categories.value = catRes.data;
@@ -133,6 +238,12 @@ async function loadAll() {
     dealershipRatings.value = drRes.data;
     dealerVisits.value = dvRes.data;
     modelPerformance.value = mpRes.data;
+    competitorAnalysis.value = caRes.data;
+    quarterlyTrends.value = qtRes.data;
+    monthlyTrends.value = mtRes.data;
+    modelRisk.value = mrRes.data;
+    whyWeLose.value = wwlRes.data;
+    whatsWorking.value = wwRes.data;
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
   } finally {
@@ -178,6 +289,24 @@ async function openDetail(id: number) {
 }
 
 function closeDetail() { detailId.value = null; detailData.value = null; }
+
+// Open a drill list for a competitive-panel selection. Toggling the same key
+// closes it. Records reuse the existing detail drawer via openDetail().
+async function openDrill(key: string, title: string, params: Record<string, any>) {
+  if (drillKey.value === key) { drillKey.value = null; return; }
+  drillKey.value = key;
+  drillTitle.value = title;
+  loadingDrill.value = true;
+  drillRecords.value = [];
+  try {
+    const res = await axios.get(ApiPath.SurveyDrillRecords, {
+      params: { ...sharedParams.value, ...params, limit: 200 },
+    });
+    drillRecords.value = res.data;
+  } catch { drillRecords.value = []; }
+  finally { loadingDrill.value = false; }
+}
+function closeDrill() { drillKey.value = null; drillRecords.value = []; }
 
 // ── Narrative generation ─────────────────────────────────────────────────────
 const narrativeProvider = ref("openai");
@@ -291,9 +420,9 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         <div class="stat"><div class="stat-label">Total Records</div><div class="stat-value">{{ overview.total }}</div></div>
         <div class="stat"><div class="stat-label">Survey Taken</div><div class="stat-value chip chip--success">{{ overview.survey_taken }}</div></div>
         <div class="stat"><div class="stat-label">Survey Not Taken</div><div class="stat-value chip chip--secondary">{{ overview.survey_not_taken }}</div></div>
-        <div class="stat"><div class="stat-label">Positive</div><div class="stat-value chip chip--success">{{ overview.positive }}</div></div>
-        <div class="stat"><div class="stat-label">Neutral</div><div class="stat-value chip chip--warning">{{ overview.neutral }}</div></div>
-        <div class="stat"><div class="stat-label">Negative</div><div class="stat-value chip chip--danger">{{ overview.negative }}</div></div>
+        <div class="stat"><div class="stat-label">Bought Client Brand</div><div class="stat-value chip chip--success">{{ overview.won }}</div></div>
+        <div class="stat"><div class="stat-label">Defected (Competitor)</div><div class="stat-value chip chip--danger">{{ overview.defected }}</div></div>
+        <div class="stat"><div class="stat-label">Still Considering</div><div class="stat-value chip chip--info">{{ overview.still_considering }}</div></div>
       </div>
 
       <!-- Category breakdown + Model performance -->
@@ -307,7 +436,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             </div>
           </div>
           <div class="tile-body">
-            <div v-for="c in categories" :key="c.category">
+            <div v-for="c in panelVisible(categories, 'categories')" :key="c.category">
               <div class="metric-row metric-row--clickable" @click="toggleCategory(c.category)">
                 <div class="metric-left"><span class="chip chip--secondary">{{ c.category }}</span></div>
                 <div class="metric-right">
@@ -330,6 +459,9 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 </div>
               </div>
             </div>
+            <button v-if="categories.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('categories')">
+              {{ expandedPanels['categories'] ? 'Show less ▲' : `Show all ${categories.length} ▼` }}
+            </button>
           </div>
         </div>
 
@@ -344,7 +476,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           </div>
           <div class="tile-body">
             <div class="hint" v-if="!modelPerformance.length">No data.</div>
-            <div v-for="m in modelPerformance" :key="m.model" class="model-row">
+            <div v-for="m in panelVisible(modelPerformance, 'models')" :key="m.model" class="model-row">
               <div class="model-name">{{ m.model }}</div>
               <div class="model-stats">
                 <span class="chip chip--secondary" style="font-size: 11px">{{ m.total }} total</span>
@@ -358,6 +490,9 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 <div class="model-bar model-bar--lost" :style="{ width: pct(m.purchased_elsewhere, m.total) + '%' }" />
               </div>
             </div>
+            <button v-if="modelPerformance.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('models')">
+              {{ expandedPanels['models'] ? 'Show less ▲' : `Show all ${modelPerformance.length} ▼` }}
+            </button>
           </div>
         </div>
       </div>
@@ -415,7 +550,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           </div>
           <div class="tile-body">
             <div class="hint" v-if="!competitorPurchases.length">No data.</div>
-            <div v-for="c in competitorPurchases" :key="c.make">
+            <div v-for="c in panelVisible(competitorPurchases, 'competitors')" :key="c.make">
               <div class="metric-row metric-row--clickable" @click="toggleCompetitor(c.make)">
                 <div class="metric-left"><span class="chip chip--warning">{{ c.make }}</span></div>
                 <div class="metric-right">
@@ -448,6 +583,9 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 </template>
               </div>
             </div>
+            <button v-if="competitorPurchases.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('competitors')">
+              {{ expandedPanels['competitors'] ? 'Show less ▲' : `Show all ${competitorPurchases.length} ▼` }}
+            </button>
           </div>
         </div>
 
@@ -472,13 +610,16 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <!-- By dealer -->
               <div v-if="dealershipRatings.by_dealer.length">
                 <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px">By Dealer (min 2 ratings)</div>
-                <div v-for="d in dealershipRatings.by_dealer" :key="d.dealer" class="metric-row" style="margin-bottom: 4px">
+                <div v-for="d in panelVisible(dealershipRatings.by_dealer, 'dealers')" :key="d.dealer" class="metric-row" style="margin-bottom: 4px">
                   <div class="metric-left" style="flex: 1; font-size: 12px">{{ d.dealer }}</div>
                   <div class="metric-right">
                     <span class="chip" :style="{ background: ratingColor(d.avg_rating), color: '#fff', fontSize: '11px' }">{{ d.avg_rating }}&#9733;</span>
                     <span class="count-pill">{{ d.count }}</span>
                   </div>
                 </div>
+                <button v-if="dealershipRatings.by_dealer.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('dealers')">
+                  {{ expandedPanels['dealers'] ? 'Show less ▲' : `Show all ${dealershipRatings.by_dealer.length} ▼` }}
+                </button>
               </div>
             </template>
           </div>
@@ -503,6 +644,297 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           </div>
         </div>
       </div>
+
+      <!-- ═══ Competitive intelligence ═══════════════════════════════════════ -->
+      <div class="section-divider">Competitive Intelligence</div>
+
+      <!-- Competitor league + Chinese OEM threat -->
+      <div v-if="competitorAnalysis" class="grid grid-2" style="margin-top: 14px">
+        <div class="tile">
+          <div class="tile-head">
+            <div class="tile-icon">&#9878;</div>
+            <div class="tile-text">
+              <div class="tile-title">Competitor League</div>
+              <div class="tile-desc">Where lost customers went ({{ competitorAnalysis.total_defections }} defections) &mdash; &#127464;&#127475; marks Chinese / Chinese-owned OEMs</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="hint" v-if="!competitorAnalysis.brands.length">No competitor defections in scope.</div>
+            <div
+              v-for="b in panelVisible(competitorAnalysis.brands, 'league')"
+              :key="b.make"
+              class="bar-row bar-row--click"
+              @click="openDrill(`comp:${b.make}`, `Defected to ${b.make}`, { competitorMake: b.make, defectedOnly: 'true' })"
+            >
+              <div class="bar-label">
+                {{ b.make }}
+                <span v-if="b.chinese" class="cn-chip" title="Chinese / Chinese-owned OEM">&#127464;&#127475; Chinese</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill" :class="b.chinese ? 'bar-fill--amber' : 'bar-fill--grey'" :style="{ width: barPct(b.count, maxCount(competitorAnalysis.brands)) + '%' }" />
+              </div>
+              <div class="bar-value">{{ b.count }} <span class="pct-label">{{ pct(b.count, competitorAnalysis.total_defections) }}%</span></div>
+            </div>
+            <button v-if="competitorAnalysis.brands.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('league')">
+              {{ expandedPanels['league'] ? 'Show less ▲' : `Show all ${competitorAnalysis.brands.length} ▼` }}
+            </button>
+          </div>
+        </div>
+
+        <div class="tile">
+          <div class="tile-head">
+            <div class="tile-icon">&#127464;&#127475;</div>
+            <div class="tile-text">
+              <div class="tile-title">Chinese OEM Threat</div>
+              <div class="tile-desc">Share of defections going to Chinese / Chinese-owned brands</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="chinese-headline">
+              <div class="chinese-share">{{ competitorAnalysis.chinese_share }}%</div>
+              <div class="chinese-sub">{{ competitorAnalysis.chinese_defections }} of {{ competitorAnalysis.total_defections }} defections</div>
+            </div>
+            <div class="chinese-track">
+              <div class="chinese-bar" :style="{ width: competitorAnalysis.chinese_share + '%' }" />
+            </div>
+            <div v-if="competitorAnalysis.chinese_brands.length" style="margin-top: 12px">
+              <div class="mini-head">Chinese brands taking customers</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px">
+                <span v-for="b in competitorAnalysis.chinese_brands" :key="b.make" class="chip chip--danger" style="font-size: 11px">{{ b.make }} &middot; {{ b.count }}</span>
+              </div>
+            </div>
+            <div v-else class="hint" style="margin-top: 12px">No Chinese-OEM defections in scope.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quarterly trend -->
+      <div v-if="quarterlyTrends.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128200;</div>
+          <div class="tile-text">
+            <div class="tile-title">Quarter-on-Quarter Trend</div>
+            <div class="tile-desc">Surveyed volume, defections and Chinese-OEM share by quarter</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="trend-table">
+            <div class="trend-head">
+              <div>Quarter</div><div>Surveyed</div><div>Defections</div><div>Chinese share</div><div>Top competitor</div><div>Top Chinese competitor</div>
+            </div>
+            <div v-for="q in quarterlyTrends" :key="q.quarter" class="trend-row">
+              <div class="trend-q">{{ q.quarter }}</div>
+              <div>{{ q.total }}</div>
+              <div>{{ q.defections }} <span class="pct-label">{{ pct(q.defections, q.total) }}%</span></div>
+              <div>
+                <div class="chinese-track chinese-track--sm">
+                  <div class="chinese-bar" :style="{ width: q.chinese_share + '%' }" />
+                </div>
+                <span class="pct-label">{{ q.chinese_share }}% ({{ q.chinese_defections }})</span>
+              </div>
+              <div>
+                <span v-if="q.top_competitor" class="chip chip--warning" style="font-size: 11px">{{ q.top_competitor }}</span>
+                <span v-if="q.top_competitor" class="pct-label">{{ q.top_competitor_share }}% ({{ q.top_competitor_count }})</span>
+                <span v-else class="hint">&mdash;</span>
+              </div>
+              <div>
+                <span v-if="q.top_chinese_competitor" class="chip chip--danger" style="font-size: 11px">{{ q.top_chinese_competitor }}</span>
+                <span v-if="q.top_chinese_competitor" class="pct-label">{{ q.top_chinese_competitor_share }}% ({{ q.top_chinese_competitor_count }})</span>
+                <span v-else class="hint">&mdash;</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monthly trend: Chinese brands as separate lines -->
+      <div v-if="chineseBrandChart" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128200;</div>
+          <div class="tile-text">
+            <div class="tile-title">Monthly Defections by Chinese OEM</div>
+            <div class="tile-desc">Each Chinese / Chinese-owned brand as a separate line across the selected period</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="chart-scroll">
+            <svg :viewBox="`0 0 ${chineseBrandChart.width} ${chineseBrandChart.height}`" class="linechart" preserveAspectRatio="xMidYMid meet">
+              <g v-for="t in chineseBrandChart.yTicks" :key="'y' + t.val">
+                <line :x1="chineseBrandChart.padL" :x2="chineseBrandChart.width - chineseBrandChart.padR" :y1="t.y" :y2="t.y" class="chart-grid" />
+                <text :x="chineseBrandChart.padL - 6" :y="t.y + 3" class="chart-axis" text-anchor="end">{{ t.val }}</text>
+              </g>
+              <text v-for="(x, i) in chineseBrandChart.xLabels" :key="'x' + i" :x="x.x" :y="chineseBrandChart.height - 26" class="chart-axis" text-anchor="middle">{{ x.label }}</text>
+              <path v-for="l in chineseBrandChart.lines" :key="l.label" :d="l.d" fill="none" :stroke="l.color" stroke-width="2" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="chart-legend">
+            <span v-for="l in chineseBrandChart.lines" :key="l.label" class="legend-item">
+              <span class="legend-dot" :style="{ background: l.color }" />{{ l.label }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monthly trend: overall -->
+      <div v-if="overallTrendChart" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128201;</div>
+          <div class="tile-text">
+            <div class="tile-title">Monthly Defections — Overall</div>
+            <div class="tile-desc">All competitor defections vs the Chinese-OEM subset, month by month</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="chart-scroll">
+            <svg :viewBox="`0 0 ${overallTrendChart.width} ${overallTrendChart.height}`" class="linechart" preserveAspectRatio="xMidYMid meet">
+              <g v-for="t in overallTrendChart.yTicks" :key="'y' + t.val">
+                <line :x1="overallTrendChart.padL" :x2="overallTrendChart.width - overallTrendChart.padR" :y1="t.y" :y2="t.y" class="chart-grid" />
+                <text :x="overallTrendChart.padL - 6" :y="t.y + 3" class="chart-axis" text-anchor="end">{{ t.val }}</text>
+              </g>
+              <text v-for="(x, i) in overallTrendChart.xLabels" :key="'x' + i" :x="x.x" :y="overallTrendChart.height - 26" class="chart-axis" text-anchor="middle">{{ x.label }}</text>
+              <path v-for="l in overallTrendChart.lines" :key="l.label" :d="l.d" fill="none" :stroke="l.color" stroke-width="2.5" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="chart-legend">
+            <span v-for="l in overallTrendChart.lines" :key="l.label" class="legend-item">
+              <span class="legend-dot" :style="{ background: l.color }" />{{ l.label }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model risk -->
+      <div v-if="modelRisk.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#9888;</div>
+          <div class="tile-text">
+            <div class="tile-title">Model Risk Ranking</div>
+            <div class="tile-desc">Enquired models ranked by defection rate (min 3 records)</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="risk-table">
+            <div class="risk-head">
+              <div>Model</div><div>Defection rate</div><div>Lost / total</div><div>Top competitor</div><div>Chinese</div><div>Top reason</div>
+            </div>
+            <div
+              v-for="m in panelVisible(modelRisk, 'risk')"
+              :key="m.model"
+              class="risk-row risk-row--click"
+              @click="openDrill(`model:${m.model}`, `${m.model} — defected to competitors`, { drillModel: m.model, defectedOnly: 'true' })"
+            >
+              <div class="risk-model">{{ m.model }}</div>
+              <div>
+                <span class="risk-pill" :style="{ background: riskColor(m.defection_rate) }">{{ m.defection_rate }}%</span>
+              </div>
+              <div>{{ m.defections }} / {{ m.total }}</div>
+              <div><span v-if="m.top_competitor" class="chip chip--warning" style="font-size: 11px">{{ m.top_competitor }}</span><span v-else class="hint">&mdash;</span></div>
+              <div><span v-if="m.chinese_share" class="chip chip--danger" style="font-size: 11px">{{ m.chinese_share }}%</span><span v-else class="hint">&mdash;</span></div>
+              <div><span v-if="m.top_reason" class="chip chip--secondary" style="font-size: 11px">{{ m.top_reason }}</span><span v-else class="hint">&mdash;</span></div>
+            </div>
+          </div>
+          <button v-if="modelRisk.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('risk')">
+            {{ expandedPanels['risk'] ? 'Show less ▲' : `Show all ${modelRisk.length} ▼` }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Why we lose: Chinese vs other -->
+      <div v-if="whyWeLose" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128269;</div>
+          <div class="tile-text">
+            <div class="tile-title">Why We Lose</div>
+            <div class="tile-desc">Not-purchase reasons among defectors &mdash; Chinese-OEM buyers vs everyone else</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">Chinese-OEM defectors ({{ whyWeLose.chinese.cohort }})</div>
+              <div
+                v-for="r in whyWeLose.chinese.reasons"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openDrill(`wl:cn:${r.key}`, `Defected to Chinese OEM — ${r.reason}`, { chineseOnly: 'true', notPurchaseReason: r.key, defectedOnly: 'true' })"
+              >
+                <div class="bar-label">{{ r.reason }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--red" :style="{ width: pct(r.count, whyWeLose.chinese.cohort) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }} <span class="pct-label">{{ pct(r.count, whyWeLose.chinese.cohort) }}%</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="mini-head">Other competitor defectors ({{ whyWeLose.other.cohort }})</div>
+              <div
+                v-for="r in whyWeLose.other.reasons"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openDrill(`wl:ot:${r.key}`, `Defected to other competitor — ${r.reason}`, { excludeChinese: 'true', notPurchaseReason: r.key, defectedOnly: 'true' })"
+              >
+                <div class="bar-label">{{ r.reason }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--grey" :style="{ width: pct(r.count, whyWeLose.other.cohort) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }} <span class="pct-label">{{ pct(r.count, whyWeLose.other.cohort) }}%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- What's working -->
+      <div v-if="whatsWorking" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#9989;</div>
+          <div class="tile-text">
+            <div class="tile-title">What's Working</div>
+            <div class="tile-desc">The "won" cohort: {{ whatsWorking.won }} positive outcomes<span v-if="whatsWorking.avg_rating != null"> &middot; avg dealership rating {{ whatsWorking.avg_rating }}&#9733;</span></div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">What attracted them</div>
+              <div v-for="f in whatsWorking.factors" :key="f.factor" class="bar-row">
+                <div class="bar-label">{{ f.factor }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--green" :style="{ width: pct(f.count, whatsWorking.won) + '%' }" /></div>
+                <div class="bar-value">{{ f.count }} <span class="pct-label">{{ pct(f.count, whatsWorking.won) }}%</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="mini-head">Models that won most</div>
+              <div class="hint" v-if="!whatsWorking.top_models.length">No data.</div>
+              <div v-for="m in whatsWorking.top_models" :key="m.model" class="metric-row" style="margin-bottom: 4px">
+                <div class="metric-left" style="flex: 1; font-size: 12px">{{ m.model }}</div>
+                <div class="metric-right"><span class="count-pill">{{ m.count }}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Drill results (from any competitive panel click) -->
+      <div v-if="drillKey" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128269;</div>
+          <div class="tile-text">
+            <div class="tile-title">{{ drillTitle }}</div>
+            <div class="tile-desc">{{ loadingDrill ? 'Loading…' : drillRecords.length + ' record(s) — click a row to open the full detail' }}</div>
+          </div>
+          <button class="drill-close" @click="closeDrill">Close</button>
+        </div>
+        <div class="tile-body">
+          <div v-if="loadingDrill" class="hint">Loading…</div>
+          <div v-else-if="!drillRecords.length" class="hint">No matching records.</div>
+          <div v-else v-for="r in drillRecords" :key="r.id_opportunity" class="drill-row" @click="openDetail(r.id_opportunity)">
+            <div class="drill-row-top">
+              <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
+              <span v-if="r.dealer" class="chip chip--secondary" style="font-size: 11px">{{ r.dealer }}</span>
+              <span v-if="r.purchased_make" class="chip chip--warning" style="font-size: 11px">Bought: {{ r.purchased_make }}<template v-if="r.purchased_model || r.purchased_other_model"> {{ r.purchased_model || r.purchased_other_model }}</template></span>
+              <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(r.allocation_date) }}</span>
+            </div>
+            <div class="drill-row-summary">{{ r.purchase_reason || r.agent_notes || "(no notes)" }}</div>
+          </div>
+        </div>
+      </div>
     </template>
 
     <!-- Generate Narrative -->
@@ -510,8 +942,8 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
       <div class="tile-head">
         <div class="tile-icon">&#128221;</div>
         <div class="tile-text">
-          <div class="tile-title">Generate Narrative</div>
-          <div class="tile-desc">AI-generated briefing from survey data: competitor threats, conversion barriers, dealership issues and free-text themes</div>
+          <div class="tile-title">Generate Executive Narrative</div>
+          <div class="tile-desc">Director-level briefing: competitive landscape, Chinese-OEM threat &amp; quarterly trend, why customers defect, model risk, emerging themes, what Nissan does well, and recommendations</div>
         </div>
       </div>
       <div class="tile-body">
@@ -688,6 +1120,9 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
 .bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 .bar-fill--blue { background: linear-gradient(90deg, #bae6fd, #0284c7); }
 .bar-fill--red { background: linear-gradient(90deg, #fecaca, #dc2626); }
+.bar-fill--green { background: linear-gradient(90deg, #bbf7d0, #059669); }
+.bar-fill--amber { background: linear-gradient(90deg, #fed7aa, #ea580c); }
+.bar-fill--grey { background: linear-gradient(90deg, #cbd5e1, #64748b); }
 .bar-value { font-size: 12px; min-width: 70px; text-align: right; font-weight: 700; color: var(--ink); }
 .pct-label { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
 
@@ -759,6 +1194,84 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
   line-height: 1.6;
   color: var(--ink);
 }
+
+/* ── Section divider ─────────────────────────────────────────────────────── */
+.section-divider {
+  margin: 24px 0 4px; padding-bottom: 6px;
+  font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--brand, #6366f1); border-bottom: 2px solid var(--border);
+}
+
+/* ── Mini heading (inside a tile column) ─────────────────────────────────── */
+.mini-head { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+
+/* ── Chinese OEM threat panel ────────────────────────────────────────────── */
+.chinese-headline { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.chinese-share { font-size: 34px; font-weight: 800; color: #dc2626; line-height: 1; }
+.chinese-sub { font-size: 12px; color: var(--muted); }
+.chinese-track { background: var(--surface-2, #e0e0e0); border-radius: 4px; height: 10px; overflow: hidden; }
+.chinese-track--sm { height: 6px; }
+.chinese-bar { height: 100%; background: linear-gradient(90deg, #fca5a5, #dc2626); border-radius: 4px; transition: width 0.4s ease; }
+
+/* ── Trend table ─────────────────────────────────────────────────────────── */
+.trend-table { display: flex; flex-direction: column; gap: 2px; }
+.trend-head, .trend-row {
+  display: grid; grid-template-columns: 1fr 0.8fr 1.2fr 1.8fr 1.6fr 1.6fr;
+  gap: 10px; align-items: center; padding: 6px 8px; font-size: 12px;
+}
+.trend-head { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--muted); }
+.trend-row { border-radius: 6px; }
+.trend-row:nth-child(even) { background: var(--surface-soft, rgba(0,0,0,0.02)); }
+.trend-q { font-weight: 700; color: var(--ink); }
+
+/* ── Risk table ──────────────────────────────────────────────────────────── */
+.risk-table { display: flex; flex-direction: column; gap: 2px; }
+.risk-head, .risk-row {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.3fr 0.8fr 1.3fr;
+  gap: 10px; align-items: center; padding: 6px 8px; font-size: 12px;
+}
+.risk-head { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--muted); }
+.risk-row { border-radius: 6px; }
+.risk-row:nth-child(even) { background: var(--surface-soft, rgba(0,0,0,0.02)); }
+.risk-model { font-weight: 700; color: var(--ink); }
+.risk-pill { color: #fff; font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.risk-row--click { cursor: pointer; transition: background 0.15s; }
+.risk-row--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+
+/* ── Clickable bar rows (competitive panels) ─────────────────────────────── */
+.bar-row--click { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: 0 -4px 8px; transition: background 0.15s; }
+.bar-row--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+
+/* ── Line charts ─────────────────────────────────────────────────────────── */
+.chart-scroll { width: 100%; overflow-x: auto; }
+.linechart { width: 100%; min-width: 520px; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis { fill: var(--muted); font-size: 10px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ── Panel size toggle ───────────────────────────────────────────────────── */
+.panel-toggle {
+  width: 100%; margin-top: 8px; padding: 6px 10px;
+  border: 1px dashed var(--border); background: transparent; border-radius: 6px;
+  font-size: 12px; font-weight: 600; color: var(--brand, #6366f1); cursor: pointer;
+}
+.panel-toggle:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+
+/* ── Chinese-OEM chip (competitor league) ────────────────────────────────── */
+.cn-chip {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+  font-size: 9px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  background: #dc2626; color: #fff; vertical-align: middle; white-space: nowrap;
+}
+
+/* ── Drill close button ──────────────────────────────────────────────────── */
+.drill-close {
+  margin-left: auto; border: 1px solid var(--border); background: var(--surface);
+  color: var(--ink); font-size: 12px; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+}
+.drill-close:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
 
 /* ── Drawer transition ───────────────────────────────────────────────────── */
 .drawer-enter-active, .drawer-leave-active { transition: transform 0.25s ease; }

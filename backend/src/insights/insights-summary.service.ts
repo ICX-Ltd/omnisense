@@ -11,6 +11,7 @@ import { SurveyResponse } from '../db/entities/survey-response.entity';
 import { createProvider } from './providers/provider.factory';
 import { InsightsProviderName } from './types/insights-provider.type';
 import { verifyCampaignQuotes } from './quote-grounding';
+import { isChineseOem } from './nmgb-competitors';
 import {
   buildNarrativeSummaryPrompt,
   buildCallsOperationsNarrativePrompt,
@@ -1602,84 +1603,178 @@ ${prompt}
   // SURVEY: GATHER METRICS + FREE-TEXT FOR NARRATIVE
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Sourced from interaction_insights.campaign_answers_json (survey answers are
+  // written there per interaction — see sql/nmgb_survey_insights.sql), NOT from
+  // the decommissioned app.survey_responses table. Scoped to survey-type
+  // insights so it never mixes in Parity / other campaigns that share the
+  // campaign_answers_json column.
   private async gatherSurveyMetricsForNarrative(from: Date, to: Date, campaign?: string) {
-    const parts: string[] = ['s.allocation_date >= @0', 's.allocation_date < @1'];
+    const parts: string[] = [
+      'ii.campaign_answers_json IS NOT NULL',
+      `ii.conversation_type = 'survey'`,
+      'COALESCE(ia.interactionDateTime, ia.createdAt) >= @0',
+      'COALESCE(ia.interactionDateTime, ia.createdAt) < @1',
+    ];
     const params: any[] = [from, to];
     if (campaign) {
-      parts.push(`s.campaign = @${params.length}`);
+      parts.push(`ia.campaign = @${params.length}`);
       params.push(campaign);
     }
     const where = 'WHERE ' + parts.join(' AND ');
+    const FROM = `FROM app.interaction_insights ii INNER JOIN app.interactions ia ON ia.id = ii.recordingId`;
+    const effDate = 'COALESCE(ia.interactionDateTime, ia.createdAt)';
 
-    // Aggregated counts
-    const totals = await this.surveyRepo.manager.query(
+    // A survey boolean flag in the JSON may serialise as true / 1 / "Yes"
+    // depending on the source column type — treat all as set.
+    const jv = (p: string) => `JSON_VALUE(ii.campaign_answers_json, '${p}')`;
+    const flag = (p: string, alias: string) =>
+      `SUM(CASE WHEN ${jv(p)} IN ('true', '1', 'Yes', 'Y') THEN 1 ELSE 0 END) AS ${alias}`;
+    const isSet = (p: string) => `${jv(p)} IS NOT NULL AND ${jv(p)} <> ''`;
+
+    const totals = await this.insightsRepo.manager.query(
       `SELECT COUNT(1) AS total,
-        SUM(CASE WHEN s.survey_flow_status = 'Survey Taken' THEN 1 ELSE 0 END) AS survey_taken,
-        SUM(CASE WHEN s.positive_outcome = 1 THEN 1 ELSE 0 END) AS positive,
-        SUM(CASE WHEN s.neutral_outcome = 1 THEN 1 ELSE 0 END) AS neutral,
-        SUM(CASE WHEN s.negative_outcome = 1 THEN 1 ELSE 0 END) AS negative
-      FROM app.survey_responses s ${where}`, params,
+        SUM(CASE WHEN ${jv('$.meta.flow_status')} = 'Survey Taken' THEN 1 ELSE 0 END) AS survey_taken,
+        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS defections,
+        ${flag('$.purchase_status.still_considering', 'still_considering')}
+      ${FROM} ${where}`, params,
     );
 
-    const categories = await this.surveyRepo.manager.query(
-      `SELECT COALESCE(s.result_code_desc, 'Unknown') AS category, COUNT(1) AS count
-       FROM app.survey_responses s ${where} GROUP BY s.result_code_desc ORDER BY COUNT(1) DESC`, params,
+    const categories = await this.insightsRepo.manager.query(
+      `SELECT COALESCE(ia.outcome, 'Unknown') AS category, COUNT(1) AS count
+       ${FROM} ${where} GROUP BY ia.outcome ORDER BY COUNT(1) DESC`, params,
     );
 
-    const interestFactors = await this.surveyRepo.manager.query(
+    // Initial interest — full 9-factor set (campaign_answers_json fidelity).
+    const interestFactors = await this.insightsRepo.manager.query(
       `SELECT
-        SUM(CAST(ISNULL(s.initial_interest_styling, 0) AS INT)) AS styling,
-        SUM(CAST(ISNULL(s.initial_interest_brand, 0) AS INT)) AS brand,
-        SUM(CAST(ISNULL(s.initial_interest_features, 0) AS INT)) AS features,
-        SUM(CAST(ISNULL(s.initial_interest_size, 0) AS INT)) AS size,
-        SUM(CAST(ISNULL(s.initial_interest_performance, 0) AS INT)) AS performance,
-        SUM(CAST(ISNULL(s.initial_interest_price, 0) AS INT)) AS price
-      FROM app.survey_responses s ${where} AND s.survey_flow_status = 'Survey Taken'`, params,
+        ${flag('$.initial_interest.styling_design', 'styling')},
+        ${flag('$.initial_interest.brand_reputation', 'brand_reputation')},
+        ${flag('$.initial_interest.brand_loyalty', 'brand_loyalty')},
+        ${flag('$.initial_interest.recommendation', 'recommendation')},
+        ${flag('$.initial_interest.features', 'features')},
+        ${flag('$.initial_interest.size_practicality', 'size_practicality')},
+        ${flag('$.initial_interest.performance', 'performance')},
+        ${flag('$.initial_interest.price_value', 'price_value')}
+      ${FROM} ${where}`, params,
     );
 
-    const notPurchaseReasons = await this.surveyRepo.manager.query(
+    const notPurchaseReasons = await this.insightsRepo.manager.query(
       `SELECT
-        SUM(CAST(ISNULL(s.not_purchased_price, 0) AS INT)) AS price,
-        SUM(CAST(ISNULL(s.not_purchased_expectations, 0) AS INT)) AS expectations,
-        SUM(CAST(ISNULL(s.not_purchased_different_brand, 0) AS INT)) AS different_brand,
-        SUM(CAST(ISNULL(s.not_purchased_different_model, 0) AS INT)) AS different_model,
-        SUM(CAST(ISNULL(s.not_purchased_financing, 0) AS INT)) AS financing,
-        SUM(CAST(ISNULL(s.not_purchased_dealership, 0) AS INT)) AS dealership
-      FROM app.survey_responses s ${where} AND s.survey_flow_status = 'Survey Taken'`, params,
+        ${flag('$.not_purchased_reasons.price', 'price')},
+        ${flag('$.not_purchased_reasons.expectations', 'expectations')},
+        ${flag('$.not_purchased_reasons.different_brand', 'different_brand')},
+        ${flag('$.not_purchased_reasons.different_client_model', 'different_model')},
+        ${flag('$.not_purchased_reasons.financing', 'financing')},
+        ${flag('$.not_purchased_reasons.dealership_experience', 'dealership')},
+        ${flag('$.not_purchased_reasons.no_interest_in_evs', 'no_interest_in_evs')}
+      ${FROM} ${where}`, params,
     );
 
-    const competitorPurchases = await this.surveyRepo.manager.query(
-      `SELECT s.purchased_make AS make, COUNT(1) AS count
-       FROM app.survey_responses s ${where} AND s.purchased_make IS NOT NULL AND s.purchased_make != ''
-       GROUP BY s.purchased_make ORDER BY COUNT(1) DESC`, params,
+    // Purchase influence — the full 18-factor P4 Q6 set (only in the JSON).
+    const influenceFactors = await this.insightsRepo.manager.query(
+      `SELECT
+        ${flag('$.influenced_by.apr_lower', 'apr_lower')},
+        ${flag('$.influenced_by.better_value', 'better_value')},
+        ${flag('$.influenced_by.brand_loyalty', 'brand_loyalty')},
+        ${flag('$.influenced_by.colour_spec_pref', 'colour_spec_pref')},
+        ${flag('$.influenced_by.comfortable_interior', 'comfortable_interior')},
+        ${flag('$.influenced_by.customer_service', 'customer_service')},
+        ${flag('$.influenced_by.discount', 'discount')},
+        ${flag('$.influenced_by.drive_of_vehicle', 'drive_of_vehicle')},
+        ${flag('$.influenced_by.enhanced_features', 'enhanced_features')},
+        ${flag('$.influenced_by.longer_warranty', 'longer_warranty')},
+        ${flag('$.influenced_by.monthly_payments_lower', 'monthly_payments_lower')},
+        ${flag('$.influenced_by.powertrain_options', 'powertrain_options')},
+        ${flag('$.influenced_by.pref_design', 'pref_design')},
+        ${flag('$.influenced_by.quicker_delivery', 'quicker_delivery')},
+        ${flag('$.influenced_by.size', 'size')},
+        ${flag('$.influenced_by.try_different', 'try_different')}
+      ${FROM} ${where}`, params,
     );
 
-    const dealerRatings = await this.surveyRepo.manager.query(
-      `SELECT s.dealer, AVG(CAST(s.dealership_rating AS FLOAT)) AS avg_rating, COUNT(1) AS count
-       FROM app.survey_responses s ${where} AND s.dealership_rating IS NOT NULL AND s.dealer IS NOT NULL
-       GROUP BY s.dealer HAVING COUNT(1) >= 2 ORDER BY AVG(CAST(s.dealership_rating AS FLOAT)) ASC`, params,
+    const competitorPurchases = await this.insightsRepo.manager.query<Array<{ make: string; count: string }>>(
+      `SELECT ${jv('$.competitor_purchase.make')} AS make, COUNT(1) AS count
+       ${FROM} ${where} AND ${isSet('$.competitor_purchase.make')}
+       GROUP BY ${jv('$.competitor_purchase.make')} ORDER BY COUNT(1) DESC`, params,
+    );
+    // Tag each competitor make Chinese / other and roll up the headline share.
+    const competitorBrands = competitorPurchases.map((r) => ({
+      make: r.make, count: parseInt(r.count, 10), chinese: isChineseOem(r.make),
+    }));
+    const totalDefections = competitorBrands.reduce((a, b) => a + b.count, 0);
+    const chineseDefections = competitorBrands.filter((b) => b.chinese).reduce((a, b) => a + b.count, 0);
+
+    const dealerRatings = await this.insightsRepo.manager.query(
+      `SELECT ia.dealer, AVG(TRY_CAST(${jv('$.dealership_rating.score')} AS FLOAT)) AS avg_rating, COUNT(1) AS count
+       ${FROM} ${where} AND ia.dealer IS NOT NULL AND ${jv('$.dealership_rating.score')} IS NOT NULL
+       GROUP BY ia.dealer HAVING COUNT(1) >= 2 ORDER BY AVG(TRY_CAST(${jv('$.dealership_rating.score')} AS FLOAT)) ASC`, params,
     );
 
-    const modelPerformance = await this.surveyRepo.manager.query(
-      `SELECT s.model, COUNT(1) AS total,
-        SUM(CASE WHEN s.p2_still_considering = 'Yes' THEN 1 ELSE 0 END) AS still_considering,
-        SUM(CASE WHEN s.purchased_make IS NOT NULL AND s.purchased_make != '' THEN 1 ELSE 0 END) AS purchased_elsewhere
-      FROM app.survey_responses s ${where} AND s.model IS NOT NULL
-      GROUP BY s.model HAVING COUNT(1) >= 2 ORDER BY COUNT(1) DESC`, params,
+    const modelPerformance = await this.insightsRepo.manager.query(
+      `SELECT ia.vehicleModel AS model, COUNT(1) AS total,
+        ${flag('$.purchase_status.still_considering', 'still_considering')},
+        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS purchased_elsewhere
+      ${FROM} ${where} AND ia.vehicleModel IS NOT NULL
+      GROUP BY ia.vehicleModel HAVING COUNT(1) >= 2 ORDER BY COUNT(1) DESC`, params,
     );
 
-    // Free-text samples (up to 100 records with any text content)
-    const freeText = await this.surveyRepo.manager.query(
+    // Quarter-on-quarter: totals + defections, plus per-quarter competitor makes
+    // so Chinese-OEM share by quarter can be folded in (Prompt 3).
+    const quarterTotals = await this.insightsRepo.manager.query<Array<{
+      yr: string; qtr: string; total: string; defections: string;
+    }>>(
+      `SELECT YEAR(${effDate}) AS yr, DATEPART(QUARTER, ${effDate}) AS qtr,
+        COUNT(1) AS total,
+        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS defections
+      ${FROM} ${where}
+      GROUP BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate})
+      ORDER BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate})`, params,
+    );
+    const quarterMakes = await this.insightsRepo.manager.query<Array<{
+      yr: string; qtr: string; make: string; count: string;
+    }>>(
+      `SELECT YEAR(${effDate}) AS yr, DATEPART(QUARTER, ${effDate}) AS qtr,
+        ${jv('$.competitor_purchase.make')} AS make, COUNT(1) AS count
+      ${FROM} ${where} AND ${isSet('$.competitor_purchase.make')}
+      GROUP BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate}), ${jv('$.competitor_purchase.make')}`, params,
+    );
+    const chineseByQuarter = new Map<string, number>();
+    for (const r of quarterMakes) {
+      if (!isChineseOem(r.make)) continue;
+      const key = `${r.yr}-${r.qtr}`;
+      chineseByQuarter.set(key, (chineseByQuarter.get(key) ?? 0) + parseInt(r.count, 10));
+    }
+    const quarterlyTrend = quarterTotals.map((r) => {
+      const defections = parseInt(r.defections, 10);
+      const chinese = chineseByQuarter.get(`${r.yr}-${r.qtr}`) ?? 0;
+      return {
+        quarter: `${r.yr} Q${r.qtr}`,
+        total: parseInt(r.total, 10),
+        defections,
+        chinese_defections: chinese,
+        chinese_share_pct: defections ? Math.round((chinese / defections) * 100) : 0,
+      };
+    });
+
+    // Free-text samples (up to 100 records with any text content).
+    const freeText = await this.insightsRepo.manager.query(
       `SELECT TOP 100
-        s.id_opportunity, s.model, s.dealer, s.result_code_desc,
-        s.agent_notes, s.dealership_rating_feedback, s.why_no_test_drive,
-        s.not_purchased_price_feedback, s.purchase_influence, s.purchase_reason,
-        s.improve_anything, s.vehicle_impression, s.purchased_make, s.purchased_model
-      FROM app.survey_responses s ${where}
-        AND (s.agent_notes IS NOT NULL OR s.dealership_rating_feedback IS NOT NULL
-             OR s.why_no_test_drive IS NOT NULL OR s.not_purchased_price_feedback IS NOT NULL
-             OR s.purchase_influence IS NOT NULL OR s.improve_anything IS NOT NULL)
-      ORDER BY s.allocation_date DESC`, params,
+        ${jv('$.meta.id_opportunity')} AS id_opportunity, ia.vehicleModel AS model, ia.dealer AS dealer, ia.outcome AS result_code,
+        ${jv('$.agent_notes')} AS agent_notes,
+        ${jv('$.dealership_rating.feedback')} AS dealership_rating_feedback,
+        ${jv('$.dealer_visit.why_no_test_drive')} AS why_no_test_drive,
+        ${jv('$.dealer_visit.vehicle_impression')} AS vehicle_impression,
+        ${jv('$.not_purchased_reasons.other_feedback')} AS not_purchased_feedback,
+        ${jv('$.purchase_reason')} AS purchase_reason,
+        ${jv('$.improvements.anything_different')} AS improve_anything,
+        ${jv('$.improvements.follow_up')} AS improve_follow_up,
+        ${jv('$.competitor_purchase.make')} AS purchased_make,
+        ${jv('$.competitor_purchase.model')} AS purchased_model
+      ${FROM} ${where}
+        AND (${jv('$.agent_notes')} IS NOT NULL OR ${jv('$.dealership_rating.feedback')} IS NOT NULL
+             OR ${jv('$.dealer_visit.why_no_test_drive')} IS NOT NULL OR ${jv('$.dealer_visit.vehicle_impression')} IS NOT NULL
+             OR ${jv('$.purchase_reason')} IS NOT NULL OR ${jv('$.improvements.anything_different')} IS NOT NULL)
+      ORDER BY ${effDate} DESC`, params,
     );
 
     return {
@@ -1688,7 +1783,15 @@ ${prompt}
         categories,
         interest_factors: interestFactors[0] ?? {},
         not_purchase_reasons: notPurchaseReasons[0] ?? {},
-        competitor_purchases: competitorPurchases,
+        purchase_influence_factors: influenceFactors[0] ?? {},
+        competitor_purchases: competitorBrands,
+        chinese_oem: {
+          total_defections: totalDefections,
+          chinese_defections: chineseDefections,
+          chinese_share_pct: totalDefections ? Math.round((chineseDefections / totalDefections) * 100) : 0,
+          chinese_brands: competitorBrands.filter((b) => b.chinese),
+        },
+        quarterly_trend: quarterlyTrend,
         dealer_ratings: dealerRatings.slice(0, 15),
         model_performance: modelPerformance.slice(0, 15),
       },
