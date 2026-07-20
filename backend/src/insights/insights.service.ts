@@ -135,6 +135,7 @@ export type ExtractedInsights = {
   qa_assessment?: any;                  // campaign-specific QA scoring (e.g. RAC Q1-Q15)
   objection_assessment?: ObjectionAssessment; // campaign-specific objection handling
   campaign_answers?: Record<string, any>;     // campaign-specific Q&A blob (e.g. Parity)
+  campaign_transcript?: Record<string, any>;  // campaign-specific transcript insight blob (e.g. NMGB Survey)
   client_services: ClientServices;
   action_items: ActionItem[];
   key_entities: Array<{ type: string; value: string }>;
@@ -215,6 +216,7 @@ export class InsightsService {
     provider?: InsightsProviderName,
     budget?: ExtractBudget,
     onAttempt?: (a: ExtractAttemptLog) => void,
+    model?: string,
   ): Promise<{
     providerUsed: string;
     model: string;
@@ -227,7 +229,7 @@ export class InsightsService {
       ? await this.promptsService.composeChatPrompt(transcript, campaign)
       : await this.promptsService.composeCallPrompt(transcript, campaign);
 
-    const llmProvider = createProvider(provider);
+    const llmProvider = createProvider(provider, model);
 
     // Extraction is non-deterministic (temperature > 0) and the JSON is large,
     // so a given transcript may truncate or emit invalid JSON on one sample and

@@ -8,11 +8,20 @@ import {
 export class AnthropicProvider implements InsightsProvider {
   private readonly logger = new Logger(AnthropicProvider.name);
 
+  // maxRetries lets the SDK ride out 429s on its own: it honors the Retry-After
+  // header with exponential backoff. Higher than the SDK default (2) so a
+  // saturated batch survives short rate-limit windows. Tunable via env.
   private client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
+    maxRetries: parseInt(process.env.ANTHROPIC_MAX_RETRIES ?? '6', 10) || 6,
   });
 
-  private readonly model = 'claude-haiku-4-5';
+  private readonly model: string;
+
+  // Per-run override (batch UI) → ANTHROPIC_INSIGHTS_MODEL env → fast default.
+  constructor(model?: string) {
+    this.model = model?.trim() || process.env.ANTHROPIC_INSIGHTS_MODEL || 'claude-haiku-4-5';
+  }
 
   // Full call insights JSON (13 operations dimensions + coaching + client
   // services + the campaign Q&A blob for campaigns like Parity) can run well

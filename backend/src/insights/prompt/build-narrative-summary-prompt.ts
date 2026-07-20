@@ -1,5 +1,26 @@
-export function buildCallsOperationsNarrativePrompt(metrics: unknown): string {
-  return `
+// Narrative-generation prompts.
+//
+// Each narrative type has a DEFAULT template exported as a constant below. The
+// templates are also seeded into app.prompt_templates (see
+// backend/src/modules/prompts/seed-fragments.ts, keys `narrative.<type>`) so they
+// can be edited on the Prompts page. At runtime the insights summary service
+// loads the active fragment body and passes it in as the `template` argument; if
+// no fragment exists it falls back to the exported default — so behaviour is
+// identical when the fragment equals the default.
+//
+// Templates use {{metrics}} (and, for survey_analytics, {{free_text_samples}})
+// placeholders which are substituted with the pretty-printed JSON at build time.
+
+/** Replace {{name}} placeholders. Unknown placeholders are left in place. */
+function fillTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, name: string) => {
+    return Object.prototype.hasOwnProperty.call(values, name)
+      ? values[name]
+      : match;
+  });
+}
+
+export const NARRATIVE_CALLS_OPERATIONS_TEMPLATE = `
 You are writing an executive narrative for a contact-centre operations manager in UK automotive finance.
 You have aggregated agent quality-score data from outbound call reviews.
 
@@ -24,12 +45,19 @@ Rules:
 - Return JSON only. No markdown. No explanation.
 
 DATA (JSON):
-${JSON.stringify(metrics, null, 2)}
-  `.trim();
+{{metrics}}
+`;
+
+export function buildCallsOperationsNarrativePrompt(
+  metrics: unknown,
+  template: string = NARRATIVE_CALLS_OPERATIONS_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+  }).trim();
 }
 
-export function buildCallsClientServicesNarrativePrompt(metrics: unknown): string {
-  return `
+export const NARRATIVE_CALLS_CLIENT_SERVICES_TEMPLATE = `
 You are writing an executive narrative for a client services manager in UK automotive finance.
 You have aggregated market intelligence and lead generation data from outbound calls.
 
@@ -54,12 +82,19 @@ Rules:
 - Return JSON only. No markdown. No explanation.
 
 DATA (JSON):
-${JSON.stringify(metrics, null, 2)}
-  `.trim();
+{{metrics}}
+`;
+
+export function buildCallsClientServicesNarrativePrompt(
+  metrics: unknown,
+  template: string = NARRATIVE_CALLS_CLIENT_SERVICES_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+  }).trim();
 }
 
-export function buildChatsOperationsNarrativePrompt(metrics: unknown): string {
-  return `
+export const NARRATIVE_CHATS_OPERATIONS_TEMPLATE = `
 You are writing an executive narrative for a contact-centre operations manager in UK automotive finance.
 You have aggregated agent quality-score data from chat interaction reviews.
 
@@ -82,12 +117,19 @@ Rules:
 - Return JSON only. No markdown. No explanation.
 
 DATA (JSON):
-${JSON.stringify(metrics, null, 2)}
-  `.trim();
+{{metrics}}
+`;
+
+export function buildChatsOperationsNarrativePrompt(
+  metrics: unknown,
+  template: string = NARRATIVE_CHATS_OPERATIONS_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+  }).trim();
 }
 
-export function buildChatsClientServicesNarrativePrompt(metrics: unknown): string {
-  return `
+export const NARRATIVE_CHATS_CLIENT_SERVICES_TEMPLATE = `
 You are writing an executive narrative for a client services manager in UK automotive finance.
 You have aggregated market intelligence and customer intent data from chat interactions.
 
@@ -110,19 +152,26 @@ Rules:
 - Return JSON only. No markdown. No explanation.
 
 DATA (JSON):
-${JSON.stringify(metrics, null, 2)}
-  `.trim();
+{{metrics}}
+`;
+
+export function buildChatsClientServicesNarrativePrompt(
+  metrics: unknown,
+  template: string = NARRATIVE_CHATS_CLIENT_SERVICES_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+  }).trim();
 }
 
-export function buildSurveyAnalyticsNarrativePrompt(metrics: unknown, freeTextSamples: unknown): string {
-  return `
+export const NARRATIVE_SURVEY_ANALYTICS_TEMPLATE = `
 You are preparing a DIRECTOR-LEVEL executive briefing for Nissan (a UK automotive
 manufacturer) on competitive loss. The data comes from post-enquiry survey calls to
 customers who considered a Nissan vehicle. A "defection" is a customer who bought a
 vehicle from another manufacturer instead of Nissan.
 
-You have TWO data sources:
-1. AGGREGATED METRICS — counts, percentages and cross-tabulations from the survey answers.
+You have THREE data sources:
+1. AGGREGATED METRICS — counts, percentages and cross-tabulations from the SURVEY answers.
    Key blocks: totals, competitor_purchases (each tagged chinese:true/false),
    chinese_oem (share of defections to Chinese / Chinese-owned OEMs — MG, BYD, OMODA,
    JAECOO, GWM, ORA, XPENG, Leapmotor, Smart, Volvo, Polestar, Lotus, Zeekr, Lynk & Co),
@@ -130,6 +179,21 @@ You have TWO data sources:
    purchase_influence_factors (what pulled the customer to the competitor),
    model_performance (per enquired Nissan model), dealer_ratings, interest_factors.
 2. FREE-TEXT SAMPLES — verbatim customer and agent comments from the same dataset.
+3. TRANSCRIPT INSIGHTS (the "transcript" block, may be null if not yet processed) —
+   mined from the actual CALL TRANSCRIPTS, capturing what the tick-box survey misses:
+   - sentiment: positive/negative/mixed counts on the Nissan brand, vehicle and dealer.
+   - competitors: brands the customer CONSIDERED or test-drove (not only bought), each
+     tagged chinese; considered_total and chinese_share are your best signal of RISING
+     Chinese-OEM CONSIDERATION (a leading indicator, ahead of completed defections).
+   - reasons / chinese_reasons: why competitors appealed, in the customer's words
+     (aligned to the survey influence factors); chinese_reasons is Chinese-OEM specific.
+   - frustrations: themes with severity, root_cause_owner, whether NMGB can resolve it,
+     and a recommended_action + verbatim quote — your primary input for key_risks and
+     recommendations.
+   - measures: ev_sentiment, loyalty (would consider Nissan again), price_expectation_gap,
+     dealer_follow_up counts.
+   - quotes: report-ready verbatim customer quotes; gaps: things the transcript revealed
+     that the survey missed.
 
 Return ONLY valid JSON with this schema:
 {
@@ -166,8 +230,20 @@ Rules:
 - Use ONLY the provided data; do not invent numbers, brands or quotes.
 - Ground every claim in a metric or a verbatim quote. Quote free text exactly.
 - competitive_landscape.top_competitors: rank by loss count; set is_chinese from the data's chinese flag.
-- chinese_oem_threat.trajectory: judge from quarterly_trend. If fewer than 2 quarters have
-  data, use "insufficient_data" and say so — do not imply a trend that isn't evidenced.
+- chinese_oem_threat.trajectory: judge from quarterly_trend (completed defections) AND, when
+  present, transcript.competitors (consideration is a leading indicator). If transcript shows
+  meaningful Chinese-OEM CONSIDERATION above completed defections, call that out as an early
+  warning. If fewer than 2 quarters have data, use "insufficient_data" and say so — do not
+  imply a trend that isn't evidenced.
+- why_customers_choose_competitors: blend the survey purchase_influence_factors with the
+  transcript reasons/chinese_reasons. In "comparison", contrast Chinese-OEM-specific reasons
+  (transcript.chinese_reasons) with the overall set.
+- key_risks and recommendations: draw heavily on transcript.frustrations — prioritise
+  high-severity, resolvable themes and turn their recommended_action into recommendations.
+  Fold in transcript.measures (e.g. low loyalty, poor dealer_follow_up, price_expectation_gap)
+  as commercial risks.
+- Prefer transcript.quotes and transcript.frustrations[].quote for verbatim evidence; they are
+  already customer-attributed. When the transcript block is null, rely on survey + free text.
 - emerging_themes: IGNORE competitor brand names. Surface underlying themes only
   (e.g. EV/charging concerns, price sensitivity, finance affordability, wanting more
   equipment, delivery times, trust, perceived value). Judge direction from the quarterly
@@ -178,19 +254,28 @@ Rules:
 - Keep it concise and board-ready. Return JSON only. No markdown. No explanation.
 
 AGGREGATED METRICS (JSON):
-${JSON.stringify(metrics, null, 2)}
+{{metrics}}
 
 FREE-TEXT SAMPLES (JSON):
-${JSON.stringify(freeTextSamples, null, 2)}
-  `.trim();
+{{free_text_samples}}
+`;
+
+export function buildSurveyAnalyticsNarrativePrompt(
+  metrics: unknown,
+  freeTextSamples: unknown,
+  template: string = NARRATIVE_SURVEY_ANALYTICS_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+    free_text_samples: JSON.stringify(freeTextSamples, null, 2),
+  }).trim();
 }
 
-export function buildNarrativeSummaryPrompt(metrics: unknown): string {
-  return `
+export const NARRATIVE_GENERIC_TEMPLATE = `
   You are writing an exec narrative for a contact-centre manager in UK automotive finance.
-  
+
   You are given aggregated metrics for a time window plus example calls.
-  
+
   Return ONLY valid JSON with this schema:
   {
     "headline": string,
@@ -202,15 +287,23 @@ export function buildNarrativeSummaryPrompt(metrics: unknown): string {
     "recommended_actions": Array<{ "action": string, "priority": "high"|"medium"|"low", "owner": "ops"|"agent"|"product"|"engineering"|"unknown" }>,
     "notes_on_data_quality": string[]
   }
-  
+
   Rules:
   - Use ONLY the provided data; do not invent numbers.
   - Be specific: call out connect rate issues, common conversation types, interest levels, and dealer follow-up volume if present.
   - Reference examples only using the fields provided (recordingId snippets / summaries).
   - Keep concise.
   - Return JSON only. No markdown. No explanation.
-  
+
   DATA (JSON):
-  ${JSON.stringify(metrics, null, 2)}
-  `.trim();
+  {{metrics}}
+`;
+
+export function buildNarrativeSummaryPrompt(
+  metrics: unknown,
+  template: string = NARRATIVE_GENERIC_TEMPLATE,
+): string {
+  return fillTemplate(template, {
+    metrics: JSON.stringify(metrics, null, 2),
+  }).trim();
 }

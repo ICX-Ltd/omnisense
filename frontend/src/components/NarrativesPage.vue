@@ -2,6 +2,7 @@
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
+import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
 
 const filterKey = ref<string>("");
 const narrativeType = ref<string>("");
@@ -20,6 +21,20 @@ const selected = computed(
 );
 
 const narrative = computed(() => selected.value?.narrative ?? null);
+
+// Survey-analytics narratives carry the structured briefing object rendered by
+// the rich <NarrativeBriefing> component (identical to the live "Generate
+// Narrative" view). All other narrative types (and legacy/unknown shapes) fall
+// back to the generic key/value renderer below.
+const isRichSurveyBriefing = computed(() => {
+  const n = narrative.value;
+  if (!n || typeof n !== "object") return false;
+  return (
+    selected.value?.narrativeType === "survey_analytics" ||
+    "competitive_landscape" in n ||
+    "chinese_oem_threat" in n
+  );
+});
 
 function labelForEntry(entry: any): string {
   const parts: string[] = [];
@@ -238,7 +253,11 @@ onMounted(load);
           <span class="chip chip--secondary">Generated {{ fmtDateTime(selected.createdAt) }}</span>
         </div>
 
+        <!-- Rich survey-analytics executive briefing (matches the live view) -->
+        <NarrativeBriefing v-if="isRichSurveyBriefing" :narrative="narrative" />
+
         <!-- Headline -->
+        <template v-else>
         <div v-if="narrative.headline" class="narr-headline">
           {{ narrative.headline }}
         </div>
@@ -301,6 +320,7 @@ onMounted(load);
             </template>
           </template>
         </div>
+        </template>
       </template>
   </div>
 </template>

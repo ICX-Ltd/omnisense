@@ -17,6 +17,22 @@
 
     <div class="layout">
       <aside class="sidebar">
+        <div class="search-row">
+          <input
+            v-model="search"
+            class="input input--sm search-input"
+            type="search"
+            placeholder="Filter by label, key, campaign…"
+          />
+          <button
+            v-if="search"
+            class="search-clear"
+            title="Clear filter"
+            @click="search = ''"
+          >
+            &times;
+          </button>
+        </div>
         <div class="filter-row">
           <select v-model="filter.interactionType" class="input input--sm">
             <option value="">All types</option>
@@ -411,7 +427,20 @@ const historyLoading = ref(false);
 
 const helpOpen = ref(false);
 
-const filteredPrompts = computed(() => prompts.value);
+const search = ref("");
+
+// Client-side text filter over the (server-filtered) list. Matches against
+// label, key, campaign and kind so the user can quickly find a fragment.
+const filteredPrompts = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return prompts.value;
+  return prompts.value.filter((p) =>
+    [p.label, p.key, p.campaign ?? "", p.kind]
+      .join(" ")
+      .toLowerCase()
+      .includes(q)
+  );
+});
 
 const canSave = computed(() => {
   return (
@@ -615,6 +644,30 @@ function showError(msg: string) {
   overflow-y: auto;
   position: sticky;
   top: 16px;
+}
+
+.search-row {
+  position: relative;
+  margin-bottom: 6px;
+}
+.search-input {
+  width: 100%;
+}
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.search-clear:hover {
+  color: #475569;
 }
 
 .filter-row {

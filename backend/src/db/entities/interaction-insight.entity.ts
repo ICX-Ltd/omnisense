@@ -205,6 +205,17 @@ export class InteractionInsight {
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   campaign_answers_json!: string | null;
 
+  // ── Campaign-specific transcript insights (e.g. NMGB Survey) ─────────────
+  // A SECOND campaign blob, separate from campaign_answers_json. Needed because
+  // for NMGB Survey campaign_answers_json is owned by the survey feed backfill
+  // (sql/nmgb_survey_backfill.sql) and is nulled/restored around each LLM run;
+  // transcript-derived insights would be clobbered if they shared that column.
+  // This column is only written by the LLM and is left untouched by the backfill.
+  // Shape is defined by the campaign's call.campaign.<name>.transcript_schema
+  // fragment, so it is intentionally schemaless from the database's view.
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  campaign_transcript_json!: string | null;
+
   // ── Shared JSON fields ───────────────────────────────────────────────────
 
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })

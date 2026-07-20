@@ -233,15 +233,21 @@ export class SurveyAnalyticsController {
     @Query('chineseOnly') chineseOnly?: string,
     @Query('excludeChinese') excludeChinese?: string,
     @Query('notPurchaseReason') notPurchaseReason?: string,
+    @Query('interestFactor') interestFactor?: string,
     @Query('drillModel') drillModel?: string,
     @Query('defectedOnly') defectedOnly?: string,
     @Query('wonOnly') wonOnly?: string,
+    @Query('flowStatus') flowStatus?: string,
+    @Query('stillConsidering') stillConsidering?: string,
+    @Query('ratingScore') ratingScore?: string,
+    @Query('dealerVisit') dealerVisit?: string,
     @Query('limit') limit?: string, @Query('offset') offset?: string,
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
     @Query('surveyTakenOnly') surveyTakenOnly?: string,
   ) {
+    const rating = ratingScore != null && ratingScore !== '' ? parseInt(ratingScore, 10) : undefined;
     return this.svc.getDrillRecords(
       this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
       {
@@ -249,13 +255,71 @@ export class SurveyAnalyticsController {
         chineseOnly: chineseOnly === 'true',
         excludeChinese: excludeChinese === 'true',
         notPurchaseReason: notPurchaseReason || undefined,
+        interestFactor: interestFactor || undefined,
         model: drillModel || undefined,
         defectedOnly: defectedOnly === 'true',
         wonOnly: wonOnly === 'true',
+        flowStatus: flowStatus || undefined,
+        stillConsidering: stillConsidering === 'true',
+        ratingScore: Number.isNaN(rating as number) ? undefined : rating,
+        dealerVisit: dealerVisit || undefined,
       },
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
     );
+  }
+
+  @Get('transcript-drill-records')
+  async transcriptDrillRecords(
+    @Query('sentimentTopic') sentimentTopic?: string,
+    @Query('sentimentValue') sentimentValue?: string,
+    @Query('transcriptBrand') transcriptBrand?: string,
+    @Query('transcriptChineseOnly') transcriptChineseOnly?: string,
+    @Query('competitorReason') competitorReason?: string,
+    @Query('chineseReason') chineseReason?: string,
+    @Query('frustrationTheme') frustrationTheme?: string,
+    @Query('frustrationSeverity') frustrationSeverity?: string,
+    @Query('frustrationResolvable') frustrationResolvable?: string,
+    @Query('priceGap') priceGap?: string,
+    @Query('dealerFollowUp') dealerFollowUp?: string,
+    @Query('evStance') evStance?: string,
+    @Query('loyaltyAnswer') loyaltyAnswer?: string,
+    @Query('limit') limit?: string, @Query('offset') offset?: string,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getTranscriptDrillRecords(
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      {
+        sentimentTopic: sentimentTopic || undefined,
+        sentimentValue: sentimentValue || undefined,
+        transcriptBrand: transcriptBrand || undefined,
+        transcriptChineseOnly: transcriptChineseOnly === 'true',
+        competitorReason: competitorReason || undefined,
+        chineseReason: chineseReason || undefined,
+        frustrationTheme: frustrationTheme || undefined,
+        frustrationSeverity: frustrationSeverity || undefined,
+        frustrationResolvable: frustrationResolvable || undefined,
+        priceGap: priceGap === 'true',
+        dealerFollowUp: dealerFollowUp || undefined,
+        evStance: evStance || undefined,
+        loyaltyAnswer: loyaltyAnswer || undefined,
+      },
+      Math.min(parseInt(limit ?? '200', 10) || 200, 500),
+      parseInt(offset ?? '0', 10) || 0,
+    );
+  }
+
+  @Get('transcript-insights')
+  async transcriptInsights(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+  ) {
+    return this.svc.getTranscriptInsights(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
   }
 
   @Get('record/:id')

@@ -2,6 +2,14 @@ import type {
   PromptInteractionType,
   PromptKind,
 } from '../../db/entities/prompt-template.entity';
+import {
+  NARRATIVE_GENERIC_TEMPLATE,
+  NARRATIVE_CALLS_OPERATIONS_TEMPLATE,
+  NARRATIVE_CALLS_CLIENT_SERVICES_TEMPLATE,
+  NARRATIVE_CHATS_OPERATIONS_TEMPLATE,
+  NARRATIVE_CHATS_CLIENT_SERVICES_TEMPLATE,
+  NARRATIVE_SURVEY_ANALYTICS_TEMPLATE,
+} from '../../insights/prompt/build-narrative-summary-prompt';
 
 export interface SeedFragment {
   key: string;
@@ -39,6 +47,7 @@ conversation_type: lead_generation | sales_follow_up | satisfaction_check | comp
 
 {{campaign_section}}
 {{campaign_qa_section}}
+{{campaign_transcript_section}}
 ═══════════════════════════════════════
 SECTION 3 — OPERATIONS SCORING (calls only)
 ═══════════════════════════════════════
@@ -166,7 +175,7 @@ JSON SCHEMA
     "competitor_intelligence": [
       { "brand": string, "context": string, "sentiment": "positive" | "negative" | "neutral" }
     ]
-  }{{campaign_qa_schema}},
+  }{{campaign_qa_schema}}{{campaign_transcript_schema}},
 
   "action_items": [
     { "description": string, "owner": "agent" | "customer" | "dealer" | "unknown", "due_date_if_mentioned": string | null }
@@ -192,8 +201,9 @@ Quality rules:
 - overall_score = mean of non-null dimension scores, rounded to 1 decimal place.
 - action_items must be concrete. If none, [].
 - risk_flags: flag vulnerable customer language, complaints, compliance gaps, or DPA failures.
-- If a campaign-specific schema extension appears above (e.g. "campaign_answers"),
-  include it in your output as a top-level field. Omit it entirely if none was provided.
+- If a campaign-specific schema extension appears above (e.g. "campaign_answers"
+  or "campaign_transcript"), include it in your output as a top-level field.
+  Omit it entirely if none was provided.
 
 Transcript:
 """{{transcript}}"""
@@ -445,6 +455,164 @@ const CALL_CAMPAIGN_PARITY_QA_SCHEMA = `"campaign_answers": {
     "key_competitor_drivers": [
       { "driver": string, "explanation": string, "quote": string }
     ]
+  }`;
+
+// ─── CALL: NMGB SURVEY CAMPAIGN ──────────────────────────────────────────────
+// Post-interaction survey for Nissan Motor GB. Structured tick-box answers are
+// written to campaign_answers_json by the survey feed backfill
+// (sql/nmgb_survey_backfill.sql) — NOT by the LLM. The LLM's job here is to mine
+// the TRANSCRIPT for the qualitative signal the survey misses, written to a
+// SEPARATE column (campaign_transcript_json) so the backfill never clobbers it.
+
+const CALL_CAMPAIGN_NMGB_SURVEY = `═══════════════════════════════════════
+SECTION 2 — CAMPAIGN: NMGB SURVEY (Nissan Motor GB post-interaction survey)
+═══════════════════════════════════════
+Campaign: NMGB Survey (provided — do not detect, set campaign_detected to "NMGB Survey")
+
+About the campaign:
+  This is an OUTBOUND satisfaction / market-intelligence SURVEY call. The
+  customer recently enquired about — or was in market for — a Nissan vehicle and
+  MAY have purchased elsewhere. The agent works through a fixed survey script;
+  the customer's answers reveal why they did or did not buy a Nissan, who they
+  bought instead, and how they rate the dealer experience.
+
+  A separate structured survey feed already records the tick-box answers, so no
+  agent-compliance script applies here. The value of THIS analysis is the
+  qualitative, verbatim voice-of-customer in Section 2C.
+
+Compliance check for NMGB Survey:
+  No campaign-specific compliance script applies — set all fields in
+  campaign_compliance to null.
+
+For gdpr dimension: set to null (not applicable for NMGB Survey).`;
+
+const CALL_CAMPAIGN_NMGB_SURVEY_TRANSCRIPT = `═══════════════════════════════════════
+SECTION 2C — CAMPAIGN TRANSCRIPT INSIGHTS (NMGB SURVEY)
+═══════════════════════════════════════
+This is a POST-INTERACTION SURVEY call for Nissan Motor GB (NMGB). The customer
+recently enquired about / was in market for a Nissan and MAY have bought
+elsewhere. A separate structured survey already records tick-box answers; your
+job here is to extract from the TRANSCRIPT ONLY the richer, qualitative signal
+the survey cannot capture — especially verbatim voice-of-customer, BALANCED
+positives and negatives, and any competitor make/model the survey left blank.
+
+Rules:
+- Use the CUSTOMER's words, not the agent's. Never infer beyond what is said.
+- Every "quote" MUST be a verbatim, ≤20-word excerpt from the CUSTOMER. If none
+  is available, set quote to "".
+- "sentiment" values: "positive" | "negative" | "mixed" | "neutral" | "not_expressed".
+- Capture positives AND negatives — do not default to negatives only.
+- If a topic is never raised, use "not_expressed" / "no" / empty [] as
+  appropriate. Never fabricate to fill a field.
+
+Items:
+
+1. current_brand_sentiment
+   The customer's view of NISSAN as a brand.
+   positives / negatives: short phrases (≤10 words each) drawn from what they say.
+
+2. current_vehicle_sentiment
+   The customer's view of their CURRENT / most recent NISSAN vehicle (or the
+   Nissan model they enquired about).
+
+3. dealer_sentiment
+   The customer's view of the NISSAN DEALER / dealership experience. This adds
+   verbatim colour to the survey's numeric dealership rating.
+
+4. competitor_considered
+   Did the customer mention CONSIDERING, test-driving, or BUYING a non-Nissan
+   vehicle? (→ "yes" for any of these — not only completed purchases.)
+   For each brand named, return:
+     brand:          <brand name as said>
+     model:          <model name> | null
+     is_chinese_oem: true if it is a Chinese or Chinese-owned brand (MG, BYD,
+                     Omoda, Jaecoo, GWM / Great Wall, ORA, Xpeng, Leapmotor,
+                     Zeekr, Lynk & Co, and Geely-owned Volvo, Polestar, Lotus,
+                     Smart), else false.
+     status:         "considered" | "test_drove" | "purchased"
+   IMPORTANT: recover make AND model even when only mentioned in passing — this
+   is a primary goal, as the survey often has these blank.
+
+5. competitor_reasons
+   WHY the competitor appealed more than Nissan. Choose all that apply from this
+   controlled list (aligned to the survey's "influenced_by" factors so they
+   chart on the same axes):
+     ["apr_lower", "better_value", "brand_loyalty", "colour_spec_pref",
+      "comfortable_interior", "customer_service", "discount", "drive_of_vehicle",
+      "enhanced_features", "longer_warranty", "monthly_payments_lower",
+      "powertrain_options", "pref_design", "quicker_delivery", "size",
+      "try_different", "other"]
+   chinese_specific_reasons: subset that specifically explains a CHINESE OEM's
+     appeal (e.g. price, spec-for-money, EV range). [] if not applicable.
+   detail: ≤50 words synthesising the reasoning in the customer's own terms.
+
+6. why_not_nissan
+   In the customer's OWN words, why the Nissan option lost — even if not framed
+   as a competitor comparison (e.g. price, availability, dealer, spec, EV doubts).
+
+7. frustrations
+   Every distinct frustration the customer expresses. For each:
+     theme:              short label (e.g. "Long delivery wait")
+     severity:           "low" | "medium" | "high"
+     root_cause_owner:   "dealer" | "brand" | "finance" | "product" | "process" | "external"
+     resolvable:         "yes" | "no" | "partial"  (could NMGB realistically fix it?)
+     recommended_action: ≤25 words — what NMGB could do to resolve / prevent it
+     quote:              ≤20-word verbatim
+   [] if none expressed.
+
+8. ev_sentiment
+   Stance on EV / hybrid / charging (the survey only has a single "no interest
+   in EVs" flag).
+     stance:  "positive" | "negative" | "mixed" | "not_applicable"
+     drivers: short phrases explaining the stance (range, charging, cost, etc.)
+
+9. price_expectation_gap
+   Did the customer cite a specific price / monthly-payment expectation or a gap
+   vs what Nissan offered?  answer: "yes" | "no"; detail ≤30 words.
+
+10. loyalty_signal
+    Would they consider Nissan again / recommend it?
+      answer:    "likely" | "unlikely" | "conditional" | "unknown"
+      condition: if "conditional", what would have to change (≤20 words), else "".
+
+11. dealer_follow_up
+    Did the dealer PROACTIVELY follow up after the enquiry / visit?
+      answer: "yes" | "no" | "unknown"
+
+12. key_quotes
+    Up to 5 of the most report-worthy verbatim customer quotes across the call,
+    each: { theme, quote (≤20 words), sentiment }.
+
+13. survey_gaps_filled
+    Short strings noting anything the transcript revealed that the tick-box
+    survey would have missed or gotten wrong — e.g.
+    "Competitor make blank in survey; transcript reveals BYD Seal",
+    "Rated dealer highly but transcript shows frustration with follow-up".`;
+
+const CALL_CAMPAIGN_NMGB_SURVEY_TRANSCRIPT_SCHEMA = `"campaign_transcript": {
+    "current_brand_sentiment":   { "sentiment": string, "positives": string[], "negatives": string[], "quote": string },
+    "current_vehicle_sentiment": { "sentiment": string, "positives": string[], "negatives": string[], "quote": string },
+    "dealer_sentiment":          { "sentiment": string, "positives": string[], "negatives": string[], "quote": string },
+    "competitor_considered": {
+      "answer": "yes" | "no",
+      "brands": [
+        { "brand": string, "model": string | null, "is_chinese_oem": boolean, "status": "considered" | "test_drove" | "purchased" }
+      ],
+      "quote": string
+    },
+    "competitor_reasons":    { "reasons": string[], "chinese_specific_reasons": string[], "detail": string, "quote": string },
+    "why_not_nissan":        { "detail": string, "quote": string },
+    "frustrations": [
+      { "theme": string, "severity": "low" | "medium" | "high", "root_cause_owner": string, "resolvable": "yes" | "no" | "partial", "recommended_action": string, "quote": string }
+    ],
+    "ev_sentiment":          { "stance": string, "drivers": string[], "quote": string },
+    "price_expectation_gap": { "answer": "yes" | "no", "detail": string, "quote": string },
+    "loyalty_signal":        { "answer": string, "condition": string, "quote": string },
+    "dealer_follow_up":      { "answer": string, "quote": string },
+    "key_quotes": [
+      { "theme": string, "quote": string, "sentiment": string }
+    ],
+    "survey_gaps_filled": string[]
   }`;
 
 // ─── CHAT BASE ───────────────────────────────────────────────────────────────
@@ -1339,7 +1507,7 @@ export const SEED_FRAGMENTS: SeedFragment[] = [
     campaign: null,
     label: 'Call — base template',
     notes:
-      'Placeholders: {{campaign_section}}, {{campaign_qa_section}}, {{campaign_qa_schema}}, {{transcript}}. Composer injects the campaign section by campaign name; the qa_section / qa_schema slots are populated only for campaigns that ship a call.campaign.<name>.qa and .qa_schema fragment (e.g. Parity).',
+      'Placeholders: {{campaign_section}}, {{campaign_qa_section}}, {{campaign_qa_schema}}, {{campaign_transcript_section}}, {{campaign_transcript_schema}}, {{transcript}}. Composer injects the campaign section by campaign name; the qa_section / qa_schema slots are populated only for campaigns that ship a call.campaign.<name>.qa + .qa_schema pair (e.g. Parity), and the transcript_section / transcript_schema slots only for campaigns that ship a call.campaign.<name>.transcript + .transcript_schema pair (e.g. NMGB Survey). The two pairs are independent — a campaign may have either, both, or neither.',
     body: CALL_BASE,
   },
   {
@@ -1437,6 +1605,36 @@ export const SEED_FRAGMENTS: SeedFragment[] = [
     body: CALL_CAMPAIGN_PARITY_QA_SCHEMA,
   },
   {
+    key: 'call.campaign.NMGB Survey',
+    interactionType: 'call',
+    kind: 'campaign_section',
+    campaign: 'NMGB Survey',
+    label: 'Call — NMGB Survey campaign section',
+    notes:
+      'Nissan Motor GB post-interaction survey. No agent-compliance script; the headline output is the transcript insight blob (see call.campaign.NMGB Survey.transcript).',
+    body: CALL_CAMPAIGN_NMGB_SURVEY,
+  },
+  {
+    key: 'call.campaign.NMGB Survey.transcript',
+    interactionType: 'call',
+    kind: 'transcript_section',
+    campaign: 'NMGB Survey',
+    label: 'Call — NMGB Survey transcript insights',
+    notes:
+      'Qualitative voice-of-customer mined from the transcript (positives/negatives, competitor make+model, frustrations, quotes). Extracted into the campaign_transcript blob → campaign_transcript_json (a SEPARATE column from campaign_answers_json, which the survey feed backfill owns). Composer injects this into the {{campaign_transcript_section}} slot of call.base.',
+    body: CALL_CAMPAIGN_NMGB_SURVEY_TRANSCRIPT,
+  },
+  {
+    key: 'call.campaign.NMGB Survey.transcript_schema',
+    interactionType: 'call',
+    kind: 'transcript_schema',
+    campaign: 'NMGB Survey',
+    label: 'Call — NMGB Survey transcript insights schema',
+    notes:
+      'JSON schema fragment for the campaign_transcript field. Composer prefixes ",\\n\\n  " when injecting into the {{campaign_transcript_schema}} slot of call.base.',
+    body: CALL_CAMPAIGN_NMGB_SURVEY_TRANSCRIPT_SCHEMA,
+  },
+  {
     key: 'chat.base',
     interactionType: 'chat',
     kind: 'base',
@@ -1518,5 +1716,70 @@ export const SEED_FRAGMENTS: SeedFragment[] = [
     label: 'Chat — RAC objection handling schema',
     notes: null,
     body: CHAT_RAC_OBJECTION_SCHEMA,
+  },
+
+  // ─── NARRATIVE / EXECUTIVE-BRIEFING PROMPTS ──────────────────────────────────
+  // These are NOT composed via call.base / chat.base. They are standalone prompts
+  // used by the "Generate Narrative" flow (insights-summary.service.ts →
+  // getNarrativeSummary). The service loads narrative.<narrativeType> and passes
+  // the body to the matching build function in
+  // backend/src/insights/prompt/build-narrative-summary-prompt.ts, falling back to
+  // the hardcoded default when the fragment is absent. Placeholder {{metrics}} is
+  // replaced with the pretty-printed aggregated metrics JSON; the survey_analytics
+  // prompt additionally uses {{free_text_samples}} for verbatim comment samples.
+  {
+    key: 'narrative.generic',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — generic exec summary',
+    notes: 'Standalone narrative prompt. Placeholder: {{metrics}}.',
+    body: NARRATIVE_GENERIC_TEMPLATE,
+  },
+  {
+    key: 'narrative.calls_operations',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — calls operations',
+    notes: 'Standalone narrative prompt. Placeholder: {{metrics}}.',
+    body: NARRATIVE_CALLS_OPERATIONS_TEMPLATE,
+  },
+  {
+    key: 'narrative.calls_client_services',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — calls client services',
+    notes: 'Standalone narrative prompt. Placeholder: {{metrics}}.',
+    body: NARRATIVE_CALLS_CLIENT_SERVICES_TEMPLATE,
+  },
+  {
+    key: 'narrative.chats_operations',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — chats operations',
+    notes: 'Standalone narrative prompt. Placeholder: {{metrics}}.',
+    body: NARRATIVE_CHATS_OPERATIONS_TEMPLATE,
+  },
+  {
+    key: 'narrative.chats_client_services',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — chats client services',
+    notes: 'Standalone narrative prompt. Placeholder: {{metrics}}.',
+    body: NARRATIVE_CHATS_CLIENT_SERVICES_TEMPLATE,
+  },
+  {
+    key: 'narrative.survey_analytics',
+    interactionType: 'shared',
+    kind: 'other',
+    campaign: null,
+    label: 'Narrative — NMGB survey analytics (Nissan competitive briefing)',
+    notes:
+      'Standalone narrative prompt for the survey-analytics executive briefing. Placeholders: {{metrics}} (aggregated survey metrics) and {{free_text_samples}} (verbatim comments).',
+    body: NARRATIVE_SURVEY_ANALYTICS_TEMPLATE,
   },
 ];

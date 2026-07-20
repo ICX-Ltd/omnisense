@@ -7,6 +7,7 @@ import { InsightsProviderName } from '../types/insights-provider.type';
 
 export function createProvider(
   provider?: InsightsProviderName,
+  model?: string,
 ): InsightsProvider {
   const selected =
     provider ??
@@ -15,13 +16,13 @@ export function createProvider(
 
   switch (selected) {
     case 'anthropic':
-      return new AnthropicProvider();
+      return new AnthropicProvider(model);
     case 'grok':
-      return new GrokProvider();
+      return new GrokProvider(model);
     case 'gemini':
-      return new GeminiProvider();
+      return new GeminiProvider(model);
     case 'openai':
     default:
-      return new OpenAIProvider();
+      return new OpenAIProvider(model);
   }
 }

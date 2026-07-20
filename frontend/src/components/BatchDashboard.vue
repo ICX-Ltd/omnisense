@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
@@ -55,6 +55,37 @@ const isOpen = (key: SectionKey) => open.value[key];
 
 const limit = ref(10);
 const insightsProvider = ref<InsightsProvider>(InsightsProvider.OpenAI);
+
+// Optional per-run model override. "" = the provider's server-side default
+// (fast/cheap tier). Suggestions are curated per provider; a higher-quality
+// model materially improves extraction (quotes, frustrations, competitor recovery).
+const insightsModel = ref<string>("");
+const MODEL_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  [InsightsProvider.OpenAI]: [
+    { value: "", label: "Default — gpt-4o-mini (fast)" },
+    { value: "gpt-4o", label: "gpt-4o (higher quality)" },
+  ],
+  [InsightsProvider.Anthropic]: [
+    { value: "", label: "Default — claude-haiku-4-5 (fast)" },
+    { value: "claude-sonnet-5", label: "claude-sonnet-5 (higher quality)" },
+    { value: "claude-opus-4-8", label: "claude-opus-4-8 (highest quality)" },
+  ],
+  [InsightsProvider.Grok]: [
+    { value: "", label: "Default — grok-4-1-fast" },
+  ],
+  [InsightsProvider.Gemini]: [
+    { value: "", label: "Default — gemini-1.5-flash (fast)" },
+    { value: "gemini-1.5-pro", label: "gemini-1.5-pro (higher quality)" },
+  ],
+};
+const modelOptions = computed(
+  () => MODEL_OPTIONS[insightsProvider.value] ?? [{ value: "", label: "Default" }]
+);
+// Reset the model override when the provider changes so we never send one
+// provider's model id to another.
+watch(insightsProvider, () => {
+  insightsModel.value = "";
+});
 
 const loadingSummary = ref(false);
 const summary = ref<{
@@ -215,7 +246,7 @@ async function runBatchInsights() {
   try {
     const res = await axios.post(
       RecordingPath.batchInsights,
-      { provider: insightsProvider.value },
+      { provider: insightsProvider.value, model: insightsModel.value || undefined },
       { params: { limit: limit.value } }
     );
     addStoredId(res.data.jobId);
@@ -233,7 +264,7 @@ async function runBatchInsightsChats() {
   try {
     const res = await axios.post(
       RecordingPath.batchInsightsChats,
-      { provider: insightsProvider.value },
+      { provider: insightsProvider.value, model: insightsModel.value || undefined },
       { params: { limit: limit.value } }
     );
     addStoredId(res.data.jobId);
@@ -479,6 +510,11 @@ onUnmounted(stopPolling);
                 <option :value="InsightsProvider.Anthropic">Anthropic</option>
                 <option :value="InsightsProvider.Grok">Grok</option>
                 <option :value="InsightsProvider.Gemini">Gemini</option>
+              </select>
+
+              <label class="label">Model</label>
+              <select v-model="insightsModel" class="select">
+                <option v-for="m in modelOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
               </select>
               <button class="btn btn--secondary" :disabled="insightsDisabled" @click="runBatchInsights">
                 {{ startingInsights ? "Starting..." : hasRunningJob("insights_calls") ? "Generating…" : `Call insights next ${limit}` }}

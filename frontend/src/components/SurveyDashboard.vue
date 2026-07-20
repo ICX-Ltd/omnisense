@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
+import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
+import InteractionDetailDrawer from "@/components/InteractionDetailDrawer.vue";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
@@ -67,6 +69,8 @@ const monthlyTrends = ref<any>(null);
 const modelRisk = ref<any[]>([]);
 const whyWeLose = ref<any>(null);
 const whatsWorking = ref<any>(null);
+// Transcript-mined insights (from campaign_transcript_json — beyond the survey).
+const transcriptInsights = ref<any>(null);
 
 // Drill-down
 const expandedCategory = ref<string | null>(null);
@@ -78,10 +82,8 @@ const competitorRecords = ref<any[]>([]);
 const loadingCompetitor = ref(false);
 const competitorModels = ref<any[]>([]);
 
-// Detail drawer
+// Detail drawer — recordingId handed to the shared InteractionDetailDrawer.
 const detailId = ref<string | null>(null);
-const detailData = ref<any>(null);
-const loadingDetail = ref(false);
 
 // Competitive-panel drill-down (shared results list → detail drawer)
 const drillKey = ref<string | null>(null);
@@ -119,6 +121,27 @@ function riskColor(rate: number) {
   return "#059669";
 }
 
+// ── Transcript-insight display helpers ───────────────────────────────────────
+const SENTIMENT_META = [
+  { key: "positive", label: "Positive", cls: "bar-fill--green" },
+  { key: "mixed", label: "Mixed", cls: "bar-fill--amber" },
+  { key: "neutral", label: "Neutral", cls: "bar-fill--grey" },
+  { key: "negative", label: "Negative", cls: "bar-fill--red" },
+  { key: "not_expressed", label: "Not expressed", cls: "bar-fill--grey" },
+];
+// Returns { total, rows[] } for one sentiment topic (brand | vehicle | dealer).
+function sentimentRows(topic: string) {
+  const m: Record<string, number> = transcriptInsights.value?.sentiment?.[topic] ?? {};
+  const total = Object.values(m).reduce((a, b) => a + (b || 0), 0);
+  const rows = SENTIMENT_META.map((s) => ({ ...s, count: m[s.key] ?? 0 })).filter((r) => r.count > 0);
+  return { total, rows };
+}
+// Sort a {label,count}-style measure list descending for display.
+function sortedCounts(arr: any[] | undefined): any[] {
+  return [...(arr ?? [])].sort((a, b) => b.count - a.count);
+}
+const SEVERITY_CLS: Record<string, string> = { high: "chip--danger", medium: "chip--warning", low: "" };
+
 // Panel size: collapsed panels show only the top few rows; each can be expanded.
 const PANEL_LIMIT = 6;
 const expandedPanels = ref<Record<string, boolean>>({});
@@ -140,49 +163,84 @@ function fmtMonth(key: string) {
   return `${names[(m || 1) - 1]} ${String(y).slice(2)}`;
 }
 
+// Toggles: plot charts as % (share / defection rate) or raw counts.
+const brandChartPct = ref(true);
+const overallChartPct = ref(true);
+
+type ChartSeries = { label: string; color: string; points: number[]; denom?: number[] };
 function buildLineChart(
-  series: Array<{ label: string; color: string; points: number[] }>,
+  series: ChartSeries[],
   months: string[],
+  opts: { pctMode?: boolean; labelMode?: 'all' | 'peak' } = {},
 ) {
-  const width = 840, height = 260, padL = 34, padR = 12, padT = 12, padB = 46;
+  const { pctMode = false, labelMode = 'peak' } = opts;
+  const width = 860, height = 280, padL = 36, padR = 14, padT = 18, padB = 46;
   const innerW = width - padL - padR, innerH = height - padT - padB;
   const n = months.length;
+  const suffix = pctMode ? '%' : '';
+
+  // Plotted value per point (percentage of its denom, or the raw count).
+  const plotAt = (s: ChartSeries, i: number): number => {
+    const raw = s.points[i] ?? 0;
+    if (!pctMode) return raw;
+    const d = s.denom?.[i] ?? 0;
+    return d ? (raw / d) * 100 : 0;
+  };
   let max = 0;
-  for (const s of series) for (const v of s.points) if (v > max) max = v;
-  if (max <= 0) max = 1;
+  for (const s of series) for (let i = 0; i < s.points.length; i++) max = Math.max(max, plotAt(s, i));
+  max = pctMode ? Math.max(Math.ceil(max / 10) * 10, 10) : Math.max(max, 1);
+
   const xAt = (i: number) => padL + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yAt = (v: number) => padT + innerH - (v / max) * innerH;
+
   const lines = series.map((s) => {
-    const pts = s.points.map((v, i) => ({ x: xAt(i), y: yAt(v), val: v }));
-    const d = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+    let peakIdx = 0, peakPlot = -1;
+    const pts = s.points.map((raw0, i) => {
+      const raw = raw0 ?? 0;
+      const plot = plotAt(s, i);
+      const denomI = s.denom?.[i] ?? 0;
+      const pct = denomI ? Math.round((raw / denomI) * 100) : null;
+      if (plot > peakPlot) { peakPlot = plot; peakIdx = i; }
+      const label = pctMode
+        ? `${pct ?? 0}%`
+        : (pct != null ? `${raw} (${pct}%)` : `${raw}`);
+      return { x: xAt(i), y: yAt(plot), raw, pct, label, show: false };
+    });
+    pts.forEach((p, i) => { p.show = labelMode === 'all' ? p.raw > 0 : (i === peakIdx && peakPlot > 0); });
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
     return { label: s.label, color: s.color, d, pts };
   });
+
   const step = Math.max(1, Math.ceil(n / 12));
   const xLabels = months
     .map((m, i) => ({ x: xAt(i), label: fmtMonth(m), show: i % step === 0 || i === n - 1 }))
     .filter((l) => l.show);
-  const yTicks = [0, 0.5, 1].map((f) => ({ y: padT + innerH - f * innerH, val: Math.round(max * f) }));
+  const yTicks = [0, 0.5, 1].map((f) => ({ y: padT + innerH - f * innerH, val: Math.round(max * f) + suffix }));
   return { width, height, padL, padR, padT, innerH, lines, xLabels, yTicks, max, n };
 }
 
 const chineseBrandChart = computed(() => {
   const d = monthlyTrends.value;
   if (!d?.months?.length || !d.brands?.length) return null;
-  const series = d.brands.map((b: any, i: number) => ({
+  const series: ChartSeries[] = d.brands.map((b: any, i: number) => ({
     label: b.brand, color: LINE_COLORS[i % LINE_COLORS.length], points: b.points,
+    denom: d.overall.total_defections,
   }));
-  return buildLineChart(series, d.months);
+  return buildLineChart(series, d.months, { pctMode: brandChartPct.value, labelMode: 'peak' });
 });
 
 const overallTrendChart = computed(() => {
   const d = monthlyTrends.value;
   if (!d?.months?.length) return null;
+  // % mode = as a rate of that month's surveyed volume (defection rate).
+  const surveyed = d.overall.surveyed ?? d.overall.total_defections;
   return buildLineChart(
     [
-      { label: "All defections", color: "#0284c7", points: d.overall.total_defections },
-      { label: "Chinese OEM", color: "#dc2626", points: d.overall.chinese_defections },
+      { label: "All defections", color: "#0284c7", points: d.overall.total_defections, denom: surveyed },
+      { label: "Chinese OEM", color: "#dc2626", points: d.overall.chinese_defections, denom: surveyed },
     ],
     d.months,
+    { pctMode: overallChartPct.value, labelMode: 'all' },
   );
 });
 
@@ -244,6 +302,15 @@ async function loadAll() {
     modelRisk.value = mrRes.data;
     whyWeLose.value = wwlRes.data;
     whatsWorking.value = wwRes.data;
+
+    // Transcript insights are fetched separately and fail-soft: the underlying
+    // campaign_transcript_json column / data may not exist yet, and a 500 here
+    // must not take down the rest of the survey dashboard.
+    try {
+      transcriptInsights.value = (await axios.get(ApiPath.SurveyTranscriptInsights, { params: p })).data;
+    } catch {
+      transcriptInsights.value = null;
+    }
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
   } finally {
@@ -277,78 +344,102 @@ async function toggleCompetitor(make: string) {
   finally { loadingCompetitor.value = false; }
 }
 
-async function openDetail(id: string) {
-  detailId.value = id;
-  detailData.value = null;
-  loadingDetail.value = true;
-  try {
-    const res = await axios.get(`${ApiPath.SurveyRecordDetail}/${id}`);
-    detailData.value = res.data;
-  } catch { detailData.value = null; }
-  finally { loadingDetail.value = false; }
+// The record detail + "Ask AI" now live in the shared InteractionDetailDrawer
+// (same drawer as Operations / Client Services). openDetail just sets the
+// recordingId; the drawer fetches its own data via getInteractionDetail.
+function openDetail(id: string | number) {
+  detailId.value = String(id);
 }
 
-function closeDetail() { detailId.value = null; detailData.value = null; }
+function closeDetail() { detailId.value = null; }
 
-// Open a drill list for a competitive-panel selection. Toggling the same key
-// closes it. Records reuse the existing detail drawer via openDetail().
-async function openDrill(key: string, title: string, params: Record<string, any>) {
+// Open a drill list for any stat-tile selection. Toggling the same key closes
+// it. Records reuse the existing detail drawer via openDetail(). `endpoint`
+// selects the survey-answer drill (default) or the transcript drill — both
+// return the same row shape so the modal + drawer are identical.
+async function openDrill(
+  key: string,
+  title: string,
+  params: Record<string, any>,
+  endpoint: string = ApiPath.SurveyDrillRecords,
+) {
   if (drillKey.value === key) { drillKey.value = null; return; }
   drillKey.value = key;
   drillTitle.value = title;
   loadingDrill.value = true;
   drillRecords.value = [];
   try {
-    const res = await axios.get(ApiPath.SurveyDrillRecords, {
+    const res = await axios.get(endpoint, {
       params: { ...sharedParams.value, ...params, limit: 200 },
     });
     drillRecords.value = res.data;
   } catch { drillRecords.value = []; }
   finally { loadingDrill.value = false; }
 }
+// Transcript-tile drill (campaign_transcript_json). Thin wrapper over openDrill.
+function openTranscriptDrill(key: string, title: string, params: Record<string, any>) {
+  return openDrill(key, title, params, ApiPath.SurveyTranscriptDrillRecords);
+}
 function closeDrill() { drillKey.value = null; drillRecords.value = []; }
 
-// Flatten the full campaign_answers_json into readable groups for the drawer,
-// so every stored survey answer is visible (skipping empty / false / null).
-function prettifyKey(k: string) {
-  return k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+// Date range (ISO) for a "YYYY Q#" label, so a quarterly-trend row can drill
+// into that quarter's records by overriding the shared from/to.
+function quarterRange(quarter: string): { from: string; to: string } | null {
+  const m = /(\d{4})\s*Q([1-4])/.exec(quarter);
+  if (!m) return null;
+  const year = parseInt(m[1]!, 10);
+  const q = parseInt(m[2]!, 10);
+  const startMonth = (q - 1) * 3; // 0-indexed
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 1); // exclusive
+  return { from: start.toISOString(), to: end.toISOString() };
 }
-function fmtAnswerVal(v: any): string {
-  if (v === true) return "Yes";
-  if (Array.isArray(v)) return v.map((x) => fmtAnswerVal(x)).join(", ");
-  return String(v);
+// Drill a quarterly-trend row into that quarter's defections (date-range override).
+function drillQuarter(quarter: string) {
+  const r = quarterRange(quarter);
+  if (!r) return;
+  openDrill(`q:${quarter}`, `${quarter} — defections`, { ...r, defectedOnly: 'true' });
 }
-const answerGroups = computed(() => {
-  const a = detailData.value?.answers;
-  if (!a || typeof a !== "object") return [];
-  const groups: Array<{ title: string | null; fields: Array<{ label: string; value: string }> }> = [];
-  const scalars: Array<{ label: string; value: string }> = [];
-  const keep = (v: any) => v !== null && v !== undefined && v !== "" && v !== false;
-  for (const [k, v] of Object.entries(a)) {
-    if (!keep(v)) continue;
-    if (typeof v === "object" && !Array.isArray(v)) {
-      const fields = Object.entries(v as Record<string, any>)
-        .filter(([, vv]) => keep(vv))
-        .map(([kk, vv]) => ({ label: prettifyKey(kk), value: fmtAnswerVal(vv) }));
-      if (fields.length) groups.push({ title: prettifyKey(k), fields });
-    } else {
-      scalars.push({ label: prettifyKey(k), value: fmtAnswerVal(v) });
-    }
-  }
-  if (scalars.length) groups.unshift({ title: null, fields: scalars });
-  return groups;
-});
 
 // ── Narrative generation ─────────────────────────────────────────────────────
 const narrativeProvider = ref("openai");
+const narrativeModel = ref("");
 const loadingNarrative = ref(false);
-const narrativeResult = ref("");
+const narrative = ref<any>(null);        // parsed structured briefing (rich render)
+const narrativeResultText = ref("");      // fallback pretty text if shape is unexpected
 const narrativeError = ref("");
+// The rich briefing render (hero, KPIs, competitor leaderboard, etc.) and its
+// helpers live in the shared <NarrativeBriefing> component so the Narratives
+// page renders saved briefings identically.
+
+// A capable model materially improves the executive briefing. Options mirror the
+// batch dashboard; "" = the provider's default. Reset on provider change.
+const NARR_MODEL_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  openai: [
+    { value: "", label: "Default — gpt-4o-mini (fast)" },
+    { value: "gpt-4o", label: "gpt-4o (higher quality)" },
+  ],
+  anthropic: [
+    { value: "", label: "Default — claude-haiku-4-5 (fast)" },
+    { value: "claude-sonnet-5", label: "claude-sonnet-5 (higher quality)" },
+    { value: "claude-opus-4-8", label: "claude-opus-4-8 (highest quality)" },
+  ],
+  grok: [{ value: "", label: "Default — grok-4-1-fast" }],
+  gemini: [
+    { value: "", label: "Default — gemini-1.5-flash (fast)" },
+    { value: "gemini-1.5-pro", label: "gemini-1.5-pro (higher quality)" },
+  ],
+};
+const narrativeModelOptions = computed(
+  () => NARR_MODEL_OPTIONS[narrativeProvider.value] ?? [{ value: "", label: "Default" }]
+);
+watch(narrativeProvider, () => { narrativeModel.value = ""; });
 
 async function generateNarrative() {
   loadingNarrative.value = true;
   narrativeError.value = "";
-  narrativeResult.value = "";
+  narrative.value = null;
+  narrativeResultText.value = "";
   try {
     const res = await axios.post(ApiPath.InsightsSummaryNarrative, null, {
       params: {
@@ -357,10 +448,16 @@ async function generateNarrative() {
         filterKey: "all",
         provider: narrativeProvider.value,
         narrativeType: "survey_analytics",
+        ...(narrativeModel.value && { model: narrativeModel.value }),
         ...(campaign.value && { campaign: campaign.value }),
       },
     });
-    narrativeResult.value = toPrettyInsights(res.data?.narrative ?? res.data);
+    const n = res.data?.narrative ?? res.data;
+    if (n && typeof n === "object" && !Array.isArray(n)) {
+      narrative.value = n;
+    } else {
+      narrativeResultText.value = toPrettyInsights(n);
+    }
   } catch (e: any) {
     narrativeError.value = e?.response?.data?.message || e?.message || "Failed to generate narrative";
   } finally {
@@ -446,14 +543,26 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
     <div v-if="error" class="error-tile" style="margin-top: 10px">{{ error }}</div>
 
     <template v-if="overview">
-      <!-- Overview strip -->
+      <!-- Overview strip (each tile drills to its records) -->
       <div class="stats-strip">
-        <div class="stat"><div class="stat-label">Total Records</div><div class="stat-value">{{ overview.total }}</div></div>
-        <div class="stat"><div class="stat-label">Survey Taken</div><div class="stat-value chip chip--success">{{ overview.survey_taken }}</div></div>
-        <div class="stat"><div class="stat-label">Survey Not Taken</div><div class="stat-value chip chip--secondary">{{ overview.survey_not_taken }}</div></div>
-        <div class="stat"><div class="stat-label">Bought Client Brand</div><div class="stat-value chip chip--success">{{ overview.won }}</div></div>
-        <div class="stat"><div class="stat-label">Defected (Competitor)</div><div class="stat-value chip chip--danger">{{ overview.defected }}</div></div>
-        <div class="stat"><div class="stat-label">Still Considering</div><div class="stat-value chip chip--info">{{ overview.still_considering }}</div></div>
+        <div class="stat stat--click" @click="openDrill('ov:total', 'All survey records', {})">
+          <div class="stat-label">Total Records</div><div class="stat-value">{{ overview.total }}</div>
+        </div>
+        <div class="stat stat--click" @click="openDrill('ov:taken', 'Survey Taken', { flowStatus: 'Survey Taken' })">
+          <div class="stat-label">Survey Taken</div><div class="stat-value chip chip--success">{{ overview.survey_taken }}</div>
+        </div>
+        <div class="stat stat--click" @click="openDrill('ov:nottaken', 'Survey Not Taken', { flowStatus: 'Survey Not Taken' })">
+          <div class="stat-label">Survey Not Taken</div><div class="stat-value chip chip--secondary">{{ overview.survey_not_taken }}</div>
+        </div>
+        <div class="stat stat--click" @click="openDrill('ov:won', 'Bought client brand (won)', { wonOnly: 'true' })">
+          <div class="stat-label">Bought Client Brand</div><div class="stat-value chip chip--success">{{ overview.won }}</div>
+        </div>
+        <div class="stat stat--click" @click="openDrill('ov:defected', 'Defected to a competitor', { defectedOnly: 'true' })">
+          <div class="stat-label">Defected (Competitor)</div><div class="stat-value chip chip--danger">{{ overview.defected }}</div>
+        </div>
+        <div class="stat stat--click" @click="openDrill('ov:considering', 'Still considering', { stillConsidering: 'true' })">
+          <div class="stat-label">Still Considering</div><div class="stat-value chip chip--info">{{ overview.still_considering }}</div>
+        </div>
       </div>
 
       <!-- Category breakdown + Model performance -->
@@ -479,7 +588,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <div v-if="expandedCategory === c.category" class="drill-panel">
                 <div v-if="loadingCategory" class="hint">Loading...</div>
                 <div v-else-if="!categoryRecords.length" class="hint">No records.</div>
-                <div v-else v-for="r in categoryRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
+                <div v-else v-for="r in categoryRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
                   <div class="drill-row-top">
                     <span class="chip chip--secondary" style="font-size: 11px">{{ r.model || 'n/a' }}</span>
                     <span class="chip chip--secondary" style="font-size: 11px">{{ r.dealer || 'n/a' }}</span>
@@ -507,7 +616,12 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           </div>
           <div class="tile-body">
             <div class="hint" v-if="!modelPerformance.length">No data.</div>
-            <div v-for="m in panelVisible(modelPerformance, 'models')" :key="m.model" class="model-row">
+            <div
+              v-for="m in panelVisible(modelPerformance, 'models')"
+              :key="m.model"
+              class="model-row model-row--click"
+              @click="openDrill(`mp:${m.model}`, `${m.model} — survey records`, { drillModel: m.model })"
+            >
               <div class="model-name">{{ m.model }}</div>
               <div class="model-stats">
                 <span class="chip chip--secondary" style="font-size: 11px">{{ m.total }} total</span>
@@ -539,7 +653,13 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             </div>
           </div>
           <div class="tile-body">
-            <div v-if="interestFactors" v-for="f in interestFactors.factors" :key="f.factor" class="bar-row">
+            <div
+              v-if="interestFactors"
+              v-for="f in interestFactors.factors"
+              :key="f.factor"
+              class="bar-row bar-row--click"
+              @click="openDrill(`if:${f.key}`, `Interested in — ${f.factor}`, { interestFactor: f.key })"
+            >
               <div class="bar-label">{{ f.factor }}</div>
               <div class="bar-track">
                 <div class="bar-fill bar-fill--blue" :style="{ width: pct(f.count, interestFactors.surveyed) + '%' }" />
@@ -558,7 +678,13 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             </div>
           </div>
           <div class="tile-body">
-            <div v-if="notPurchaseReasons" v-for="r in notPurchaseReasons.reasons" :key="r.reason" class="bar-row">
+            <div
+              v-if="notPurchaseReasons"
+              v-for="r in notPurchaseReasons.reasons"
+              :key="r.reason"
+              class="bar-row bar-row--click"
+              @click="openDrill(`npr:${r.key}`, `Not purchased — ${r.reason}`, { notPurchaseReason: r.key })"
+            >
               <div class="bar-label">{{ r.reason }}</div>
               <div class="bar-track">
                 <div class="bar-fill bar-fill--red" :style="{ width: pct(r.count, notPurchaseReasons.surveyed) + '%' }" />
@@ -602,7 +728,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                   </div>
                   <!-- Individual records -->
                   <div v-if="!competitorRecords.length" class="hint">No records.</div>
-                  <div v-else v-for="r in competitorRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
+                  <div v-else v-for="r in competitorRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
                     <div class="drill-row-top">
                       <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
                       <span class="chip chip--warning" style="font-size: 11px">Bought: {{ r.purchased_model || r.purchased_other_model || 'n/a' }}</span>
@@ -633,7 +759,12 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             <template v-else>
               <!-- Rating distribution -->
               <div style="display: flex; gap: 8px; margin-bottom: 14px">
-                <div v-for="d in dealershipRatings.distribution" :key="d.rating" class="rating-block">
+                <div
+                  v-for="d in dealershipRatings.distribution"
+                  :key="d.rating"
+                  class="rating-block rating-block--click"
+                  @click="openDrill(`rating:${d.rating}`, `Dealership rated ${d.rating}★`, { ratingScore: d.rating })"
+                >
                   <div class="rating-star" :style="{ color: ratingColor(d.rating) }">{{ d.rating }}&#9733;</div>
                   <div class="rating-count">{{ d.count }}</div>
                 </div>
@@ -641,7 +772,13 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <!-- By dealer -->
               <div v-if="dealershipRatings.by_dealer.length">
                 <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px">By Dealer (min 2 ratings)</div>
-                <div v-for="d in panelVisible(dealershipRatings.by_dealer, 'dealers')" :key="d.dealer" class="metric-row" style="margin-bottom: 4px">
+                <div
+                  v-for="d in panelVisible(dealershipRatings.by_dealer, 'dealers')"
+                  :key="d.dealer"
+                  class="metric-row metric-row--clickable"
+                  style="margin-bottom: 4px"
+                  @click="openDrill(`dealer:${d.dealer}`, `${d.dealer} — rated records`, { dealer: d.dealer })"
+                >
                   <div class="metric-left" style="flex: 1; font-size: 12px">{{ d.dealer }}</div>
                   <div class="metric-right">
                     <span class="chip" :style="{ background: ratingColor(d.avg_rating), color: '#fff', fontSize: '11px' }">{{ d.avg_rating }}&#9733;</span>
@@ -668,7 +805,12 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         </div>
         <div class="tile-body">
           <div style="display: flex; gap: 12px; flex-wrap: wrap">
-            <div v-for="v in dealerVisits" :key="v.visit_type" class="visit-chip">
+            <div
+              v-for="v in dealerVisits"
+              :key="v.visit_type"
+              class="visit-chip visit-chip--click"
+              @click="openDrill(`dv:${v.visit_type}`, `Dealer visit — ${v.visit_type}`, { dealerVisit: v.visit_type })"
+            >
               <div class="visit-label">{{ v.visit_type }}</div>
               <div class="visit-count">{{ v.count }}</div>
             </div>
@@ -721,9 +863,12 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             </div>
           </div>
           <div class="tile-body">
-            <div class="chinese-headline">
+            <div
+              class="chinese-headline chinese-headline--click"
+              @click="openDrill('cn:all', 'Defected to a Chinese / Chinese-owned OEM', { chineseOnly: 'true', defectedOnly: 'true' })"
+            >
               <div class="chinese-share">{{ competitorAnalysis.chinese_share }}%</div>
-              <div class="chinese-sub">{{ competitorAnalysis.chinese_defections }} of {{ competitorAnalysis.total_defections }} defections</div>
+              <div class="chinese-sub">{{ competitorAnalysis.chinese_defections }} of {{ competitorAnalysis.total_defections }} defections &middot; click to view</div>
             </div>
             <div class="chinese-track">
               <div class="chinese-bar" :style="{ width: competitorAnalysis.chinese_share + '%' }" />
@@ -731,7 +876,13 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             <div v-if="competitorAnalysis.chinese_brands.length" style="margin-top: 12px">
               <div class="mini-head">Chinese brands taking customers</div>
               <div style="display: flex; flex-wrap: wrap; gap: 6px">
-                <span v-for="b in competitorAnalysis.chinese_brands" :key="b.make" class="chip chip--danger" style="font-size: 11px">{{ b.make }} &middot; {{ b.count }}</span>
+                <span
+                  v-for="b in competitorAnalysis.chinese_brands"
+                  :key="b.make"
+                  class="chip chip--danger chip--click"
+                  style="font-size: 11px"
+                  @click="openDrill(`cn:${b.make}`, `Defected to ${b.make}`, { competitorMake: b.make, defectedOnly: 'true' })"
+                >{{ b.make }} &middot; {{ b.count }}</span>
               </div>
             </div>
             <div v-else class="hint" style="margin-top: 12px">No Chinese-OEM defections in scope.</div>
@@ -753,7 +904,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             <div class="trend-head">
               <div>Quarter</div><div>Surveyed</div><div>Defections</div><div>Chinese share</div><div>Top competitor</div><div>Top Chinese competitor</div>
             </div>
-            <div v-for="q in quarterlyTrends" :key="q.quarter" class="trend-row">
+            <div v-for="q in quarterlyTrends" :key="q.quarter" class="trend-row trend-row--click" @click="drillQuarter(q.quarter)">
               <div class="trend-q">{{ q.quarter }}</div>
               <div>{{ q.total }}</div>
               <div>{{ q.defections }} <span class="pct-label">{{ pct(q.defections, q.total) }}%</span></div>
@@ -784,7 +935,11 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           <div class="tile-icon">&#128200;</div>
           <div class="tile-text">
             <div class="tile-title">Monthly Defections by Chinese OEM</div>
-            <div class="tile-desc">Each Chinese / Chinese-owned brand as a separate line across the selected period</div>
+            <div class="tile-desc">Each Chinese / Chinese-owned brand across the selected period — {{ brandChartPct ? '% of that month’s defections' : 'defection counts' }}. Labels mark each brand’s peak.</div>
+          </div>
+          <div class="chart-toggle">
+            <button :class="{ 'chart-toggle-on': brandChartPct }" @click="brandChartPct = true">%</button>
+            <button :class="{ 'chart-toggle-on': !brandChartPct }" @click="brandChartPct = false">Count</button>
           </div>
         </div>
         <div class="tile-body">
@@ -795,7 +950,11 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 <text :x="chineseBrandChart.padL - 6" :y="t.y + 3" class="chart-axis" text-anchor="end">{{ t.val }}</text>
               </g>
               <text v-for="(x, i) in chineseBrandChart.xLabels" :key="'x' + i" :x="x.x" :y="chineseBrandChart.height - 26" class="chart-axis" text-anchor="middle">{{ x.label }}</text>
-              <path v-for="l in chineseBrandChart.lines" :key="l.label" :d="l.d" fill="none" :stroke="l.color" stroke-width="2" stroke-linejoin="round" />
+              <template v-for="l in chineseBrandChart.lines" :key="l.label">
+                <path :d="l.d" fill="none" :stroke="l.color" stroke-width="2" stroke-linejoin="round" />
+                <circle v-for="(p, pi) in l.pts" :key="pi" :cx="p.x" :cy="p.y" r="2.6" :fill="l.color" />
+                <text v-for="(p, pi) in l.pts.filter((pp) => pp.show)" :key="'l' + pi" :x="p.x" :y="p.y - 6" class="chart-point" text-anchor="middle" :fill="l.color">{{ l.label }} {{ p.label }}</text>
+              </template>
             </svg>
           </div>
           <div class="chart-legend">
@@ -812,7 +971,11 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           <div class="tile-icon">&#128201;</div>
           <div class="tile-text">
             <div class="tile-title">Monthly Defections — Overall</div>
-            <div class="tile-desc">All competitor defections vs the Chinese-OEM subset, month by month</div>
+            <div class="tile-desc">All competitor defections vs the Chinese-OEM subset, month by month — {{ overallChartPct ? '% of surveyed (defection rate)' : 'counts' }}</div>
+          </div>
+          <div class="chart-toggle">
+            <button :class="{ 'chart-toggle-on': overallChartPct }" @click="overallChartPct = true">%</button>
+            <button :class="{ 'chart-toggle-on': !overallChartPct }" @click="overallChartPct = false">Count</button>
           </div>
         </div>
         <div class="tile-body">
@@ -823,7 +986,11 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
                 <text :x="overallTrendChart.padL - 6" :y="t.y + 3" class="chart-axis" text-anchor="end">{{ t.val }}</text>
               </g>
               <text v-for="(x, i) in overallTrendChart.xLabels" :key="'x' + i" :x="x.x" :y="overallTrendChart.height - 26" class="chart-axis" text-anchor="middle">{{ x.label }}</text>
-              <path v-for="l in overallTrendChart.lines" :key="l.label" :d="l.d" fill="none" :stroke="l.color" stroke-width="2.5" stroke-linejoin="round" />
+              <template v-for="l in overallTrendChart.lines" :key="l.label">
+                <path :d="l.d" fill="none" :stroke="l.color" stroke-width="2.5" stroke-linejoin="round" />
+                <circle v-for="(p, pi) in l.pts" :key="pi" :cx="p.x" :cy="p.y" r="3" :fill="l.color" />
+                <text v-for="(p, pi) in l.pts.filter((pp) => pp.show)" :key="'l' + pi" :x="p.x" :y="p.y - 7" class="chart-point" text-anchor="middle" :fill="l.color">{{ p.label }}</text>
+              </template>
             </svg>
           </div>
           <div class="chart-legend">
@@ -924,7 +1091,12 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           <div class="grid grid-2">
             <div>
               <div class="mini-head">What attracted them</div>
-              <div v-for="f in whatsWorking.factors" :key="f.factor" class="bar-row">
+              <div
+                v-for="f in whatsWorking.factors"
+                :key="f.factor"
+                class="bar-row bar-row--click"
+                @click="openDrill(`ww:f:${f.key}`, `Won — attracted by ${f.factor}`, { wonOnly: 'true', interestFactor: f.key })"
+              >
                 <div class="bar-label">{{ f.factor }}</div>
                 <div class="bar-track"><div class="bar-fill bar-fill--green" :style="{ width: pct(f.count, whatsWorking.won) + '%' }" /></div>
                 <div class="bar-value">{{ f.count }} <span class="pct-label">{{ pct(f.count, whatsWorking.won) }}%</span></div>
@@ -933,7 +1105,13 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             <div>
               <div class="mini-head">Models that won most</div>
               <div class="hint" v-if="!whatsWorking.top_models.length">No data.</div>
-              <div v-for="m in whatsWorking.top_models" :key="m.model" class="metric-row" style="margin-bottom: 4px">
+              <div
+                v-for="m in whatsWorking.top_models"
+                :key="m.model"
+                class="metric-row metric-row--clickable"
+                style="margin-bottom: 4px"
+                @click="openDrill(`ww:m:${m.model}`, `${m.model} — won (bought client brand)`, { wonOnly: 'true', drillModel: m.model })"
+              >
                 <div class="metric-left" style="flex: 1; font-size: 12px">{{ m.model }}</div>
                 <div class="metric-right"><span class="count-pill">{{ m.count }}</span></div>
               </div>
@@ -942,20 +1120,309 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         </div>
       </div>
 
-      <!-- Drill results (from any competitive panel click) -->
-      <div v-if="drillKey" class="tile" style="margin-top: 14px">
+      <!-- ══════════ Transcript Insights (beyond the survey) ══════════ -->
+      <div v-if="transcriptInsights" class="tile" style="margin-top: 22px; border-top: 3px solid #6366f1">
         <div class="tile-head">
-          <div class="tile-icon">&#128269;</div>
+          <div class="tile-icon">&#127908;</div>
           <div class="tile-text">
-            <div class="tile-title">{{ drillTitle }}</div>
-            <div class="tile-desc">{{ loadingDrill ? 'Loading…' : drillRecords.length + ' record(s) — click a row to open the full detail' }}</div>
+            <div class="tile-title">Transcript Insights &mdash; beyond the survey</div>
+            <div class="tile-desc">
+              Mined from the call transcripts by the LLM ({{ transcriptInsights.total_with_transcript }} calls analysed).
+              Verbatim voice-of-customer, balanced sentiment, competitor make/model and frustrations the tick-box survey can't capture.
+            </div>
           </div>
-          <button class="drill-close" @click="closeDrill">Close</button>
+        </div>
+        <div v-if="!transcriptInsights.total_with_transcript" class="tile-body">
+          <div class="hint">No transcript insights yet — run batch insights on NMGB Survey calls (with a capable model) to populate this.</div>
+        </div>
+      </div>
+
+      <!-- Voice-of-customer sentiment -->
+      <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128172;</div>
+          <div class="tile-text">
+            <div class="tile-title">Voice-of-Customer Sentiment</div>
+            <div class="tile-desc">Positive &amp; negative views on the Nissan brand, the vehicle and the dealer</div>
+          </div>
         </div>
         <div class="tile-body">
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px">
+            <div v-for="topic in [{k:'brand',t:'Brand (Nissan)'},{k:'vehicle',t:'Current vehicle'},{k:'dealer',t:'Dealer'}]" :key="topic.k">
+              <div class="mini-head">{{ topic.t }}</div>
+              <div
+                v-for="r in sentimentRows(topic.k).rows"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`sent:${topic.k}:${r.key}`, `${topic.t} sentiment — ${r.label}`, { sentimentTopic: topic.k, sentimentValue: r.key })"
+              >
+                <div class="bar-label">{{ r.label }}</div>
+                <div class="bar-track"><div class="bar-fill" :class="r.cls" :style="{ width: pct(r.count, sentimentRows(topic.k).total) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }} <span class="pct-label">{{ pct(r.count, sentimentRows(topic.k).total) }}%</span></div>
+              </div>
+              <div v-if="!sentimentRows(topic.k).rows.length" class="hint">No data.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Competitors considered (transcript) -->
+      <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#127950;</div>
+          <div class="tile-text">
+            <div class="tile-title">Competitors Considered (from transcript)</div>
+            <div class="tile-desc">
+              Brands the customer considered, test-drove or bought &mdash; recovered from speech, including those the survey left blank.
+              {{ transcriptInsights.competitors.chinese_share }}% of mentions are Chinese / Chinese-owned OEMs.
+            </div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px">
+            <div class="stat"><div class="stat-label">Brand mentions</div><div class="stat-value">{{ transcriptInsights.competitors.considered_total }}</div></div>
+            <div
+              class="stat stat--click"
+              @click="openTranscriptDrill('ti:cn', 'Considered a Chinese / Chinese-owned OEM', { transcriptChineseOnly: 'true' })"
+            >
+              <div class="stat-label">Chinese-OEM mentions</div><div class="stat-value chip chip--danger">{{ transcriptInsights.competitors.chinese_considered }}</div>
+            </div>
+          </div>
+          <div
+            v-for="b in panelVisible(transcriptInsights.competitors.brands, 'ti-comp')"
+            :key="b.brand"
+            class="bar-row bar-row--click"
+            @click="openTranscriptDrill(`ti:brand:${b.brand}`, `Considered ${b.brand}`, { transcriptBrand: b.brand })"
+          >
+            <div class="bar-label">
+              {{ b.brand }}
+              <span v-if="b.chinese" class="chip chip--danger" style="font-size: 10px; margin-left: 6px">CN</span>
+              <div v-if="b.models.length" class="hint" style="font-size: 11px">{{ b.models.join(', ') }}</div>
+            </div>
+            <div class="bar-track"><div class="bar-fill" :class="b.chinese ? 'bar-fill--amber' : 'bar-fill--grey'" :style="{ width: barPct(b.count, maxCount(transcriptInsights.competitors.brands)) + '%' }" /></div>
+            <div class="bar-value">{{ b.count }}</div>
+          </div>
+          <div v-if="!transcriptInsights.competitors.brands.length" class="hint">No competitors mentioned.</div>
+          <button v-if="transcriptInsights.competitors.brands.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('ti-comp')">
+            {{ expandedPanels['ti-comp'] ? 'Show less' : `Show all ${transcriptInsights.competitors.brands.length}` }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Why competitors win (transcript) -->
+      <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#127942;</div>
+          <div class="tile-text">
+            <div class="tile-title">Why Competitors Win (from transcript)</div>
+            <div class="tile-desc">Reasons the customer preferred a competitor &mdash; aligned to the survey's influence factors</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">All competitors</div>
+              <div
+                v-for="r in transcriptInsights.reasons"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:reason:${r.key}`, `Competitor reason — ${r.label}`, { competitorReason: r.key })"
+              >
+                <div class="bar-label">{{ r.label }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--grey" :style="{ width: barPct(r.count, maxCount(transcriptInsights.reasons)) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }}</div>
+              </div>
+              <div v-if="!transcriptInsights.reasons.length" class="hint">No data.</div>
+            </div>
+            <div>
+              <div class="mini-head">Chinese-OEM specific</div>
+              <div
+                v-for="r in transcriptInsights.chinese_reasons"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:cnreason:${r.key}`, `Chinese-OEM reason — ${r.label}`, { chineseReason: r.key })"
+              >
+                <div class="bar-label">{{ r.label }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--red" :style="{ width: barPct(r.count, maxCount(transcriptInsights.chinese_reasons)) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }}</div>
+              </div>
+              <div v-if="!transcriptInsights.chinese_reasons.length" class="hint">No Chinese-OEM-specific reasons captured.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Frustrations -->
+      <div v-if="transcriptInsights && transcriptInsights.frustrations.total" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#9888;</div>
+          <div class="tile-text">
+            <div class="tile-title">Customer Frustrations &amp; Resolutions</div>
+            <div class="tile-desc">{{ transcriptInsights.frustrations.total }} frustrations across the cohort, with what NMGB could do about them</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px">
+            <div
+              v-for="(count, sev) in transcriptInsights.frustrations.by_severity"
+              :key="'sev'+sev"
+              class="stat stat--click"
+              @click="openTranscriptDrill(`ti:frsev:${sev}`, `Frustrations — ${sev} severity`, { frustrationSeverity: sev })"
+            >
+              <div class="stat-label">{{ sev }} severity</div>
+              <div class="stat-value chip" :class="SEVERITY_CLS[sev] || ''">{{ count }}</div>
+            </div>
+            <div
+              v-for="(count, res) in transcriptInsights.frustrations.by_resolvable"
+              :key="'res'+res"
+              class="stat stat--click"
+              @click="openTranscriptDrill(`ti:frres:${res}`, `Frustrations — resolvable: ${res}`, { frustrationResolvable: res })"
+            >
+              <div class="stat-label">resolvable: {{ res }}</div>
+              <div class="stat-value">{{ count }}</div>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">Top themes</div>
+              <div
+                v-for="t in transcriptInsights.frustrations.top_themes"
+                :key="t.theme"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:frtheme:${t.theme}`, `Frustration — ${t.theme}`, { frustrationTheme: t.theme })"
+              >
+                <div class="bar-label">{{ t.theme }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--red" :style="{ width: barPct(t.count, maxCount(transcriptInsights.frustrations.top_themes)) + '%' }" /></div>
+                <div class="bar-value">{{ t.count }}</div>
+              </div>
+            </div>
+            <div>
+              <div class="mini-head">What we could do (high-severity first)</div>
+              <div
+                v-for="(s, i) in transcriptInsights.frustrations.samples"
+                :key="'fr'+i"
+                class="ti-sample--click"
+                style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border)"
+                @click="openTranscriptDrill(`ti:frsample:${s.theme}`, `Frustration — ${s.theme}`, { frustrationTheme: s.theme })"
+              >
+                <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+                  <span class="chip" :class="SEVERITY_CLS[s.severity] || ''" style="font-size: 10px">{{ s.severity }}</span>
+                  <strong style="font-size: 12px">{{ s.theme }}</strong>
+                  <span class="hint" style="font-size: 11px">&middot; {{ s.owner }} &middot; resolvable: {{ s.resolvable }}</span>
+                </div>
+                <div v-if="s.recommended_action" style="font-size: 12px; margin-top: 3px">&#8594; {{ s.recommended_action }}</div>
+                <div v-if="s.quote" class="hint" style="font-size: 11px; font-style: italic; margin-top: 2px">&ldquo;{{ s.quote }}&rdquo;</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reportable measures -->
+      <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128202;</div>
+          <div class="tile-text">
+            <div class="tile-title">Reportable Measures</div>
+            <div class="tile-desc">Signals the survey doesn't ask about: EV stance, loyalty, price-expectation gaps and dealer follow-up</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px">
+            <div class="stat stat--click" @click="openTranscriptDrill('ti:pricegap', 'Price-expectation gap', { priceGap: 'true' })">
+              <div class="stat-label">Price-expectation gap</div><div class="stat-value chip chip--warning">{{ transcriptInsights.measures.price_expectation_gap_yes }}</div>
+            </div>
+            <div class="stat stat--click" @click="openTranscriptDrill('ti:fu:yes', 'Dealer followed up', { dealerFollowUp: 'yes' })">
+              <div class="stat-label">Dealer followed up</div><div class="stat-value">{{ transcriptInsights.measures.dealer_follow_up_yes }}</div>
+            </div>
+            <div class="stat stat--click" @click="openTranscriptDrill('ti:fu:no', 'Dealer did NOT follow up', { dealerFollowUp: 'no' })">
+              <div class="stat-label">Dealer did NOT follow up</div><div class="stat-value chip chip--danger">{{ transcriptInsights.measures.dealer_follow_up_no }}</div>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">EV / hybrid stance</div>
+              <div
+                v-for="e in sortedCounts(transcriptInsights.measures.ev_sentiment)"
+                :key="e.stance"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:ev:${e.stance}`, `EV / hybrid stance — ${e.stance}`, { evStance: e.stance })"
+              >
+                <div class="bar-label">{{ e.stance }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--blue" :style="{ width: barPct(e.count, maxCount(transcriptInsights.measures.ev_sentiment)) + '%' }" /></div>
+                <div class="bar-value">{{ e.count }}</div>
+              </div>
+            </div>
+            <div>
+              <div class="mini-head">Would consider Nissan again</div>
+              <div
+                v-for="l in sortedCounts(transcriptInsights.measures.loyalty)"
+                :key="l.answer"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:loyalty:${l.answer}`, `Would consider again — ${l.answer}`, { loyaltyAnswer: l.answer })"
+              >
+                <div class="bar-label">{{ l.answer }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--green" :style="{ width: barPct(l.count, maxCount(transcriptInsights.measures.loyalty)) + '%' }" /></div>
+                <div class="bar-value">{{ l.count }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key quotes + survey gaps -->
+      <div v-if="transcriptInsights && (transcriptInsights.quotes.length || transcriptInsights.gaps.length)" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128172;</div>
+          <div class="tile-text">
+            <div class="tile-title">Key Quotes &amp; Survey Gaps Filled</div>
+            <div class="tile-desc">Report-ready verbatims, and what the transcript revealed that the survey missed</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="grid grid-2">
+            <div>
+              <div class="mini-head">Notable quotes</div>
+              <div v-for="(qt, i) in panelVisible(transcriptInsights.quotes, 'ti-quotes')" :key="'q'+i" style="margin-bottom: 8px">
+                <div style="font-size: 12px; font-style: italic">&ldquo;{{ qt.quote }}&rdquo;</div>
+                <div class="hint" style="font-size: 11px">{{ qt.theme }}<span v-if="qt.sentiment"> &middot; {{ qt.sentiment }}</span></div>
+              </div>
+              <div v-if="!transcriptInsights.quotes.length" class="hint">No quotes captured.</div>
+              <button v-if="transcriptInsights.quotes.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('ti-quotes')">
+                {{ expandedPanels['ti-quotes'] ? 'Show less' : `Show all ${transcriptInsights.quotes.length}` }}
+              </button>
+            </div>
+            <div>
+              <div class="mini-head">Survey gaps filled</div>
+              <ul style="margin: 0; padding-left: 18px">
+                <li v-for="(g, i) in panelVisible(transcriptInsights.gaps, 'ti-gaps')" :key="'g'+i" style="font-size: 12px; margin-bottom: 4px">{{ g }}</li>
+              </ul>
+              <div v-if="!transcriptInsights.gaps.length" class="hint">None flagged.</div>
+              <button v-if="transcriptInsights.gaps.length > PANEL_LIMIT" class="panel-toggle" @click="togglePanel('ti-gaps')">
+                {{ expandedPanels['ti-gaps'] ? 'Show less' : `Show all ${transcriptInsights.gaps.length}` }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </template>
+
+    <!-- Drill results modal (from any competitive panel click) -->
+    <Teleport to="body">
+      <div v-if="drillKey" class="drill-modal-backdrop" @click="closeDrill" />
+      <div v-if="drillKey" class="drill-modal">
+        <div class="drill-modal-header">
+          <div>
+            <div class="drill-modal-title">{{ drillTitle }}</div>
+            <div class="drill-modal-sub">{{ loadingDrill ? 'Loading…' : drillRecords.length + ' record(s) — click a row for full detail' }}</div>
+          </div>
+          <button class="drawer-close" @click="closeDrill">&times;</button>
+        </div>
+        <div class="drill-modal-body">
           <div v-if="loadingDrill" class="hint">Loading…</div>
           <div v-else-if="!drillRecords.length" class="hint">No matching records.</div>
-          <div v-else v-for="r in drillRecords" :key="r.interaction_id" class="drill-row" @click="openDetail(r.interaction_id)">
+          <div v-else v-for="r in drillRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
             <div class="drill-row-top">
               <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
               <span v-if="r.dealer" class="chip chip--secondary" style="font-size: 11px">{{ r.dealer }}</span>
@@ -966,7 +1433,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
           </div>
         </div>
       </div>
-    </template>
+    </Teleport>
 
     <!-- Generate Narrative -->
     <div v-if="overview" class="tile" style="margin-top: 14px">
@@ -974,7 +1441,7 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         <div class="tile-icon">&#128221;</div>
         <div class="tile-text">
           <div class="tile-title">Generate Executive Narrative</div>
-          <div class="tile-desc">Director-level briefing: competitive landscape, Chinese-OEM threat &amp; quarterly trend, why customers defect, model risk, emerging themes, what Nissan does well, and recommendations</div>
+          <div class="tile-desc">Director-level briefing built from survey answers <strong>and</strong> transcript insights: competitive landscape, Chinese-OEM threat &amp; quarterly trend, why customers defect, model risk, emerging themes, what Nissan does well, and recommendations</div>
         </div>
       </div>
       <div class="tile-body">
@@ -988,152 +1455,35 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <option value="gemini">Gemini</option>
             </select>
           </div>
+          <div class="filter-group">
+            <label class="label">Model</label>
+            <select v-model="narrativeModel" class="select select--sm">
+              <option v-for="m in narrativeModelOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
+            </select>
+          </div>
           <button class="btn btn--primary" :disabled="loadingNarrative" @click="generateNarrative">
             {{ loadingNarrative ? "Generating..." : "Generate Narrative" }}
           </button>
         </div>
         <div v-if="narrativeError" class="error-tile">{{ narrativeError }}</div>
-        <div v-if="narrativeResult" class="narrative-box"><pre class="narrative-pre">{{ narrativeResult }}</pre></div>
-        <div v-else-if="!loadingNarrative" class="hint">Click Generate to create an AI briefing. Analyses aggregated metrics and free-text comments from agent notes, feedback and improvement suggestions.</div>
+
+        <!-- Loading shimmer -->
+        <div v-if="loadingNarrative" class="nb-loading">
+          <div class="nb-spinner" />
+          <div>Analysing survey answers &amp; call transcripts, drafting the briefing…</div>
+        </div>
+
+        <!-- Rich executive briefing (shared component; also used on the Narratives page) -->
+        <NarrativeBriefing v-else-if="narrative" :narrative="narrative" />
+
+        <!-- Fallback: raw pretty text if the shape wasn't as expected -->
+        <div v-else-if="narrativeResultText" class="narrative-box"><pre class="narrative-pre">{{ narrativeResultText }}</pre></div>
+        <div v-else class="hint">Click Generate to create an AI briefing. Blends aggregated survey metrics, free-text comments and transcript-mined insights.</div>
       </div>
     </div>
 
-    <!-- Detail drawer -->
-    <Teleport to="body">
-      <div v-if="detailId" class="drawer-backdrop" @click="closeDetail" />
-      <Transition name="drawer">
-        <div v-if="detailId" class="drawer">
-          <div class="drawer-header">
-            <div class="drawer-title">Survey Record Detail</div>
-            <button class="drawer-close" @click="closeDetail">&times;</button>
-          </div>
-          <div class="drawer-body">
-            <div v-if="loadingDetail" class="hint" style="padding: 24px">Loading...</div>
-            <div v-else-if="!detailData" class="hint" style="padding: 24px">Could not load record.</div>
-            <template v-else>
-              <div class="drawer-columns">
-                <div class="drawer-col drawer-col--left">
-                  <!-- Context -->
-                  <div class="drawer-section">
-                    <div class="drawer-section-title">Context</div>
-                    <div class="drawer-meta-grid">
-                      <div><span class="drawer-label">ID</span><span>{{ detailData.id_opportunity }}</span></div>
-                      <div><span class="drawer-label">Campaign</span><span>{{ detailData.campaign || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Manufacturer</span><span>{{ detailData.manufacture || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Model</span><span>{{ detailData.model || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Dealer</span><span>{{ detailData.dealer || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Date</span><span>{{ fmtDate(detailData.allocation_date) }}</span></div>
-                      <div><span class="drawer-label">Category</span><span class="chip chip--secondary">{{ detailData.result_code_desc || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Survey Status</span><span class="chip chip--secondary">{{ detailData.survey_flow_status || "n/a" }}</span></div>
-                      <div v-if="detailData.source_type"><span class="drawer-label">Source</span><span>{{ detailData.source_type }}</span></div>
-                    </div>
-                  </div>
-
-                  <!-- Purchase Status -->
-                  <div class="drawer-section">
-                    <div class="drawer-section-title">Purchase Status</div>
-                    <div class="drawer-meta-grid">
-                      <div><span class="drawer-label">Purchased Yet?</span><span>{{ detailData.p2_has_not_purchased_yet || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Still Considering?</span><span>{{ detailData.p2_still_considering || "n/a" }}</span></div>
-                      <div><span class="drawer-label">Follow-up Interest?</span><span>{{ detailData.p3_interest_follow_up || "n/a" }}</span></div>
-                      <div v-if="detailData.fpi_date"><span class="drawer-label">FPI Date</span><span>{{ fmtDate(detailData.fpi_date) }}</span></div>
-                    </div>
-                  </div>
-
-                  <!-- Initial Interest -->
-                  <div v-if="detailData.survey_flow_status === 'Survey Taken'" class="drawer-section">
-                    <div class="drawer-section-title">Initial Interest</div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 6px">
-                      <span v-if="detailData.initial_interest_styling" class="chip chip--info" style="font-size: 11px">Styling</span>
-                      <span v-if="detailData.initial_interest_brand" class="chip chip--info" style="font-size: 11px">Brand</span>
-                      <span v-if="detailData.initial_interest_features" class="chip chip--info" style="font-size: 11px">Features</span>
-                      <span v-if="detailData.initial_interest_size" class="chip chip--info" style="font-size: 11px">Size</span>
-                      <span v-if="detailData.initial_interest_performance" class="chip chip--info" style="font-size: 11px">Performance</span>
-                      <span v-if="detailData.initial_interest_price" class="chip chip--info" style="font-size: 11px">Price</span>
-                      <span v-if="detailData.initial_interest_other" class="chip chip--secondary" style="font-size: 11px">{{ detailData.initial_interest_other }}</span>
-                    </div>
-                  </div>
-
-                  <!-- Dealership Experience -->
-                  <div v-if="detailData.dealer_visit || detailData.dealership_rating" class="drawer-section">
-                    <div class="drawer-section-title">Dealership Experience</div>
-                    <div class="drawer-meta-grid">
-                      <div v-if="detailData.dealer_visit"><span class="drawer-label">Visit</span><span>{{ detailData.dealer_visit }}</span></div>
-                      <div v-if="detailData.dealership_rating"><span class="drawer-label">Rating</span><span :style="{ color: ratingColor(detailData.dealership_rating), fontWeight: 700 }">{{ detailData.dealership_rating }}&#9733;</span></div>
-                    </div>
-                    <p v-if="detailData.vehicle_impression" style="margin: 8px 0 0; font-size: 13px; color: var(--ink)"><strong>Vehicle impression:</strong> {{ detailData.vehicle_impression }}</p>
-                    <p v-if="detailData.why_no_test_drive" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>No test drive:</strong> {{ detailData.why_no_test_drive }}</p>
-                    <p v-if="detailData.dealership_rating_feedback" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>Feedback:</strong> {{ detailData.dealership_rating_feedback }}</p>
-                  </div>
-                </div>
-
-                <div class="drawer-col drawer-col--right">
-                  <!-- All survey answers (complete, from campaign_answers_json) -->
-                  <div v-if="answerGroups.length" class="drawer-section">
-                    <div class="drawer-section-title">All Survey Answers</div>
-                    <div v-for="(g, gi) in answerGroups" :key="gi" class="answer-group">
-                      <div v-if="g.title" class="answer-group-title">{{ g.title }}</div>
-                      <div class="answer-row" v-for="(f, fi) in g.fields" :key="fi">
-                        <span class="answer-label">{{ f.label }}</span>
-                        <span class="answer-value">{{ f.value }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Not Purchase Reasons -->
-                  <div v-if="detailData.survey_flow_status === 'Survey Taken'" class="drawer-section">
-                    <div class="drawer-section-title">Not-Purchase Reasons</div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px">
-                      <span v-if="detailData.not_purchased_price" class="chip chip--danger" style="font-size: 11px">Price</span>
-                      <span v-if="detailData.not_purchased_expectations" class="chip chip--danger" style="font-size: 11px">Expectations</span>
-                      <span v-if="detailData.not_purchased_different_brand" class="chip chip--danger" style="font-size: 11px">Different Brand</span>
-                      <span v-if="detailData.not_purchased_different_model" class="chip chip--danger" style="font-size: 11px">Different Model</span>
-                      <span v-if="detailData.not_purchased_financing" class="chip chip--danger" style="font-size: 11px">Financing</span>
-                      <span v-if="detailData.not_purchased_dealership" class="chip chip--danger" style="font-size: 11px">Dealership</span>
-                      <span v-if="detailData.not_purchased_other" class="chip chip--secondary" style="font-size: 11px">{{ detailData.not_purchased_other }}</span>
-                    </div>
-                    <p v-if="detailData.not_purchased_price_feedback" style="margin: 0; font-size: 13px; color: var(--ink)"><strong>Price feedback:</strong> {{ detailData.not_purchased_price_feedback }}</p>
-                  </div>
-
-                  <!-- Competitor Purchase -->
-                  <div v-if="detailData.purchased_make" class="drawer-section">
-                    <div class="drawer-section-title">Purchased Instead</div>
-                    <div class="drawer-meta-grid">
-                      <div><span class="drawer-label">Make</span><span class="chip chip--warning" style="font-size: 12px">{{ detailData.purchased_make }}</span></div>
-                      <div><span class="drawer-label">Model</span><span>{{ detailData.purchased_model || detailData.purchased_other_model || "n/a" }}</span></div>
-                      <div><span class="drawer-label">New/Used</span><span>{{ detailData.purchased_new_used || "n/a" }}</span></div>
-                    </div>
-                    <p v-if="detailData.purchase_influence" style="margin: 8px 0 0; font-size: 13px; color: var(--ink)"><strong>Influence:</strong> {{ detailData.purchase_influence }}</p>
-                    <p v-if="detailData.purchase_reason" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>Reason:</strong> {{ detailData.purchase_reason }}</p>
-                  </div>
-
-                  <!-- Improvement -->
-                  <div v-if="detailData.improve_anything || detailData.improve_follow_up" class="drawer-section">
-                    <div class="drawer-section-title">What Could Be Improved</div>
-                    <p v-if="detailData.improve_anything" style="margin: 0 0 4px; font-size: 13px; color: var(--ink)">{{ detailData.improve_anything }}</p>
-                    <p v-if="detailData.improve_follow_up" style="margin: 0; font-size: 13px; color: var(--muted)"><strong>Follow-up:</strong> {{ detailData.improve_follow_up }}</p>
-                  </div>
-
-                  <!-- Agent Notes -->
-                  <div v-if="detailData.agent_notes" class="drawer-section">
-                    <div class="drawer-section-title">Agent Notes</div>
-                    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap">{{ detailData.agent_notes }}</p>
-                  </div>
-
-                  <!-- Audio -->
-                  <div v-if="detailData.call_recording_url" class="drawer-section">
-                    <div class="drawer-section-title">Recording</div>
-                    <audio controls preload="none" :src="detailData.call_recording_url" style="width: 100%; height: 36px; border-radius: 6px">
-                      Your browser does not support audio playback.
-                    </audio>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <!-- Detail drawer — shared component (same drawer as Operations / Client Services) -->
+    <InteractionDetailDrawer :recording-id="detailId" @close="closeDetail" />
   </div>
 </template>
 
@@ -1207,6 +1557,33 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
 .drawer-title { font-size: 16px; font-weight: 800; color: var(--ink); }
 .drawer-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--muted); padding: 0 4px; line-height: 1; }
 .drawer-close:hover { color: var(--ink); }
+
+/* ── Ask AI ──────────────────────────────────────────────────────────────── */
+.ask-ai-btn {
+  border: 1px solid var(--brand, #6366f1); background: var(--brand, #6366f1); color: #fff;
+  font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+}
+.ask-ai-btn:hover { filter: brightness(1.08); }
+.ask-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 1200; }
+.ask-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(620px, 94vw); max-height: 84vh; z-index: 1201;
+  background: var(--surface, #fff); border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 10px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  display: flex; flex-direction: column;
+}
+.ask-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.ask-title { font-size: 15px; font-weight: 800; color: var(--ink); }
+.ask-body { padding: 14px 18px; overflow-y: auto; flex: 1; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-chip { border: 1px solid var(--border); background: var(--surface); color: var(--ink); font-size: 12px; padding: 5px 10px; border-radius: 14px; cursor: pointer; }
+.ask-chip:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+.ask-turn { margin-bottom: 14px; }
+.ask-q { font-weight: 700; color: var(--ink); font-size: 13px; margin-bottom: 6px; }
+.ask-q::before { content: "Q: "; color: var(--brand, #6366f1); }
+.ask-a { font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; background: var(--surface-soft, #f8f8f8); border-radius: 8px; padding: 10px 12px; }
+.ask-input { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.ask-textarea { flex: 1; resize: vertical; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: var(--surface); color: var(--ink); }
 .drawer-body { flex: 1; overflow-y: auto; padding: 0; }
 .drawer-columns { display: grid; grid-template-columns: 1fr 1fr; height: 100%; }
 .drawer-col { overflow-y: auto; min-height: 0; }
@@ -1285,6 +1662,20 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
 .bar-row--click { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: 0 -4px 8px; transition: background 0.15s; }
 .bar-row--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
 
+/* ── Other clickable stat surfaces (every tile drills into its records) ──── */
+.stat--click, .rating-block--click, .visit-chip--click,
+.chinese-headline--click, .model-row--click, .trend-row--click,
+.risk-row--click, .ti-sample--click { cursor: pointer; transition: background 0.15s, box-shadow 0.15s, transform 0.1s; }
+.stat--click { border-radius: var(--radius-md, 6px); padding: 4px 8px; margin: -4px -8px; }
+.stat--click:hover, .rating-block--click:hover, .visit-chip--click:hover,
+.model-row--click:hover, .trend-row--click:hover, .ti-sample--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+.rating-block--click:hover, .visit-chip--click:hover { box-shadow: 0 2px 8px -3px rgba(0, 0, 0, 0.25); transform: translateY(-1px); }
+.chinese-headline--click { border-radius: var(--radius-md, 6px); padding: 4px 8px; margin: -4px -8px 4px; }
+.chinese-headline--click:hover { background: rgba(220, 38, 38, 0.06); }
+.chip--click { cursor: pointer; }
+.chip--click:hover { filter: brightness(1.08); }
+.trend-row--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.05)); }
+
 /* ── All survey answers (drawer) ─────────────────────────────────────────── */
 .answer-group { margin-bottom: 12px; }
 .answer-group-title {
@@ -1297,12 +1688,18 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
 }
 .answer-label { color: var(--muted); flex-shrink: 0; }
 .answer-value { color: var(--ink); font-weight: 600; text-align: right; word-break: break-word; }
+.answer-yn { font-size: 10px; font-weight: 800; padding: 0 8px; }
+.answer-n { color: var(--muted); font-weight: 700; }
 
 /* ── Line charts ─────────────────────────────────────────────────────────── */
 .chart-scroll { width: 100%; overflow-x: auto; }
 .linechart { width: 100%; min-width: 520px; height: auto; display: block; }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
 .chart-axis { fill: var(--muted); font-size: 10px; }
+.chart-point { font-size: 10px; font-weight: 700; paint-order: stroke; stroke: var(--surface, #fff); stroke-width: 3px; }
+.chart-toggle { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.chart-toggle button { border: none; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; padding: 4px 12px; cursor: pointer; }
+.chart-toggle button.chart-toggle-on { background: var(--brand, #6366f1); color: #fff; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -1322,14 +1719,31 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
   background: #dc2626; color: #fff; vertical-align: middle; white-space: nowrap;
 }
 
-/* ── Drill close button ──────────────────────────────────────────────────── */
-.drill-close {
-  margin-left: auto; border: 1px solid var(--border); background: var(--surface);
-  color: var(--ink); font-size: 12px; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+/* ── Drill results modal ─────────────────────────────────────────────────── */
+.drill-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 900; }
+.drill-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(760px, 94vw); max-height: 82vh; z-index: 901;
+  background: var(--surface, #fff); border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 10px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  display: flex; flex-direction: column;
 }
-.drill-close:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+.drill-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.drill-modal-title { font-size: 15px; font-weight: 800; color: var(--ink); }
+.drill-modal-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.drill-modal-body { padding: 8px 12px; overflow-y: auto; }
 
 /* ── Drawer transition ───────────────────────────────────────────────────── */
 .drawer-enter-active, .drawer-leave-active { transition: transform 0.25s ease; }
 .drawer-enter-from, .drawer-leave-to { transform: translateX(100%); }
+
+/* ══════════ Executive narrative — loading state ══════════ */
+/* The rich briefing render + its styles live in the shared NarrativeBriefing.vue. */
+.nb-loading { display: flex; align-items: center; gap: 14px; padding: 32px; color: var(--muted); font-size: 14px; }
+.nb-spinner { width: 26px; height: 26px; border: 3px solid rgba(99,102,241,0.25); border-top-color: #6366f1; border-radius: 50%; animation: nb-spin 0.8s linear infinite; }
+@keyframes nb-spin { to { transform: rotate(360deg); } }
+
 </style>

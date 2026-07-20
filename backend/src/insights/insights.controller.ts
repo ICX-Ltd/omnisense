@@ -365,6 +365,14 @@ export class InsightsController {
     return detail;
   }
 
+  @Post('ask')
+  async ask(@Body() body: { id?: string; question?: string; provider?: string }) {
+    if (!body?.id || !body?.question?.trim()) {
+      throw new BadRequestException('id and question are required');
+    }
+    return this.svcSummary.askInteraction(String(body.id), body.question, body.provider);
+  }
+
   @Get('parity/campaign-analysis')
   async parityCampaignAnalysis(
     @Query('from') from?: string,
@@ -592,13 +600,18 @@ export class InsightsController {
     @Query('campaign') campaign?: string,
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('model') model?: string,
   ) {
     const { fromDate, toDate } = parseDateRange(from, to);
     const provider = normalizeProvider(providerRaw);
     const filter = normalizeInteractionFilter(filterKey);
     const narrativeType = normalizeNarrativeType(narrativeTypeRaw);
 
-    return this.svcSummary.getNarrativeSummary(fromDate, toDate, filter, provider, narrativeType, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
+    return this.svcSummary.getNarrativeSummary(
+      fromDate, toDate, filter, provider, narrativeType, campaign, agent,
+      parseExcludeOutcomes(excludeOutcomesRaw), undefined, undefined,
+      model?.trim() || undefined,
+    );
   }
 
   @Get('summary/narratives')

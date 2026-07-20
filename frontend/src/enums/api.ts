@@ -13,6 +13,7 @@ export const ApiPath = {
   InsightsSummaryNarratives: "/uiapi/insights/summary/narratives",
   InsightsSummaryFilters: "/uiapi/insights/summary/filters",
   InsightsUsage: "/uiapi/insights/usage",
+  InsightsAsk: "/uiapi/insights/ask",
 
   OpsDimensions: "/uiapi/insights/ops/dimensions",
   OpsInteractionsByBucket: "/uiapi/insights/ops/interactions-by-bucket",
@@ -48,7 +49,9 @@ export const ApiPath = {
   SurveyModelRisk: "/uiapi/survey/model-risk",
   SurveyWhyWeLose: "/uiapi/survey/why-we-lose",
   SurveyWhatsWorking: "/uiapi/survey/whats-working",
+  SurveyTranscriptInsights: "/uiapi/survey/transcript-insights",
   SurveyDrillRecords: "/uiapi/survey/drill-records",
+  SurveyTranscriptDrillRecords: "/uiapi/survey/transcript-drill-records",
   SurveyRecordsByCategory: "/uiapi/survey/records-by-category",
   SurveyRecordsByCompetitor: "/uiapi/survey/records-by-competitor",
   SurveyRecordDetail: "/uiapi/survey/record",

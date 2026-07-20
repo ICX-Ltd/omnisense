@@ -30,6 +30,7 @@ import {
   computeChatResponseMetricsFromTranscript,
 } from '../insights/chat-response-time';
 import { InsightsProviderName } from '../insights/types/insights-provider.type';
+import { describeError } from '../utils/describe-error.util';
 
 // Bounded string columns on InteractionInsight — declared length in characters.
 // Used by the upsert diagnostic logger so we can spot length / encoding issues
@@ -223,7 +224,18 @@ export class RecordingsService {
       );
     }
 
-    const res = await fetch(url, { redirect: 'follow' });
+    let res: Response;
+    try {
+      res = await fetch(url, { redirect: 'follow' });
+    } catch (e) {
+      // Network-level failure reaching the recording host (DNS/TCP/TLS/timeout).
+      // fetch throws a bare "fetch failed"; surface the host + underlying cause
+      // so ops can tell a firewall/NAT-hairpin issue from a bad URL at a glance.
+      const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+      throw new BadRequestException(
+        `Audio download failed (network) from ${host}: ${describeError(e)}`,
+      );
+    }
 
     const contentType = res.headers.get('content-type') ?? 'unknown';
     const contentLength = res.headers.get('content-length') ?? 'unknown';
@@ -293,7 +305,12 @@ export class RecordingsService {
       let text = '';
 
       if (provider === 'deepgram') {
-        const dg = await this.deepgram.transcribeUrl(rec.recordingUrl || '');
+        // Download server-side and send bytes rather than handing Deepgram the
+        // URL. The MaxContact ASP.NET download endpoint 405s on HEAD and ignores
+        // Range, so Deepgram's remote fetcher fails with REMOTE_CONTENT_ERROR
+        // even though a plain server-side GET returns valid audio.
+        const audio = await this.downloadAudio(rec.recordingUrl || '');
+        const dg = await this.deepgram.transcribeBuffer(audio.buffer);
 
         if (Array.isArray(dg.turns) && dg.turns.length) {
           text = this.formatDeepgramTurns(dg.turns);
@@ -339,7 +356,9 @@ export class RecordingsService {
     } catch (e: any) {
       await this.recordingsRepo.update(rec.id, {
         status: 'error',
-        lastError: e?.message ?? String(e),
+        // describeError walks error.cause so a network "fetch failed" is stored
+        // with its real reason (e.g. "connect ETIMEDOUT maxcall...:443").
+        lastError: describeError(e),
       });
       throw e;
     } finally {
@@ -370,6 +389,7 @@ export class RecordingsService {
     recordingId: string,
     provider?: InsightsProviderName,
     budget?: ExtractBudget,
+    modelOverride?: string,
   ) {
     const rec = await this.recordingsRepo.findOne({
       where: { id: recordingId },
@@ -394,6 +414,7 @@ export class RecordingsService {
         provider,
         budget,
         (a) => attemptLogs.push(a),
+        modelOverride,
       );
 
       const { rawJsonText, parsed, providerUsed, model, usage } = result;
@@ -491,6 +512,14 @@ export class RecordingsService {
         // Campaign-specific Q&A blob (e.g. Parity campaign_answers)
         campaign_answers_json: parsed.campaign_answers
           ? JSON.stringify(parsed.campaign_answers)
+          : null,
+
+        // Campaign-specific transcript insight blob (e.g. NMGB Survey). Stored
+        // separately from campaign_answers_json — for NMGB Survey that column is
+        // owned/restored by sql/nmgb_survey_backfill.sql, which leaves this one
+        // untouched.
+        campaign_transcript_json: parsed.campaign_transcript
+          ? JSON.stringify(parsed.campaign_transcript)
           : null,
 
         // Chat agent response-time metrics (chats only; null for calls)
@@ -838,7 +867,11 @@ export class RecordingsService {
     return { jobId: job.id, type: 'transcribe', total: items.length };
   }
 
-  async startBatchInsights(limit: number, provider?: InsightsProviderName) {
+  async startBatchInsights(
+    limit: number,
+    provider?: InsightsProviderName,
+    model?: string,
+  ) {
     const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
     const selectedProvider =
@@ -872,7 +905,7 @@ export class RecordingsService {
       this.runBatchBackground(
         job.id,
         items.map((r) => r.id),
-        (id) => this.generateInsights(id, selectedProvider, budget),
+        (id) => this.generateInsights(id, selectedProvider, budget, model),
       ).catch((err) => {
         console.error('[BatchJob] insights background error:', err);
         this.batchJobRepo
@@ -881,10 +914,14 @@ export class RecordingsService {
       });
     });
 
-    return { jobId: job.id, type: 'insights_calls', total: items.length, provider: selectedProvider };
+    return { jobId: job.id, type: 'insights_calls', total: items.length, provider: selectedProvider, model: model ?? null };
   }
 
-  async startBatchInsightsChats(limit: number, provider?: InsightsProviderName) {
+  async startBatchInsightsChats(
+    limit: number,
+    provider?: InsightsProviderName,
+    model?: string,
+  ) {
     const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
     const selectedProvider =
@@ -918,7 +955,7 @@ export class RecordingsService {
       this.runBatchBackground(
         job.id,
         items.map((r) => r.id),
-        (id) => this.generateInsights(id, selectedProvider, budget),
+        (id) => this.generateInsights(id, selectedProvider, budget, model),
       ).catch((err) => {
         console.error('[BatchJob] insights-chats background error:', err);
         this.batchJobRepo
@@ -927,7 +964,7 @@ export class RecordingsService {
       });
     });
 
-    return { jobId: job.id, type: 'insights_chats', total: items.length, provider: selectedProvider };
+    return { jobId: job.id, type: 'insights_chats', total: items.length, provider: selectedProvider, model: model ?? null };
   }
 
   private async runBatchBackground(

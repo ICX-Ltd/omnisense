@@ -238,6 +238,17 @@ export class PromptsService implements OnModuleInit {
     return this.repo.findOne({ where: { key, isActive: true } });
   }
 
+  /**
+   * Public lookup for the active body of a single fragment by key. Returns null
+   * if no active row exists. Used by standalone prompts (e.g. the narrative
+   * builders) that load an editable template and fall back to a hardcoded
+   * default when the fragment is missing.
+   */
+  async getActiveFragmentBody(key: string): Promise<string | null> {
+    const row = await this.getActiveByKey(key);
+    return row?.body ?? null;
+  }
+
   async composeCallPrompt(transcript: string, campaign?: string | null) {
     const base = await this.getActiveByKey('call.base');
     if (!base) {
@@ -252,6 +263,11 @@ export class PromptsService implements OnModuleInit {
     // to inject; one without the other would produce invalid output.
     let campaignQaSection = '';
     let campaignQaSchema = '';
+    // Optional campaign-specific TRANSCRIPT insight pair (e.g. NMGB Survey).
+    // Independent of the Q&A pair — a campaign may ship either, both, or neither.
+    // Persisted to campaign_transcript_json (separate from campaign_answers_json).
+    let campaignTranscriptSection = '';
+    let campaignTranscriptSchema = '';
     if (campaign && campaign !== 'unknown') {
       const qa = await this.getActiveByKey(`call.campaign.${campaign}.qa`);
       const qaSchema = await this.getActiveByKey(
@@ -261,12 +277,25 @@ export class PromptsService implements OnModuleInit {
         campaignQaSection = substitute(qa.body, { campaign });
         campaignQaSchema = `,\n\n  ${substitute(qaSchema.body, { campaign })}`;
       }
+
+      const transcript = await this.getActiveByKey(
+        `call.campaign.${campaign}.transcript`,
+      );
+      const transcriptSchema = await this.getActiveByKey(
+        `call.campaign.${campaign}.transcript_schema`,
+      );
+      if (transcript && transcriptSchema) {
+        campaignTranscriptSection = substitute(transcript.body, { campaign });
+        campaignTranscriptSchema = `,\n\n  ${substitute(transcriptSchema.body, { campaign })}`;
+      }
     }
 
     const withSections = substitute(base.body, {
       campaign_section: campaignSection,
       campaign_qa_section: campaignQaSection,
       campaign_qa_schema: campaignQaSchema,
+      campaign_transcript_section: campaignTranscriptSection,
+      campaign_transcript_schema: campaignTranscriptSchema,
     });
 
     return substitute(withSections, {

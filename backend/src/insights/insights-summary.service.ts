@@ -9,9 +9,12 @@ import { InsightSummary } from '../db/entities/insight-summary.entity';
 import { SurveyResponse } from '../db/entities/survey-response.entity';
 
 import { createProvider } from './providers/provider.factory';
+import { SurveyAnalyticsService, buildSurveyDetail } from './survey-analytics.service';
+import { PromptsService } from '../modules/prompts/prompts.service';
 import { InsightsProviderName } from './types/insights-provider.type';
 import { verifyCampaignQuotes } from './quote-grounding';
 import { isChineseOem } from './nmgb-competitors';
+import { buildInteractionQaPrompt } from './prompt/build-interaction-qa-prompt';
 import {
   buildNarrativeSummaryPrompt,
   buildCallsOperationsNarrativePrompt,
@@ -167,6 +170,12 @@ export class InsightsSummaryService {
     private summariesRepo: Repository<InsightSummary>,
     @InjectRepository(SurveyResponse)
     private surveyRepo: Repository<SurveyResponse>,
+    // Reused for its transcript-insight aggregation (campaign_transcript_json)
+    // so the survey narrative can blend transcript signal with survey answers.
+    private surveyAnalytics: SurveyAnalyticsService,
+    // Supplies editable narrative-prompt fragments (keys narrative.<type>) so the
+    // "Generate Narrative" flow can use prompts edited on the Prompts page.
+    private prompts: PromptsService,
   ) {}
 
   async getFilterOptions(filterKey?: InteractionFilter): Promise<FilterOptions> {
@@ -1487,13 +1496,14 @@ export class InsightsSummaryService {
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    model?: string,
   ) {
     const selectedProvider =
       provider ??
       (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
       'openai';
 
-    const storedKey = [filterKey, selectedProvider, campaign ?? 'all', agent ?? 'all'].join('__');
+    const storedKey = [filterKey, selectedProvider, model ?? 'default', campaign ?? 'all', agent ?? 'all'].join('__');
 
     const cached = await this.summariesRepo.findOne({
       where: { fromUtc: from, toUtc: to, filterKey: storedKey, narrativeType },
@@ -1517,32 +1527,38 @@ export class InsightsSummaryService {
       };
     }
 
-    // Fetch the appropriate metrics and build the right prompt
+    // Fetch the appropriate metrics and build the right prompt. The prompt
+    // template is loaded from the editable `narrative.<type>` fragment (Prompts
+    // page); when absent the build function falls back to its hardcoded default.
     let metrics: unknown;
     let prompt: string;
 
+    const promptTemplate =
+      (await this.prompts.getActiveFragmentBody(`narrative.${narrativeType}`)) ??
+      undefined;
+
     if (narrativeType === 'calls_operations') {
       metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
-      prompt = buildCallsOperationsNarrativePrompt(metrics);
+      prompt = buildCallsOperationsNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'calls_client_services') {
       metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
-      prompt = buildCallsClientServicesNarrativePrompt(metrics);
+      prompt = buildCallsClientServicesNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'chats_operations') {
       metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
-      prompt = buildChatsOperationsNarrativePrompt(metrics);
+      prompt = buildChatsOperationsNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'chats_client_services') {
       metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
-      prompt = buildChatsClientServicesNarrativePrompt(metrics);
+      prompt = buildChatsClientServicesNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'survey_analytics') {
       const surveyMetrics = await this.gatherSurveyMetricsForNarrative(from, to, campaign);
       metrics = surveyMetrics.aggregated;
-      prompt = buildSurveyAnalyticsNarrativePrompt(surveyMetrics.aggregated, surveyMetrics.freeText);
+      prompt = buildSurveyAnalyticsNarrativePrompt(surveyMetrics.aggregated, surveyMetrics.freeText, promptTemplate);
     } else {
       metrics = await this.getMetricsSummary(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
-      prompt = buildNarrativeSummaryPrompt(metrics);
+      prompt = buildNarrativeSummaryPrompt(metrics, promptTemplate);
     }
 
-    const llmProvider = createProvider(selectedProvider);
+    const llmProvider = createProvider(selectedProvider, model);
 
     let firstPass = await llmProvider.extract(prompt);
     let jsonText = firstPass.text;
@@ -1601,6 +1617,66 @@ ${prompt}
 
   // ─────────────────────────────────────────────────────────────────────────────
   // SURVEY: GATHER METRICS + FREE-TEXT FOR NARRATIVE
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── Per-interaction "Ask AI" ───────────────────────────────────────────────
+  // Answers a free-text question about ONE interaction (any type), grounded in
+  // its metadata, insight / survey answers and transcript (when present).
+  async askInteraction(id: string, question: string, provider?: string) {
+    const q = (question ?? '').trim().slice(0, 1000);
+    if (!q) return { answer: 'Please enter a question.', model: null, provider: null };
+
+    const rows = await this.insightsRepo.manager.query<Array<{
+      campaign: string | null; vehicleMake: string | null; vehicleModel: string | null;
+      dealer: string | null; agent: string | null; outcome: string | null;
+      interactionDateTime: Date | null; interactionType: string | null;
+      summary_short: string | null; summary_detailed: string | null;
+      campaign_answers_json: string | null; insight_json: string | null; transcript: string | null;
+    }>>(
+      `SELECT TOP 1
+        ia.campaign, ia.vehicleMake, ia.vehicleModel, ia.dealer, ia.agent, ia.outcome,
+        ia.interactionDateTime, ia.interactionType,
+        ii.summary_short, ii.summary_detailed,
+        ii.campaign_answers_json, ii.json AS insight_json,
+        t.text AS transcript
+      FROM app.interaction_insights ii
+      INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+      LEFT JOIN app.interaction_transcripts t ON t.recordingId = ia.id
+      WHERE CAST(ia.id AS VARCHAR(36)) = @0
+         OR CAST(TRY_CAST(JSON_VALUE(ii.campaign_answers_json, '$.meta.id_opportunity') AS INT) AS VARCHAR(20)) = @0`,
+      [String(id)],
+    );
+    const row = rows[0];
+    if (!row) return { answer: 'Could not find that interaction.', model: null, provider: null };
+
+    const parse = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
+    const context = {
+      campaign: row.campaign,
+      vehicle: { make: row.vehicleMake, model: row.vehicleModel },
+      dealer: row.dealer,
+      agent: row.agent,
+      outcome: row.outcome,
+      interactionDateTime: row.interactionDateTime,
+      interactionType: row.interactionType,
+      summary_short: row.summary_short,
+      summary_detailed: row.summary_detailed,
+      survey_answers: parse(row.campaign_answers_json),
+      insight: parse(row.insight_json),
+    };
+    const transcript = (row.transcript ?? '').slice(0, 12000);
+
+    const prompt = buildInteractionQaPrompt(context, transcript, q);
+    const llm = createProvider(provider as InsightsProviderName | undefined);
+    const res = await llm.extract(prompt);
+    let answer = '';
+    try { answer = parse(res.text)?.answer ?? ''; } catch { answer = ''; }
+    if (!answer) answer = res.text?.trim() || 'No answer was produced.';
+
+    return { answer, model: res.model, provider: res.provider };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SURVEY: GATHER METRICS + FREE-TEXT FOR NARRATIVE (campaign_answers_json)
   // ─────────────────────────────────────────────────────────────────────────────
 
   // Sourced from interaction_insights.campaign_answers_json (survey answers are
@@ -1777,6 +1853,18 @@ ${prompt}
       ORDER BY ${effDate} DESC`, params,
     );
 
+    // Transcript-mined insights (campaign_transcript_json) — the qualitative
+    // layer the survey feed lacks: consideration (not just completed purchases),
+    // balanced sentiment, transcript-derived competitor reasons, frustrations
+    // with recommended actions, and verbatim quotes. Fail-soft: if the column /
+    // data isn't present yet, the narrative still runs on survey data alone.
+    let transcript: any = null;
+    try {
+      transcript = await this.surveyAnalytics.getTranscriptInsights({ from, to, campaign });
+    } catch {
+      transcript = null;
+    }
+
     return {
       aggregated: {
         totals: totals[0] ?? {},
@@ -1794,6 +1882,8 @@ ${prompt}
         quarterly_trend: quarterlyTrend,
         dealer_ratings: dealerRatings.slice(0, 15),
         model_performance: modelPerformance.slice(0, 15),
+        // Transcript layer (may be null if not yet processed).
+        transcript,
       },
       freeText,
     };
@@ -3075,7 +3165,37 @@ ${prompt}
 
     const transcript = await this.transcriptsRepo.findOne({ where: { recordingId } });
 
+    // Survey records get an extra projected block so the shared drawer can render
+    // the full survey answer set + mined transcript insights (same shape as the
+    // survey dashboard's own detail endpoint). Null for non-survey interactions.
+    const survey =
+      insight?.conversation_type === 'survey'
+        ? buildSurveyDetail(
+            insight.campaign_answers_json
+              ? safeParseJson(insight.campaign_answers_json)
+              : {},
+            insight.campaign_transcript_json
+              ? safeParseJson(insight.campaign_transcript_json)
+              : null,
+            {
+              id: interaction.id,
+              interaction_id: interaction.id,
+              interaction_tps_id: interaction.interactionTpsId,
+              campaign: interaction.campaign,
+              manufacture: interaction.vehicleMake,
+              model: interaction.vehicleModel,
+              dealer: interaction.dealer,
+              allocation_date: interaction.interactionDateTime,
+              outcome: interaction.outcome,
+              recordingUrl: interaction.recordingUrl,
+              transcript_text: transcript?.text ?? null,
+              transcript_model: transcript?.model ?? null,
+            },
+          )
+        : null;
+
     return {
+      survey,
       interaction: {
         id: interaction.id,
         agent: interaction.agent,

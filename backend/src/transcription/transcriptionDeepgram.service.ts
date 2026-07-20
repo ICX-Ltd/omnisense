@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { VEHICLE_KEYTERMS, VEHICLE_REPLACEMENTS } from './vehicle-vocab';
+import { describeError } from '../utils/describe-error.util';
 
 type DiarizedTurn = {
   speaker: number;
@@ -43,9 +44,8 @@ function smoothTurns(turns: DiarizedTurn[]) {
 export class TranscriptionDeepgramService {
   private readonly apiKey = process.env.DEEPGRAM_API_KEY;
 
-  async transcribeUrl(url: string) {
-    if (!this.apiKey) throw new Error('Missing DEEPGRAM_API_KEY');
-
+  // Builds the model + query string shared by both the URL and buffer paths.
+  private buildEndpoint() {
     // Model is env-tunable so we can A/B nova-3 (keyterm prompting) against the
     // phone-tuned nova-2-phonecall on real calls without redeploying.
     const model = process.env.DEEPGRAM_MODEL || 'nova-2-phonecall';
@@ -77,16 +77,50 @@ export class TranscriptionDeepgramService {
     }
 
     //const endpoint = `https://api.deepgram.com/v1/listen?${params.toString()}`;
-    const endpoint = `https://api.eu.deepgram.com/v1/listen?${params.toString()}`;
+    return `https://api.eu.deepgram.com/v1/listen?${params.toString()}`;
+  }
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ url }),
-    });
+  /**
+   * Transcribe pre-downloaded audio bytes. Preferred over transcribeUrl for
+   * media hosted on servers Deepgram's fetcher can't consume — e.g. the
+   * MaxContact ASP.NET `downLoad` endpoint, which 405s on HEAD and ignores
+   * Range, triggering Deepgram REMOTE_CONTENT_ERROR. We fetch server-side
+   * (a plain GET works there) and post the raw buffer instead.
+   */
+  async transcribeBuffer(buffer: Buffer, contentType = 'audio/wav') {
+    if (!this.apiKey) throw new Error('Missing DEEPGRAM_API_KEY');
+    return this.postToDeepgram(buffer, contentType);
+  }
+
+  async transcribeUrl(url: string) {
+    if (!this.apiKey) throw new Error('Missing DEEPGRAM_API_KEY');
+    return this.postToDeepgram(JSON.stringify({ url }), 'application/json');
+  }
+
+  private async postToDeepgram(
+    body: Buffer | string,
+    contentType: string,
+  ) {
+    const endpoint = this.buildEndpoint();
+    const host = new URL(endpoint).host;
+
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${this.apiKey}`,
+          'Content-Type': contentType,
+        },
+        body: body as any,
+      });
+    } catch (e) {
+      // Network-level failure (DNS/TCP/TLS/timeout) before any HTTP response —
+      // fetch throws a bare "fetch failed"; surface the underlying cause.
+      throw new Error(
+        `Deepgram request failed (network) to ${host}: ${describeError(e)}`,
+      );
+    }
 
     const textOrJson = await res.text();
     if (!res.ok) {

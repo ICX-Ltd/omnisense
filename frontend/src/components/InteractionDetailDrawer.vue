@@ -43,6 +43,7 @@
               class="drawer-header-score"
               :style="{ background: scoreColorSolid(detailData.insight.overall_score) }"
             >{{ fmtScore(detailData.insight.overall_score) }}</span>
+            <button v-if="detailData" class="ask-ai-btn" @click="openAsk">&#10024; Ask AI</button>
             <button class="drawer-close" @click="onClose">&times;</button>
           </div>
         </div>
@@ -74,6 +75,53 @@
                       Your browser does not support audio playback.
                     </audio>
                   </div>
+                </div>
+
+                <!-- Survey — Vehicle & Status -->
+                <div v-if="isSurvey" class="drawer-section">
+                  <div class="drawer-section-title">Survey — Vehicle &amp; Status</div>
+                  <div class="drawer-meta-grid">
+                    <div><span class="drawer-label">Manufacturer</span><span class="drawer-value">{{ survey.manufacture || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Model</span><span class="drawer-value">{{ survey.model || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Survey Status</span><span class="chip chip--secondary">{{ survey.survey_flow_status || "n/a" }}</span></div>
+                    <div v-if="survey.result_code_desc"><span class="drawer-label">Category</span><span class="chip chip--secondary">{{ survey.result_code_desc }}</span></div>
+                  </div>
+                </div>
+
+                <!-- Survey — Purchase Status -->
+                <div v-if="isSurvey" class="drawer-section">
+                  <div class="drawer-section-title">Purchase Status</div>
+                  <div class="drawer-meta-grid">
+                    <div><span class="drawer-label">Purchased Yet?</span><span class="drawer-value">{{ survey.p2_has_not_purchased_yet || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Still Considering?</span><span class="drawer-value">{{ survey.p2_still_considering || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Follow-up Interest?</span><span class="drawer-value">{{ survey.p3_interest_follow_up || "n/a" }}</span></div>
+                  </div>
+                </div>
+
+                <!-- Survey — Initial Interest -->
+                <div v-if="isSurvey && survey.survey_flow_status === 'Survey Taken'" class="drawer-section">
+                  <div class="drawer-section-title">Initial Interest</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px">
+                    <span v-if="survey.initial_interest_styling" class="chip chip--info" style="font-size: 11px">Styling</span>
+                    <span v-if="survey.initial_interest_brand" class="chip chip--info" style="font-size: 11px">Brand</span>
+                    <span v-if="survey.initial_interest_features" class="chip chip--info" style="font-size: 11px">Features</span>
+                    <span v-if="survey.initial_interest_size" class="chip chip--info" style="font-size: 11px">Size</span>
+                    <span v-if="survey.initial_interest_performance" class="chip chip--info" style="font-size: 11px">Performance</span>
+                    <span v-if="survey.initial_interest_price" class="chip chip--info" style="font-size: 11px">Price</span>
+                    <span v-if="survey.initial_interest_other" class="chip chip--secondary" style="font-size: 11px">{{ survey.initial_interest_other }}</span>
+                  </div>
+                </div>
+
+                <!-- Survey — Dealership Experience -->
+                <div v-if="isSurvey && (survey.dealer_visit || survey.dealership_rating)" class="drawer-section">
+                  <div class="drawer-section-title">Dealership Experience</div>
+                  <div class="drawer-meta-grid">
+                    <div v-if="survey.dealer_visit"><span class="drawer-label">Visit</span><span class="drawer-value">{{ survey.dealer_visit }}</span></div>
+                    <div v-if="survey.dealership_rating"><span class="drawer-label">Rating</span><span :style="{ color: ratingColor(survey.dealership_rating), fontWeight: 700 }">{{ survey.dealership_rating }}&#9733;</span></div>
+                  </div>
+                  <p v-if="survey.vehicle_impression" style="margin: 8px 0 0; font-size: 13px; color: var(--ink)"><strong>Vehicle impression:</strong> {{ survey.vehicle_impression }}</p>
+                  <p v-if="survey.why_no_test_drive" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>No test drive:</strong> {{ survey.why_no_test_drive }}</p>
+                  <p v-if="survey.dealership_rating_feedback" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>Feedback:</strong> {{ survey.dealership_rating_feedback }}</p>
                 </div>
 
                 <!-- Scores -->
@@ -155,6 +203,20 @@
                   <div class="drawer-section-title">Summary</div>
                   <p style="margin: 0 0 8px; font-weight: 600">{{ detailData.insight.summary_short }}</p>
                   <p v-if="detailData.insight.summary_detailed" style="margin: 0; line-height: 1.6; color: var(--ink)">{{ detailData.insight.summary_detailed }}</p>
+                </div>
+
+                <!-- Survey — All Survey Answers (complete, from campaign_answers_json) -->
+                <div v-if="isSurvey && answerGroups.length" class="drawer-section">
+                  <div class="drawer-section-title">All Survey Answers</div>
+                  <div v-for="(g, gi) in answerGroups" :key="gi" class="answer-group">
+                    <div v-if="g.title" class="answer-group-title">{{ g.title }}</div>
+                    <div class="answer-row" v-for="(f, fi) in g.fields" :key="fi">
+                      <span class="answer-label">{{ f.label }}</span>
+                      <span v-if="f.kind === 'yes'" class="chip chip--success answer-yn">Y</span>
+                      <span v-else-if="f.kind === 'no'" class="answer-n">N</span>
+                      <span v-else class="answer-value">{{ f.value }}</span>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Chat Response Time -->
@@ -310,6 +372,80 @@
 
               <!-- RIGHT COLUMN -->
               <div class="drawer-col">
+                <!-- Survey — Not-Purchase Reasons -->
+                <div v-if="isSurvey && survey.survey_flow_status === 'Survey Taken'" class="drawer-section">
+                  <div class="drawer-section-title">Not-Purchase Reasons</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px">
+                    <span v-if="survey.not_purchased_price" class="chip chip--danger" style="font-size: 11px">Price</span>
+                    <span v-if="survey.not_purchased_expectations" class="chip chip--danger" style="font-size: 11px">Expectations</span>
+                    <span v-if="survey.not_purchased_different_brand" class="chip chip--danger" style="font-size: 11px">Different Brand</span>
+                    <span v-if="survey.not_purchased_different_model" class="chip chip--danger" style="font-size: 11px">Different Model</span>
+                    <span v-if="survey.not_purchased_financing" class="chip chip--danger" style="font-size: 11px">Financing</span>
+                    <span v-if="survey.not_purchased_dealership" class="chip chip--danger" style="font-size: 11px">Dealership</span>
+                    <span v-if="survey.not_purchased_other" class="chip chip--secondary" style="font-size: 11px">{{ survey.not_purchased_other }}</span>
+                  </div>
+                  <p v-if="survey.not_purchased_price_feedback" style="margin: 0; font-size: 13px; color: var(--ink)"><strong>Price feedback:</strong> {{ survey.not_purchased_price_feedback }}</p>
+                </div>
+
+                <!-- Survey — Purchased Instead -->
+                <div v-if="isSurvey && survey.purchased_make" class="drawer-section">
+                  <div class="drawer-section-title">Purchased Instead</div>
+                  <div class="drawer-meta-grid">
+                    <div><span class="drawer-label">Make</span><span class="chip chip--warning" style="font-size: 12px">{{ survey.purchased_make }}</span></div>
+                    <div><span class="drawer-label">Model</span><span class="drawer-value">{{ survey.purchased_model || survey.purchased_other_model || "n/a" }}</span></div>
+                    <div><span class="drawer-label">New/Used</span><span class="drawer-value">{{ survey.purchased_new_used || "n/a" }}</span></div>
+                  </div>
+                  <p v-if="survey.purchase_influence" style="margin: 8px 0 0; font-size: 13px; color: var(--ink)"><strong>Influence:</strong> {{ survey.purchase_influence }}</p>
+                  <p v-if="survey.purchase_reason" style="margin: 4px 0 0; font-size: 13px; color: var(--ink)"><strong>Reason:</strong> {{ survey.purchase_reason }}</p>
+                </div>
+
+                <!-- Survey — What Could Be Improved -->
+                <div v-if="isSurvey && (survey.improve_anything || survey.improve_follow_up)" class="drawer-section">
+                  <div class="drawer-section-title">What Could Be Improved</div>
+                  <p v-if="survey.improve_anything" style="margin: 0 0 4px; font-size: 13px; color: var(--ink)">{{ survey.improve_anything }}</p>
+                  <p v-if="survey.improve_follow_up" style="margin: 0; font-size: 13px; color: var(--muted)"><strong>Follow-up:</strong> {{ survey.improve_follow_up }}</p>
+                </div>
+
+                <!-- Survey — Agent Notes -->
+                <div v-if="isSurvey && survey.agent_notes" class="drawer-section">
+                  <div class="drawer-section-title">Agent Notes</div>
+                  <p style="margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap">{{ survey.agent_notes }}</p>
+                </div>
+
+                <!-- Survey — Transcript Insights (mined, from campaign_transcript_json) -->
+                <div v-if="isSurvey && survey.transcript" class="drawer-section">
+                  <div class="drawer-section-title">Transcript Insights</div>
+                  <div class="drawer-meta-grid" style="margin-bottom: 10px">
+                    <div><span class="drawer-label">Brand sentiment</span><span class="drawer-value">{{ survey.transcript.current_brand_sentiment?.sentiment || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Vehicle sentiment</span><span class="drawer-value">{{ survey.transcript.current_vehicle_sentiment?.sentiment || "n/a" }}</span></div>
+                    <div><span class="drawer-label">Dealer sentiment</span><span class="drawer-value">{{ survey.transcript.dealer_sentiment?.sentiment || "n/a" }}</span></div>
+                    <div v-if="survey.transcript.loyalty_signal?.answer"><span class="drawer-label">Consider again</span><span class="drawer-value">{{ survey.transcript.loyalty_signal.answer }}</span></div>
+                    <div v-if="survey.transcript.ev_sentiment?.stance"><span class="drawer-label">EV stance</span><span class="drawer-value">{{ survey.transcript.ev_sentiment.stance }}</span></div>
+                    <div v-if="survey.transcript.dealer_follow_up?.answer"><span class="drawer-label">Dealer followed up</span><span class="drawer-value">{{ survey.transcript.dealer_follow_up.answer }}</span></div>
+                  </div>
+                  <div v-if="survey.transcript.competitor_considered?.brands?.length" style="margin-bottom: 10px">
+                    <span class="drawer-label">Competitors considered</span>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px">
+                      <span v-for="(b, i) in survey.transcript.competitor_considered.brands" :key="i" class="chip chip--warning" style="font-size: 11px">{{ b.brand }}<template v-if="b.model"> {{ b.model }}</template></span>
+                    </div>
+                  </div>
+                  <div v-if="survey.transcript.frustrations?.length" style="margin-bottom: 10px">
+                    <span class="drawer-label">Frustrations</span>
+                    <div v-for="(fr, i) in survey.transcript.frustrations" :key="i" style="margin-top: 6px; padding-bottom: 6px; border-bottom: 1px dotted var(--border)">
+                      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+                        <span class="chip" :class="SEVERITY_CLS[fr.severity] || ''" style="font-size: 10px">{{ fr.severity }}</span>
+                        <strong style="font-size: 12px">{{ fr.theme }}</strong>
+                      </div>
+                      <div v-if="fr.recommended_action" style="font-size: 12px; margin-top: 3px">&#8594; {{ fr.recommended_action }}</div>
+                      <div v-if="fr.quote" class="hint" style="font-size: 11px; font-style: italic; margin-top: 2px">&ldquo;{{ fr.quote }}&rdquo;</div>
+                    </div>
+                  </div>
+                  <div v-if="survey.transcript.key_quotes?.length">
+                    <span class="drawer-label">Key quotes</span>
+                    <div v-for="(q, i) in survey.transcript.key_quotes" :key="i" style="font-size: 12px; font-style: italic; margin-top: 4px">&ldquo;{{ q.quote }}&rdquo;<span class="hint" style="font-style: normal"> &mdash; {{ q.theme }}</span></div>
+                  </div>
+                </div>
+
                 <!-- Opportunity Classification -->
                 <div v-if="detailData.insight?.opportunity?.is_opportunity !== null && detailData.insight?.opportunity?.is_opportunity !== undefined" class="drawer-section">
                   <div class="drawer-section-title">Opportunity Classification</div>
@@ -332,7 +468,7 @@
                 </div>
 
                 <!-- Campaign Q&A — Customer Position -->
-                <div v-if="campaignAnswers" class="drawer-section">
+                <div v-if="campaignAnswers && !isSurvey" class="drawer-section">
                   <div class="drawer-section-title">Campaign Q&A — Customer Position</div>
 
                   <!-- Headline answers: consent + decision -->
@@ -387,7 +523,7 @@
                 </div>
 
                 <!-- Campaign Q&A — Competitor & Dealer Activity -->
-                <div v-if="campaignAnswers" class="drawer-section">
+                <div v-if="campaignAnswers && !isSurvey" class="drawer-section">
                   <div class="drawer-section-title">Campaign Q&A — Competitor &amp; Dealer Activity</div>
 
                   <div class="parity-row">
@@ -483,13 +619,14 @@
                 <div v-if="detailData.transcript" class="drawer-section">
                   <div class="drawer-section-title">
                     {{ isChat ? 'Chat Conversation' : 'Transcript' }}
-                    <div v-if="isChat && chatMessages.length" class="chat-view-toggle">
+                    <span v-if="!isChat && detailData.transcript.model" class="hint" style="font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px">{{ detailData.transcript.model }}</span>
+                    <div v-if="(isChat && chatMessages.length) || (!isChat && callTurns.length)" class="chat-view-toggle">
                       <button
                         type="button"
                         class="chat-view-btn"
                         :class="{ 'chat-view-btn--active': chatView === 'bubbles' }"
                         @click="chatView = 'bubbles'"
-                      >Chat</button>
+                      >{{ isChat ? 'Chat' : 'Conversation' }}</button>
                       <button
                         type="button"
                         class="chat-view-btn"
@@ -514,6 +651,20 @@
                     </div>
                   </div>
 
+                  <div v-else-if="!isChat && callTurns.length && chatView === 'bubbles'" class="chat-thread">
+                    <div
+                      v-for="(t, i) in callTurns"
+                      :key="i"
+                      class="chat-msg"
+                      :class="t.speaker % 2 === 0 ? 'chat-msg--agent' : 'chat-msg--customer'"
+                    >
+                      <div class="chat-bubble" :class="t.speaker % 2 === 0 ? 'chat-bubble--agent' : 'chat-bubble--customer'">
+                        <div class="chat-sender">{{ t.label }}</div>
+                        <div class="chat-content">{{ t.text }}</div>
+                      </div>
+                    </div>
+                  </div>
+
                   <pre v-else class="drawer-transcript">{{ detailData.transcript.text }}</pre>
                 </div>
               </div>
@@ -522,15 +673,81 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Ask AI assistant modal (over the drawer) -->
+    <div v-if="askOpen && recordingId" class="ask-backdrop" @click="closeAsk" />
+    <div v-if="askOpen && recordingId" class="ask-modal">
+      <div class="ask-header">
+        <div class="ask-title">&#10024; Ask about this interaction</div>
+        <button class="drawer-close" @click="closeAsk">&times;</button>
+      </div>
+      <div class="ask-body">
+        <div v-if="!askThread.length && !askLoading" class="ask-empty">
+          <div class="hint" style="margin-bottom: 10px">Ask anything about this interaction — its metadata, insight and transcript are given to the assistant.</div>
+          <div class="ask-suggestions">
+            <button v-for="s in askSuggestions" :key="s" class="ask-chip" @click="submitAsk(s)">{{ s }}</button>
+          </div>
+        </div>
+        <div v-for="(t, i) in askThread" :key="i" class="ask-turn">
+          <div class="ask-q">{{ t.q }}</div>
+          <div class="ask-a">{{ t.a }}</div>
+        </div>
+        <div v-if="askLoading" class="hint">Thinking…</div>
+        <div v-if="askError" class="ask-error">{{ askError }}</div>
+      </div>
+      <div class="ask-input">
+        <textarea
+          v-model="askQuestion"
+          class="ask-textarea"
+          rows="2"
+          placeholder="Type a question and press Enter…"
+          @keydown.enter.exact.prevent="submitAsk()"
+        />
+        <button class="ask-send" :disabled="askLoading || !askQuestion.trim()" @click="submitAsk()">
+          {{ askLoading ? "…" : "Ask" }}
+        </button>
+      </div>
+    </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import axios from "axios";
 import { getInteractionDetail } from "@/services/interaction-search.service";
+import { ApiPath } from "@/enums/api";
 
 const props = defineProps<{ recordingId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
+
+// ── Ask AI assistant ──────────────────────────────────────────────────────────
+const askOpen = ref(false);
+const askQuestion = ref("");
+const askLoading = ref(false);
+const askError = ref("");
+const askThread = ref<Array<{ q: string; a: string }>>([]);
+const askSuggestions = [
+  "Summarise this interaction in two sentences.",
+  "What was the customer's main concern?",
+  "What should the agent have done differently?",
+];
+function openAsk() { askOpen.value = true; askError.value = ""; }
+function closeAsk() { askOpen.value = false; askQuestion.value = ""; askError.value = ""; askThread.value = []; }
+async function submitAsk(q?: string) {
+  const question = (q ?? askQuestion.value).trim();
+  if (!question || askLoading.value || !props.recordingId) return;
+  askLoading.value = true;
+  askError.value = "";
+  try {
+    const res = await axios.post(ApiPath.InsightsAsk, { id: props.recordingId, question });
+    askThread.value.push({ q: question, a: res.data?.answer ?? "(no answer)" });
+    askQuestion.value = "";
+  } catch (e: any) {
+    askError.value = e?.response?.data?.message || e?.message || "Failed to get an answer";
+  } finally {
+    askLoading.value = false;
+  }
+}
 
 const detailData = ref<any>(null);
 const loadingDetail = ref(false);
@@ -541,6 +758,7 @@ watch(
   () => props.recordingId,
   async (id) => {
     chatView.value = "bubbles";
+    closeAsk();
     if (!id) {
       detailData.value = null;
       return;
@@ -844,9 +1062,123 @@ const chatMessages = computed<ChatMessage[]>(() => {
   if (lineParsed.length) return lineParsed;
   return [];
 });
+
+// ─── call transcript (diarized "Speaker N:" → conversation turns) ────────────
+// Deepgram call transcripts are stored one turn per line as "Speaker N: text".
+// Parse them into turns so calls render as a conversation, like chats. When no
+// speaker labels are present (e.g. OpenAI prose transcripts) we return [] and
+// the raw text is shown instead.
+interface CallTurn { speaker: number; label: string; text: string }
+const callTurns = computed<CallTurn[]>(() => {
+  if (isChat.value) return [];
+  const raw: string = detailData.value?.transcript?.text ?? "";
+  if (!raw.trim()) return [];
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const re = /^Speaker\s+(\d+)\s*:\s*(.*)$/i;
+  const turns: CallTurn[] = [];
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (m) {
+      const speaker = Number(m[1]);
+      turns.push({ speaker, label: `Speaker ${speaker + 1}`, text: m[2] ?? "" });
+    } else if (turns.length) {
+      turns[turns.length - 1]!.text += " " + line;
+    } else {
+      return [];
+    }
+  }
+  return turns;
+});
+
+// ─── survey record (NMGB Survey etc.) ────────────────────────────────────────
+// Present only for conversation_type='survey' interactions; carries the full
+// projected survey answer set + mined transcript insights. Gates the survey
+// sections and turns OFF the Parity-style campaign Q&A panels.
+const survey = computed<any>(() => detailData.value?.survey ?? null);
+const isSurvey = computed<boolean>(() => Boolean(survey.value));
+
+function ratingColor(v: number) {
+  if (v >= 4) return "#059669";
+  if (v >= 3) return "#d97706";
+  return "#dc2626";
+}
+
+const SEVERITY_CLS: Record<string, string> = { high: "chip--danger", medium: "chip--warning", low: "" };
+
+// Flatten the full survey answers blob into readable groups, so every stored
+// answer is visible (skipping empty / null). Mirrors the survey dashboard.
+function prettifyKey(k: string) {
+  return k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function fmtAnswerVal(v: any): string {
+  if (v === true) return "Y";
+  if (v === false) return "N";
+  if (Array.isArray(v)) return v.map((x) => fmtAnswerVal(x)).join(", ");
+  return String(v);
+}
+function classifyAnswer(key: string, v: any): { kind: "yes" | "no" | "text"; value: string } {
+  const s = String(v).trim().toLowerCase();
+  if (v === true || s === "true" || s === "yes" || s === "y") return { kind: "yes", value: "Y" };
+  if (v === false || s === "false" || s === "no" || s === "n") return { kind: "no", value: "N" };
+  const numericKey = /score|rating|opportunity|(^|_)id(_|$)/i.test(key);
+  if (!numericKey && s === "1") return { kind: "yes", value: "Y" };
+  if (!numericKey && s === "0") return { kind: "no", value: "N" };
+  return { kind: "text", value: fmtAnswerVal(v) };
+}
+const answerGroups = computed(() => {
+  const a = survey.value?.answers;
+  if (!a || typeof a !== "object") return [];
+  type Field = { label: string; kind: "yes" | "no" | "text"; value: string };
+  const groups: Array<{ title: string | null; fields: Field[] }> = [];
+  const scalars: Field[] = [];
+  const keep = (v: any) => v !== null && v !== undefined && v !== "";
+  const mkField = (kk: string, vv: any): Field => ({ label: prettifyKey(kk), ...classifyAnswer(kk, vv) });
+  for (const [k, v] of Object.entries(a)) {
+    if (!keep(v)) continue;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      const fields = Object.entries(v as Record<string, any>).filter(([, vv]) => keep(vv)).map(([kk, vv]) => mkField(kk, vv));
+      if (fields.length) groups.push({ title: prettifyKey(k), fields });
+    } else {
+      scalars.push(mkField(k, v));
+    }
+  }
+  if (scalars.length) groups.unshift({ title: null, fields: scalars });
+  return groups;
+});
 </script>
 
 <style scoped>
+/* ── Ask AI ──────────────────────────────────────────────────────────────── */
+.ask-ai-btn {
+  border: 1px solid rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.15); color: #fff;
+  font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.ask-ai-btn:hover { background: rgba(255, 255, 255, 0.28); }
+.ask-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 1200; }
+.ask-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(620px, 94vw); max-height: 84vh; z-index: 1201;
+  background: var(--surface, #fff); border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  display: flex; flex-direction: column;
+}
+.ask-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); flex-shrink: 0; }
+.ask-header .drawer-close { background: var(--surface-soft, rgba(0,0,0,0.06)); color: var(--ink, #1e293b); }
+.ask-title { font-size: 15px; font-weight: 800; color: var(--ink, #1e293b); }
+.ask-body { padding: 14px 18px; overflow-y: auto; flex: 1; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-chip { border: 1px solid var(--border, #e2e8f0); background: var(--surface, #fff); color: var(--ink, #1e293b); font-size: 12px; padding: 5px 10px; border-radius: 14px; cursor: pointer; }
+.ask-chip:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
+.ask-turn { margin-bottom: 14px; }
+.ask-q { font-weight: 700; color: var(--ink, #1e293b); font-size: 13px; margin-bottom: 6px; }
+.ask-q::before { content: "Q: "; color: var(--brand, #6366f1); }
+.ask-a { font-size: 13px; line-height: 1.6; color: var(--ink, #1e293b); white-space: pre-wrap; background: var(--surface-soft, #f8fafc); border-radius: 8px; padding: 10px 12px; }
+.ask-error { margin-top: 8px; color: #dc2626; font-size: 13px; }
+.ask-input { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border, #e2e8f0); flex-shrink: 0; }
+.ask-textarea { flex: 1; resize: vertical; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: var(--surface, #fff); color: var(--ink, #1e293b); }
+.ask-send { border: none; background: var(--brand, #6366f1); color: #fff; font-weight: 700; font-size: 13px; padding: 0 18px; border-radius: 8px; cursor: pointer; }
+.ask-send:disabled { opacity: 0.5; cursor: default; }
+
 .drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -1528,4 +1860,19 @@ const chatMessages = computed<ChatMessage[]>(() => {
 .mono {
   font-family: ui-monospace, "Courier New", monospace;
 }
+
+/* Survey — all answers list */
+.answer-group { margin-bottom: 12px; }
+.answer-group-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); margin: 6px 0 4px;
+}
+.answer-row {
+  display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+  font-size: 12px; border-bottom: 1px dotted var(--border);
+}
+.answer-label { color: var(--muted); flex-shrink: 0; }
+.answer-value { color: var(--ink); font-weight: 600; text-align: right; word-break: break-word; }
+.answer-yn { font-size: 10px; font-weight: 800; padding: 0 8px; }
+.answer-n { color: var(--muted); font-weight: 700; }
 </style>

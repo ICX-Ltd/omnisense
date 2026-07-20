@@ -42,6 +42,10 @@ export interface InteractionDetail {
     // owned by the matching call.campaign.<NAME>.qa_schema prompt fragment.
     campaign_answers?: Record<string, any> | null;
   } | null;
+  // Present only for survey interactions (conversation_type='survey'): the full
+  // projected survey answer set + mined transcript insights. Drives the survey
+  // sections in the shared drawer. Null/absent for non-survey interactions.
+  survey?: Record<string, any> | null;
 }
 
 export async function searchInteractions(q: string) {

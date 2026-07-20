@@ -22,6 +22,12 @@ class BatchInsightsDto {
   @IsOptional()
   @IsString()
   provider?: string;
+
+  // Optional per-run model override (e.g. "gpt-4o", "claude-sonnet-5"). Empty →
+  // the provider's env/default model.
+  @IsOptional()
+  @IsString()
+  model?: string;
 }
 
 @Controller('uiapi/recordings')
@@ -109,7 +115,7 @@ export class RecordingsController {
 
     const provider = normalizeProvider(body?.provider);
 
-    return this.svc.startBatchInsights(Math.min(parsedLimit, 1000), provider);
+    return this.svc.startBatchInsights(Math.min(parsedLimit, 1000), provider, body?.model?.trim() || undefined);
   }
 
   @Post('batch/insights/chats')
@@ -125,7 +131,7 @@ export class RecordingsController {
 
     const provider = normalizeProvider(body?.provider);
 
-    return this.svc.startBatchInsightsChats(Math.min(parsedLimit, 1000), provider);
+    return this.svc.startBatchInsightsChats(Math.min(parsedLimit, 1000), provider, body?.model?.trim() || undefined);
   }
 
   @Post(':id/transcribe')

@@ -17,6 +17,8 @@ export type PromptKind =
   | 'operations_schema'
   | 'qa_section'
   | 'qa_schema'
+  | 'transcript_section'
+  | 'transcript_schema'
   | 'objection_section'
   | 'objection_schema'
   | 'other';

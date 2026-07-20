@@ -277,3 +277,19 @@ Updates
 - Renamed nav tabs + page headers: "Operations" → "Operations (QC)", "Client Services" →
   "Campaign Insights" (App.vue + the two dashboard hero titles). Frontend-only. APP_VERSION → 1.19.1.
 
+
+2026-07-20
+- LLM providers (OpenAI/Anthropic/Grok) now set maxRetries (env OPENAI/ANTHROPIC/XAI_MAX_RETRIES,
+  default 6) so batch insights ride out 429 rate-limit (TPM) windows instead of failing the record.
+  For low-TPM gpt-4o runs also lower INSIGHTS_BATCH_CONCURRENCY (e.g. 2). Gemini SDK has no equivalent knob.
+- Survey Analytics: every stat tile is now drillable to its records - overview strip, model performance,
+  dealership ratings, dealer visits, Chinese-OEM threat, quarterly trend, and all transcript-insight
+  tiles - each drill row opening the detail drawer. New criteria on drill-records + a new
+  transcript-drill-records endpoint over campaign_transcript_json; getRecordDetail relaxed to open
+  transcript-only records; drawer gained a Transcript Insights section. (Reminder: backfilled survey
+  rows must have conversation_type='survey' or nothing renders.)
+- Narratives page now renders saved survey briefings with full rich formatting via a new shared
+  NarrativeBriefing.vue (SurveyDashboard.vue refactored to import it, removing the duplicated markup/styles).
+  Narrative-generation prompts are now editable on the Prompts page as narrative.* fragments (restart
+  backend to seed the new rows); keep the {{metrics}} / {{free_text_samples}} placeholders when editing.
+  Added a text filter box to the Prompts list. APP_VERSION -> 1.32.0.

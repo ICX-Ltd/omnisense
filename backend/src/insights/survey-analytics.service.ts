@@ -63,6 +63,107 @@ const INFLUENCE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+// Meta the survey projection needs beyond the parsed answers/transcript blobs.
+export interface SurveyDetailMeta {
+  id: string | number;
+  interaction_id: string;
+  interaction_tps_id: string | null;
+  campaign: string | null;
+  manufacture: string | null;
+  model: string | null;
+  dealer: string | null;
+  allocation_date: Date | null;
+  outcome: string | null;
+  recordingUrl: string | null;
+  transcript_text: string | null;
+  transcript_model: string | null;
+}
+
+/**
+ * Project the raw campaign_answers_json (`a`) + mined campaign_transcript_json
+ * (`transcript`) into the flat, drawer-friendly survey record shape. Shared by
+ * SurveyAnalyticsService.getRecordDetail AND InsightsSummaryService
+ * .getInteractionDetail so both drawers render survey records identically.
+ */
+export function buildSurveyDetail(
+  a: any,
+  transcript: any,
+  meta: SurveyDetailMeta,
+) {
+  a = a && typeof a === 'object' ? a : {};
+  const ii = a.initial_interest ?? {};
+  const npr = a.not_purchased_reasons ?? {};
+  const cp = a.competitor_purchase ?? {};
+  const dv = a.dealer_visit ?? {};
+  const dr = a.dealership_rating ?? {};
+  const ps = a.purchase_status ?? {};
+  const inf = a.influenced_by ?? {};
+
+  const influenceText = Object.entries(INFLUENCE_LABELS)
+    .filter(([k]) => truthy(inf[k]))
+    .map(([, label]) => label)
+    .join(', ') || null;
+
+  const ratingNum = dr.score != null && dr.score !== '' ? Number(dr.score) : null;
+
+  return {
+    id_opportunity: a.meta?.id_opportunity ?? meta.id,
+    interaction_id: meta.interaction_id,
+    interaction_tps_id: meta.interaction_tps_id,
+    campaign: meta.campaign,
+    manufacture: meta.manufacture,
+    model: meta.model,
+    dealer: meta.dealer,
+    allocation_date: meta.allocation_date,
+    result_code_desc: meta.outcome,
+    survey_flow_status: a.meta?.flow_status ?? null,
+    source_type: null,
+    fpi_date: null,
+    p2_has_not_purchased_yet: ps.has_not_purchased_yet ?? null,
+    p2_still_considering: ps.still_considering ?? null,
+    p3_interest_follow_up: a.follow_up_interest ?? null,
+    initial_interest_styling: truthy(ii.styling_design),
+    initial_interest_brand: truthy(ii.brand_reputation),
+    initial_interest_features: truthy(ii.features),
+    initial_interest_size: truthy(ii.size_practicality),
+    initial_interest_performance: truthy(ii.performance),
+    initial_interest_price: truthy(ii.price_value),
+    initial_interest_other: ii.other_feedback ?? null,
+    dealer_visit: dv.visited ?? null,
+    dealership_rating: Number.isFinite(ratingNum as number) ? ratingNum : null,
+    vehicle_impression: dv.vehicle_impression ?? null,
+    why_no_test_drive: dv.why_no_test_drive ?? null,
+    dealership_rating_feedback: dr.feedback ?? null,
+    not_purchased_price: truthy(npr.price),
+    not_purchased_expectations: truthy(npr.expectations),
+    not_purchased_different_brand: truthy(npr.different_brand),
+    not_purchased_different_model: truthy(npr.different_client_model),
+    not_purchased_financing: truthy(npr.financing),
+    not_purchased_dealership: truthy(npr.dealership_experience),
+    not_purchased_other: npr.other_feedback ?? null,
+    not_purchased_price_feedback: npr.price_sub_reason ?? null,
+    purchased_make: cp.make ?? null,
+    purchased_model: cp.model ?? null,
+    purchased_other_model: cp.other_model_not_listed ?? null,
+    purchased_new_used: cp.new_used ?? null,
+    purchase_influence: influenceText,
+    purchase_reason: a.purchase_reason ?? null,
+    improve_anything: a.improvements?.anything_different ?? null,
+    improve_follow_up: a.improvements?.follow_up ?? null,
+    agent_notes: a.agent_notes ?? null,
+    call_recording_url: meta.recordingUrl,
+    // Full parsed survey answers, so the drawer can render every stored field
+    // regardless of the projected shape above.
+    answers: a,
+    // Transcript-mined insights (campaign_transcript_json), null when none.
+    transcript,
+    // Raw verbatim transcript text (app.interaction_transcripts). Deepgram
+    // calls store it diarized as "Speaker N: ..." lines; OpenAI stores prose.
+    transcript_text: meta.transcript_text,
+    transcript_model: meta.transcript_model,
+  };
+}
+
 @Injectable()
 export class SurveyAnalyticsService {
   constructor(
@@ -177,12 +278,12 @@ export class SurveyAnalyticsService {
     return {
       surveyed: parseInt(r.surveyed ?? '0', 10),
       factors: [
-        { factor: 'Styling / Design', count: parseInt(r.styling ?? '0', 10) },
-        { factor: 'Brand Reputation', count: parseInt(r.brand_reputation ?? '0', 10) },
-        { factor: 'Features', count: parseInt(r.features ?? '0', 10) },
-        { factor: 'Size / Practicality', count: parseInt(r.size_practicality ?? '0', 10) },
-        { factor: 'Performance', count: parseInt(r.performance ?? '0', 10) },
-        { factor: 'Price / Value', count: parseInt(r.price_value ?? '0', 10) },
+        { factor: 'Styling / Design', key: 'styling', count: parseInt(r.styling ?? '0', 10) },
+        { factor: 'Brand Reputation', key: 'brand_reputation', count: parseInt(r.brand_reputation ?? '0', 10) },
+        { factor: 'Features', key: 'features', count: parseInt(r.features ?? '0', 10) },
+        { factor: 'Size / Practicality', key: 'size_practicality', count: parseInt(r.size_practicality ?? '0', 10) },
+        { factor: 'Performance', key: 'performance', count: parseInt(r.performance ?? '0', 10) },
+        { factor: 'Price / Value', key: 'price_value', count: parseInt(r.price_value ?? '0', 10) },
       ].sort((a, b) => b.count - a.count),
     };
   }
@@ -210,12 +311,12 @@ export class SurveyAnalyticsService {
     return {
       surveyed: parseInt(r.surveyed ?? '0', 10),
       reasons: [
-        { reason: 'Price', count: parseInt(r.price ?? '0', 10) },
-        { reason: 'Expectations Not Met', count: parseInt(r.expectations ?? '0', 10) },
-        { reason: 'Purchased Different Brand', count: parseInt(r.different_brand ?? '0', 10) },
-        { reason: 'Purchased Different Model', count: parseInt(r.different_model ?? '0', 10) },
-        { reason: 'Financing', count: parseInt(r.financing ?? '0', 10) },
-        { reason: 'Dealership Experience', count: parseInt(r.dealership_experience ?? '0', 10) },
+        { reason: 'Price', key: 'price', count: parseInt(r.price ?? '0', 10) },
+        { reason: 'Expectations Not Met', key: 'expectations', count: parseInt(r.expectations ?? '0', 10) },
+        { reason: 'Purchased Different Brand', key: 'different_brand', count: parseInt(r.different_brand ?? '0', 10) },
+        { reason: 'Purchased Different Model', key: 'different_model', count: parseInt(r.different_model ?? '0', 10) },
+        { reason: 'Financing', key: 'financing', count: parseInt(r.financing ?? '0', 10) },
+        { reason: 'Dealership Experience', key: 'dealership_experience', count: parseInt(r.dealership_experience ?? '0', 10) },
       ].sort((a, b) => b.count - a.count),
     };
   }
@@ -399,12 +500,22 @@ export class SurveyAnalyticsService {
     financing: '$.not_purchased_reasons.financing',
     dealership_experience: '$.not_purchased_reasons.dealership_experience',
   };
+  private static readonly INTEREST_PATHS: Record<string, string> = {
+    styling: '$.initial_interest.styling_design',
+    brand_reputation: '$.initial_interest.brand_reputation',
+    features: '$.initial_interest.features',
+    size_practicality: '$.initial_interest.size_practicality',
+    performance: '$.initial_interest.performance',
+    price_value: '$.initial_interest.price_value',
+  };
 
   async getDrillRecords(
     f: SurveyFilter,
     criteria: {
       competitorMake?: string; chineseOnly?: boolean; excludeChinese?: boolean;
-      notPurchaseReason?: string; model?: string; defectedOnly?: boolean; wonOnly?: boolean;
+      notPurchaseReason?: string; interestFactor?: string; model?: string;
+      defectedOnly?: boolean; wonOnly?: boolean;
+      flowStatus?: string; stillConsidering?: boolean; ratingScore?: number; dealerVisit?: string;
     },
     limit = 200,
     offset = 0,
@@ -418,8 +529,16 @@ export class SurveyAnalyticsService {
     if (criteria.wonOnly) conds.push(WON);
     if (criteria.model) conds.push(`ia.vehicleModel = ${pushParam(criteria.model)}`);
     if (criteria.competitorMake) conds.push(`${CA('$.competitor_purchase.make')} = ${pushParam(criteria.competitorMake)}`);
+    if (criteria.flowStatus) conds.push(`${CA('$.meta.flow_status')} = ${pushParam(criteria.flowStatus)}`);
+    if (criteria.stillConsidering) conds.push(`${CA('$.purchase_status.still_considering')} IN ${TRUTHY}`);
+    if (criteria.ratingScore != null) conds.push(`TRY_CAST(${CA('$.dealership_rating.score')} AS INT) = ${pushParam(criteria.ratingScore)}`);
+    if (criteria.dealerVisit) conds.push(`${CA('$.dealer_visit.visited')} = ${pushParam(criteria.dealerVisit)}`);
     if (criteria.notPurchaseReason) {
       const path = SurveyAnalyticsService.REASON_PATHS[criteria.notPurchaseReason];
+      if (path) conds.push(`${CA(path)} IN ${TRUTHY}`);
+    }
+    if (criteria.interestFactor) {
+      const path = SurveyAnalyticsService.INTEREST_PATHS[criteria.interestFactor];
       if (path) conds.push(`${CA(path)} IN ${TRUTHY}`);
     }
     if (criteria.chineseOnly || criteria.excludeChinese) {
@@ -459,88 +578,57 @@ export class SurveyAnalyticsService {
 
   async getRecordDetail(id: string) {
     const rows = await this.repo.manager.query<Array<{
-      caj: string; manufacture: string | null; model: string | null; dealer: string | null;
+      caj: string | null; ctj: string | null; interaction_id: string; interaction_tps_id: string | null;
+      manufacture: string | null; model: string | null; dealer: string | null;
       campaign: string | null; outcome: string | null; recordingUrl: string | null; allocation_date: Date | null;
+      transcript_text: string | null; transcript_model: string | null;
     }>>(
       `SELECT TOP 1
         ii.campaign_answers_json AS caj,
+        ii.campaign_transcript_json AS ctj,
+        ia.id AS interaction_id, ia.interactionTpsId AS interaction_tps_id,
         ia.vehicleMake AS manufacture, ia.vehicleModel AS model, ia.dealer AS dealer,
         ia.campaign AS campaign, ia.outcome AS outcome, ia.recordingUrl AS recordingUrl,
-        ${EFF_DATE} AS allocation_date
+        ${EFF_DATE} AS allocation_date,
+        tr.tx AS transcript_text, tr.tmodel AS transcript_model
       ${FROM_SURVEY}
-      WHERE ii.conversation_type = 'survey' AND ii.campaign_answers_json IS NOT NULL
-        AND ia.id = @0`,
-      [id],
+      OUTER APPLY (
+        SELECT TOP 1 t.text AS tx, t.model AS tmodel
+        FROM app.interaction_transcripts t
+        WHERE t.recordingId = ia.id
+        ORDER BY t.createdAt DESC
+      ) tr
+      WHERE ii.conversation_type = 'survey'
+        AND (ii.campaign_answers_json IS NOT NULL OR ii.campaign_transcript_json IS NOT NULL)
+        AND (CAST(ia.id AS VARCHAR(36)) = @0
+             OR CAST(TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS VARCHAR(20)) = @0)`,
+      [String(id)],
     );
 
     const row = rows[0];
     if (!row) return null;
 
     let a: any = {};
-    try { a = JSON.parse(row.caj) ?? {}; } catch { a = {}; }
-    const ii = a.initial_interest ?? {};
-    const npr = a.not_purchased_reasons ?? {};
-    const cp = a.competitor_purchase ?? {};
-    const dv = a.dealer_visit ?? {};
-    const dr = a.dealership_rating ?? {};
-    const ps = a.purchase_status ?? {};
-    const inf = a.influenced_by ?? {};
+    try { a = row.caj ? JSON.parse(row.caj) ?? {} : {}; } catch { a = {}; }
+    // Transcript-mined insights (campaign_transcript_json) — surfaced in the
+    // drawer so a record drilled from a transcript tile shows its evidence.
+    let transcript: any = null;
+    try { transcript = row.ctj ? JSON.parse(row.ctj) : null; } catch { transcript = null; }
 
-    const influenceText = Object.entries(INFLUENCE_LABELS)
-      .filter(([k]) => truthy(inf[k]))
-      .map(([, label]) => label)
-      .join(', ') || null;
-
-    const ratingNum = dr.score != null && dr.score !== '' ? Number(dr.score) : null;
-
-    return {
-      id_opportunity: a.meta?.id_opportunity ?? id,
+    return buildSurveyDetail(a, transcript, {
+      id,
+      interaction_id: row.interaction_id,
+      interaction_tps_id: row.interaction_tps_id,
       campaign: row.campaign,
       manufacture: row.manufacture,
       model: row.model,
       dealer: row.dealer,
       allocation_date: row.allocation_date,
-      result_code_desc: row.outcome,
-      survey_flow_status: a.meta?.flow_status ?? null,
-      source_type: null,
-      fpi_date: null,
-      p2_has_not_purchased_yet: ps.has_not_purchased_yet ?? null,
-      p2_still_considering: ps.still_considering ?? null,
-      p3_interest_follow_up: a.follow_up_interest ?? null,
-      initial_interest_styling: truthy(ii.styling_design),
-      initial_interest_brand: truthy(ii.brand_reputation),
-      initial_interest_features: truthy(ii.features),
-      initial_interest_size: truthy(ii.size_practicality),
-      initial_interest_performance: truthy(ii.performance),
-      initial_interest_price: truthy(ii.price_value),
-      initial_interest_other: ii.other_feedback ?? null,
-      dealer_visit: dv.visited ?? null,
-      dealership_rating: Number.isFinite(ratingNum as number) ? ratingNum : null,
-      vehicle_impression: dv.vehicle_impression ?? null,
-      why_no_test_drive: dv.why_no_test_drive ?? null,
-      dealership_rating_feedback: dr.feedback ?? null,
-      not_purchased_price: truthy(npr.price),
-      not_purchased_expectations: truthy(npr.expectations),
-      not_purchased_different_brand: truthy(npr.different_brand),
-      not_purchased_different_model: truthy(npr.different_client_model),
-      not_purchased_financing: truthy(npr.financing),
-      not_purchased_dealership: truthy(npr.dealership_experience),
-      not_purchased_other: npr.other_feedback ?? null,
-      not_purchased_price_feedback: npr.price_sub_reason ?? null,
-      purchased_make: cp.make ?? null,
-      purchased_model: cp.model ?? null,
-      purchased_other_model: cp.other_model_not_listed ?? null,
-      purchased_new_used: cp.new_used ?? null,
-      purchase_influence: influenceText,
-      purchase_reason: a.purchase_reason ?? null,
-      improve_anything: a.improvements?.anything_different ?? null,
-      improve_follow_up: a.improvements?.follow_up ?? null,
-      agent_notes: a.agent_notes ?? null,
-      call_recording_url: row.recordingUrl,
-      // Full parsed survey answers, so the drawer can render every stored field
-      // regardless of the projected shape above.
-      answers: a,
-    };
+      outcome: row.outcome,
+      recordingUrl: row.recordingUrl,
+      transcript_text: row.transcript_text ?? null,
+      transcript_model: row.transcript_model ?? null,
+    });
   }
 
   // ── Competitor analysis + Chinese-OEM grouping (Prompts 1 & 2) ─────────────
@@ -656,7 +744,17 @@ export class SurveyAnalyticsService {
       params,
     );
 
+    // All surveyed rows per month — the denominator for defection-rate (% mode).
+    const surveyedRows = await this.repo.manager.query<Array<{ yr: string; mo: string; count: string }>>(
+      `SELECT YEAR(${EFF_DATE}) AS yr, MONTH(${EFF_DATE}) AS mo, COUNT(1) AS count
+       ${FROM_SURVEY} ${clause}
+       GROUP BY YEAR(${EFF_DATE}), MONTH(${EFF_DATE})`,
+      params,
+    );
+
     const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`;
+    const surveyedByMonth = new Map<string, number>();
+    for (const r of surveyedRows) surveyedByMonth.set(monthKey(+r.yr, +r.mo), parseInt(r.count, 10));
 
     // Month axis: the selected period when supplied, else the data's own range.
     let months: string[] = [];
@@ -712,6 +810,7 @@ export class SurveyAnalyticsService {
       months,
       brands,
       overall: {
+        surveyed: months.map((mk) => surveyedByMonth.get(mk) ?? 0),
         total_defections: months.map((mk) => sumMonth(mk)),
         chinese_defections: months.map((mk) => sumMonth(mk, isChineseOem)),
       },
@@ -903,14 +1002,287 @@ export class SurveyAnalyticsService {
       won,
       avg_rating: Number.isNaN(avgRating as number) ? null : avgRating,
       factors: [
-        { factor: 'Styling / Design', count: parseInt(r.styling ?? '0', 10) },
-        { factor: 'Brand Reputation', count: parseInt(r.brand_reputation ?? '0', 10) },
-        { factor: 'Features', count: parseInt(r.features ?? '0', 10) },
-        { factor: 'Size / Practicality', count: parseInt(r.size_practicality ?? '0', 10) },
-        { factor: 'Performance', count: parseInt(r.performance ?? '0', 10) },
-        { factor: 'Price / Value', count: parseInt(r.price_value ?? '0', 10) },
+        { factor: 'Styling / Design', key: 'styling', count: parseInt(r.styling ?? '0', 10) },
+        { factor: 'Brand Reputation', key: 'brand_reputation', count: parseInt(r.brand_reputation ?? '0', 10) },
+        { factor: 'Features', key: 'features', count: parseInt(r.features ?? '0', 10) },
+        { factor: 'Size / Practicality', key: 'size_practicality', count: parseInt(r.size_practicality ?? '0', 10) },
+        { factor: 'Performance', key: 'performance', count: parseInt(r.performance ?? '0', 10) },
+        { factor: 'Price / Value', key: 'price_value', count: parseInt(r.price_value ?? '0', 10) },
       ].sort((a, b) => b.count - a.count),
       top_models: byModel.slice(0, 10).map((m) => ({ model: m.model, count: parseInt(m.count, 10) })),
     };
   }
+
+  // ── Transcript insights (beyond the survey) ────────────────────────────────
+  // Everything here reads campaign_transcript_json — the LLM-mined blob written
+  // from the CALL TRANSCRIPT (see call.campaign."NMGB Survey".transcript). It is
+  // a SEPARATE column from the survey feed's campaign_answers_json and survives
+  // the survey backfill. One combined method → one endpoint → one dashboard
+  // section, so the frontend makes a single call.
+  async getTranscriptInsights(f: SurveyFilter) {
+    const { clause, params } = this.buildWhere(f);
+    const tClause = clause + ` AND ii.campaign_transcript_json IS NOT NULL`;
+    const CT = (p: string) => `JSON_VALUE(ii.campaign_transcript_json, '${p}')`;
+    const q = <T = any>(sql: string) => this.repo.manager.query<T[]>(sql, params);
+
+    const totalRows = await q<{ total: string }>(
+      `SELECT COUNT(1) AS total ${FROM_SURVEY} ${tClause}`,
+    );
+    const total = parseInt(totalRows[0]?.total ?? '0', 10);
+
+    // ── Sentiment (brand / vehicle / dealer): counts per sentiment value ──
+    const sentimentRows = await q<{ topic: string; sentiment: string; cnt: string }>(
+      `SELECT topic, COALESCE(sentiment, 'not_expressed') AS sentiment, COUNT(1) AS cnt FROM (
+         SELECT 'brand' AS topic, ${CT('$.current_brand_sentiment.sentiment')} AS sentiment ${FROM_SURVEY} ${tClause}
+         UNION ALL
+         SELECT 'vehicle', ${CT('$.current_vehicle_sentiment.sentiment')} ${FROM_SURVEY} ${tClause}
+         UNION ALL
+         SELECT 'dealer', ${CT('$.dealer_sentiment.sentiment')} ${FROM_SURVEY} ${tClause}
+       ) x GROUP BY topic, sentiment`,
+    );
+    const sentiment: Record<string, Record<string, number>> = { brand: {}, vehicle: {}, dealer: {} };
+    for (const r of sentimentRows) {
+      (sentiment[r.topic] ??= {})[r.sentiment] = parseInt(r.cnt, 10);
+    }
+
+    // ── Competitors considered (make + model, Chinese-tagged in code) ──
+    const competitorRows = await q<{ brand: string; model: string | null; status: string | null; cnt: string }>(
+      `SELECT b.brand AS brand, b.model AS model, b.status AS status, COUNT(1) AS cnt
+       ${FROM_SURVEY}
+       CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands')
+         WITH (brand nvarchar(200) '$.brand', model nvarchar(200) '$.model', status varchar(30) '$.status') b
+       ${tClause} AND b.brand IS NOT NULL AND b.brand <> ''
+       GROUP BY b.brand, b.model, b.status`,
+    );
+    const brandMap = new Map<string, { brand: string; count: number; chinese: boolean; models: Set<string> }>();
+    for (const r of competitorRows) {
+      const key = (r.brand ?? '').trim();
+      if (!key) continue;
+      const e = brandMap.get(key) ?? { brand: key, count: 0, chinese: isChineseOem(key), models: new Set<string>() };
+      e.count += parseInt(r.cnt, 10);
+      if (r.model && r.model.trim()) e.models.add(r.model.trim());
+      brandMap.set(key, e);
+    }
+    const competitorBrands = [...brandMap.values()]
+      .map((e) => ({ brand: e.brand, count: e.count, chinese: e.chinese, models: [...e.models] }))
+      .sort((a, b) => b.count - a.count);
+    const consideredTotal = competitorBrands.reduce((a, b) => a + b.count, 0);
+    const chineseConsidered = competitorBrands.filter((b) => b.chinese).reduce((a, b) => a + b.count, 0);
+
+    // ── Competitor reasons (aligned to survey influenced_by labels) ──
+    const reasonAgg = async (path: string) =>
+      (await q<{ reason: string; cnt: string }>(
+        `SELECT r.value AS reason, COUNT(1) AS cnt
+         ${FROM_SURVEY} CROSS APPLY OPENJSON(ii.campaign_transcript_json, '${path}') r
+         ${tClause} AND r.value IS NOT NULL AND r.value <> ''
+         GROUP BY r.value ORDER BY COUNT(1) DESC`,
+      )).map((r) => ({
+        key: r.reason,
+        label: INFLUENCE_LABELS[r.reason] ?? r.reason,
+        count: parseInt(r.cnt, 10),
+      }));
+    const reasons = await reasonAgg('$.competitor_reasons.reasons');
+    const chineseReasons = await reasonAgg('$.competitor_reasons.chinese_specific_reasons');
+
+    // ── Frustrations (theme / severity / owner / resolvability + samples) ──
+    const frustrationRows = await q<{
+      theme: string; severity: string; root_cause_owner: string; resolvable: string;
+      recommended_action: string; quote: string;
+    }>(
+      `SELECT fr.theme, fr.severity, fr.root_cause_owner, fr.resolvable, fr.recommended_action, fr.quote
+       ${FROM_SURVEY}
+       CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.frustrations')
+         WITH (theme nvarchar(300) '$.theme', severity varchar(20) '$.severity',
+               root_cause_owner varchar(40) '$.root_cause_owner', resolvable varchar(20) '$.resolvable',
+               recommended_action nvarchar(600) '$.recommended_action', quote nvarchar(600) '$.quote') fr
+       ${tClause} AND fr.theme IS NOT NULL AND fr.theme <> ''`,
+    );
+    const tally = (rows: any[], field: string) => {
+      const m: Record<string, number> = {};
+      for (const r of rows) { const k = (r[field] ?? 'unknown') || 'unknown'; m[k] = (m[k] ?? 0) + 1; }
+      return m;
+    };
+    const themeCounts = tally(frustrationRows, 'theme');
+    const frustrations = {
+      total: frustrationRows.length,
+      by_severity: tally(frustrationRows, 'severity'),
+      by_owner: tally(frustrationRows, 'root_cause_owner'),
+      by_resolvable: tally(frustrationRows, 'resolvable'),
+      top_themes: Object.entries(themeCounts)
+        .map(([theme, count]) => ({ theme, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12),
+      // Prioritise high-severity, resolvable frustrations — the actionable list.
+      samples: frustrationRows
+        .filter((r) => r.quote || r.recommended_action)
+        .sort((a, b) => sevRank(b.severity) - sevRank(a.severity))
+        .slice(0, 30)
+        .map((r) => ({
+          theme: r.theme, severity: r.severity, owner: r.root_cause_owner,
+          resolvable: r.resolvable, recommended_action: r.recommended_action, quote: r.quote,
+        })),
+    };
+
+    // ── Reportable measures the survey misses ──
+    const measureRows = await q<{ price_gap_yes: string; follow_up_yes: string; follow_up_no: string }>(
+      `SELECT
+         SUM(CASE WHEN ${CT('$.price_expectation_gap.answer')} = 'yes' THEN 1 ELSE 0 END) AS price_gap_yes,
+         SUM(CASE WHEN ${CT('$.dealer_follow_up.answer')} = 'yes' THEN 1 ELSE 0 END) AS follow_up_yes,
+         SUM(CASE WHEN ${CT('$.dealer_follow_up.answer')} = 'no' THEN 1 ELSE 0 END) AS follow_up_no
+       ${FROM_SURVEY} ${tClause}`,
+    );
+    const evRows = await q<{ stance: string; cnt: string }>(
+      `SELECT COALESCE(${CT('$.ev_sentiment.stance')}, 'not_applicable') AS stance, COUNT(1) AS cnt
+       ${FROM_SURVEY} ${tClause} GROUP BY ${CT('$.ev_sentiment.stance')}`,
+    );
+    const loyaltyRows = await q<{ answer: string; cnt: string }>(
+      `SELECT COALESCE(${CT('$.loyalty_signal.answer')}, 'unknown') AS answer, COUNT(1) AS cnt
+       ${FROM_SURVEY} ${tClause} GROUP BY ${CT('$.loyalty_signal.answer')}`,
+    );
+    const measures = {
+      price_expectation_gap_yes: parseInt(measureRows[0]?.price_gap_yes ?? '0', 10),
+      dealer_follow_up_yes: parseInt(measureRows[0]?.follow_up_yes ?? '0', 10),
+      dealer_follow_up_no: parseInt(measureRows[0]?.follow_up_no ?? '0', 10),
+      ev_sentiment: evRows.map((r) => ({ stance: r.stance, count: parseInt(r.cnt, 10) })),
+      loyalty: loyaltyRows.map((r) => ({ answer: r.answer, count: parseInt(r.cnt, 10) })),
+    };
+
+    // ── Report-ready quotes + explicit survey-gap notes ──
+    const quotes = (await q<{ theme: string; quote: string; sentiment: string }>(
+      `SELECT TOP 60 kq.theme, kq.quote, kq.sentiment
+       ${FROM_SURVEY}
+       CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.key_quotes')
+         WITH (theme nvarchar(200) '$.theme', quote nvarchar(600) '$.quote', sentiment varchar(20) '$.sentiment') kq
+       ${tClause} AND kq.quote IS NOT NULL AND kq.quote <> ''`,
+    )).map((r) => ({ theme: r.theme, quote: r.quote, sentiment: r.sentiment }));
+
+    const gaps = (await q<{ gap: string }>(
+      `SELECT TOP 60 g.value AS gap
+       ${FROM_SURVEY} CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.survey_gaps_filled') g
+       ${tClause} AND g.value IS NOT NULL AND g.value <> ''`,
+    )).map((r) => r.gap);
+
+    return {
+      total_with_transcript: total,
+      sentiment,
+      competitors: {
+        considered_total: consideredTotal,
+        chinese_considered: chineseConsidered,
+        chinese_share: consideredTotal ? Math.round((chineseConsidered / consideredTotal) * 100) : 0,
+        brands: competitorBrands,
+      },
+      reasons,
+      chinese_reasons: chineseReasons,
+      frustrations,
+      measures,
+      quotes,
+      gaps,
+    };
+  }
+
+  // ── Transcript drill: individual records behind a transcript-insight tile ──
+  // Mirrors getDrillRecords but filters on campaign_transcript_json. Reuses the
+  // same recordSelect() projection so the existing detail drawer works unchanged.
+  // Gated identically to getTranscriptInsights (buildWhere + transcript not null)
+  // so a drill row-count matches the tile it was launched from.
+  async getTranscriptDrillRecords(
+    f: SurveyFilter,
+    criteria: {
+      sentimentTopic?: string; sentimentValue?: string;
+      transcriptBrand?: string; transcriptChineseOnly?: boolean;
+      competitorReason?: string; chineseReason?: string;
+      frustrationTheme?: string; frustrationSeverity?: string; frustrationResolvable?: string;
+      priceGap?: boolean; dealerFollowUp?: string; evStance?: string; loyaltyAnswer?: string;
+    },
+    limit = 200,
+    offset = 0,
+  ) {
+    const { clause, params } = this.buildWhere(f);
+    const CT = (p: string) => `JSON_VALUE(ii.campaign_transcript_json, '${p}')`;
+    const conds: string[] = [`ii.campaign_transcript_json IS NOT NULL`];
+    const extra: any[] = [];
+    const pushParam = (v: any) => { extra.push(v); return `@${params.length + extra.length - 1}`; };
+
+    const SENT_PATH: Record<string, string> = {
+      brand: '$.current_brand_sentiment.sentiment',
+      vehicle: '$.current_vehicle_sentiment.sentiment',
+      dealer: '$.dealer_sentiment.sentiment',
+    };
+    if (criteria.sentimentTopic && criteria.sentimentValue) {
+      const path = SENT_PATH[criteria.sentimentTopic];
+      if (path) conds.push(`COALESCE(${CT(path)}, 'not_expressed') = ${pushParam(criteria.sentimentValue)}`);
+    }
+    if (criteria.transcriptBrand) {
+      conds.push(
+        `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands') ` +
+          `WITH (brand nvarchar(200) '$.brand') b WHERE b.brand = ${pushParam(criteria.transcriptBrand)})`,
+      );
+    }
+    if (criteria.competitorReason) {
+      conds.push(
+        `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_reasons.reasons') r ` +
+          `WHERE r.value = ${pushParam(criteria.competitorReason)})`,
+      );
+    }
+    if (criteria.chineseReason) {
+      conds.push(
+        `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_reasons.chinese_specific_reasons') r ` +
+          `WHERE r.value = ${pushParam(criteria.chineseReason)})`,
+      );
+    }
+    if (criteria.frustrationTheme || criteria.frustrationSeverity || criteria.frustrationResolvable) {
+      const frConds: string[] = [];
+      if (criteria.frustrationTheme) frConds.push(`fr.theme = ${pushParam(criteria.frustrationTheme)}`);
+      if (criteria.frustrationSeverity) frConds.push(`fr.severity = ${pushParam(criteria.frustrationSeverity)}`);
+      if (criteria.frustrationResolvable) frConds.push(`fr.resolvable = ${pushParam(criteria.frustrationResolvable)}`);
+      conds.push(
+        `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.frustrations') ` +
+          `WITH (theme nvarchar(300) '$.theme', severity varchar(20) '$.severity', resolvable varchar(20) '$.resolvable') fr ` +
+          `WHERE ${frConds.join(' AND ')})`,
+      );
+    }
+    if (criteria.priceGap) conds.push(`${CT('$.price_expectation_gap.answer')} = 'yes'`);
+    if (criteria.dealerFollowUp) conds.push(`${CT('$.dealer_follow_up.answer')} = ${pushParam(criteria.dealerFollowUp)}`);
+    if (criteria.evStance) conds.push(`COALESCE(${CT('$.ev_sentiment.stance')}, 'not_applicable') = ${pushParam(criteria.evStance)}`);
+    if (criteria.loyaltyAnswer) conds.push(`COALESCE(${CT('$.loyalty_signal.answer')}, 'unknown') = ${pushParam(criteria.loyaltyAnswer)}`);
+
+    // Chinese-only over transcript brand mentions: classify in JS (same as the
+    // tile), then constrain to those makes.
+    if (criteria.transcriptChineseOnly) {
+      const brandRows = await this.repo.manager.query<Array<{ brand: string }>>(
+        `SELECT DISTINCT b.brand AS brand
+         ${FROM_SURVEY}
+         CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands')
+           WITH (brand nvarchar(200) '$.brand') b
+         ${clause} AND ii.campaign_transcript_json IS NOT NULL AND b.brand IS NOT NULL AND b.brand <> ''`,
+        params,
+      );
+      const chineseMakes = brandRows.map((r) => r.brand).filter((m) => isChineseOem(m));
+      if (chineseMakes.length) {
+        const ph = chineseMakes.map((m) => pushParam(m));
+        conds.push(
+          `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands') ` +
+            `WITH (brand nvarchar(200) '$.brand') b WHERE b.brand IN (${ph.join(', ')}))`,
+        );
+      } else {
+        conds.push('1 = 0');
+      }
+    }
+
+    const whereFull = clause + ' AND ' + conds.join(' AND ');
+    const offIdx = params.length + extra.length;
+
+    return this.repo.manager.query(
+      `SELECT ${this.recordSelect()}
+       ${FROM_SURVEY} ${whereFull}
+       ORDER BY ${EFF_DATE} DESC
+       OFFSET @${offIdx} ROWS FETCH NEXT @${offIdx + 1} ROWS ONLY`,
+      [...params, ...extra, offset, limit],
+    );
+  }
+}
+
+// High → low severity ordering for the frustration sample list.
+function sevRank(sev?: string): number {
+  return sev === 'high' ? 3 : sev === 'medium' ? 2 : sev === 'low' ? 1 : 0;
 }
