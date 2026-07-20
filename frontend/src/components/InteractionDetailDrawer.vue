@@ -644,16 +644,10 @@
                   </div>
 
                   <div v-if="!isChat && lowConfidenceTerms.length" class="ts-lowconf">
-                    <span class="drawer-label">
-                      Low-confidence terms — check these against the audio
-                      <span class="ts-info" tabindex="0">&#9432;<span class="ts-info-pop">
-                        These are the words the transcription AI (Deepgram) was <strong>least sure about</strong> — below 60% confidence. They're often mis-heard vehicle makes/models or unusual names, so the transcript wording here may be wrong.
-                        <br /><br />
-                        <strong>What to do:</strong> play the recording above and check each term. The chip tooltip shows the model's confidence and how many times the word came up shaky in this call.
-                        <br /><br />
-                        If a real make/model keeps appearing here across calls, add it to the transcription vocabulary — see <strong>Batch Dashboard → Transcription Vocabulary Suggestions</strong>, which aggregates these across all calls.
-                      </span></span>
-                    </span>
+                    <div class="ts-lowconf-head">
+                      <span class="drawer-label" style="margin: 0">Low-confidence terms — check these against the audio</span>
+                      <LowConfidenceHelp />
+                    </div>
                     <div class="ts-lowconf-chips">
                       <span
                         v-for="(t, i) in lowConfidenceTerms"
@@ -745,6 +739,7 @@ import { computed, ref, watch } from "vue";
 import axios from "axios";
 import { getInteractionDetail } from "@/services/interaction-search.service";
 import { ApiPath } from "@/enums/api";
+import LowConfidenceHelp from "@/components/LowConfidenceHelp.vue";
 
 const props = defineProps<{ recordingId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -1454,20 +1449,32 @@ const answerGroups = computed(() => {
 }
 
 .drawer-section {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 20px 20px;
+  /* Chunky tinted band between sections so the eye can group a busy column. */
+  border-bottom: 6px solid var(--surface-soft, #f1f5f9);
 }
 
 .drawer-section-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--brand, #6366f1);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--brand, #6366f1) 20%, transparent);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* Leading accent bar marks the start of each top-level section. */
+.drawer-section-title::before {
+  content: "";
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--brand, #6366f1);
+  flex-shrink: 0;
 }
 
 .chat-view-toggle {
@@ -1791,12 +1798,14 @@ const answerGroups = computed(() => {
 
 /* Campaign Q&A (e.g. Parity) rows */
 .parity-subheader {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--muted);
-  margin: 12px 0 6px;
+  margin: 14px 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--brand, #6366f1) 35%, transparent);
 }
 
 .parity-row {
@@ -1922,54 +1931,21 @@ const answerGroups = computed(() => {
   gap: 5px;
   margin-top: 5px;
 }
-.ts-info {
-  position: relative;
-  display: inline-flex;
+.ts-lowconf-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  margin-left: 5px;
-  border-radius: 50%;
-  font-size: 11px;
-  color: var(--brand, #6366f1);
-  cursor: help;
-  vertical-align: middle;
-  outline: none;
-}
-.ts-info-pop {
-  position: absolute;
-  top: 130%;
-  left: 0;
-  z-index: 20;
-  width: 300px;
-  padding: 10px 12px;
-  background: var(--surface, #fff);
-  color: var(--ink, #1e293b);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 8px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  text-transform: none;
-  letter-spacing: normal;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.12s;
-  pointer-events: none;
-}
-.ts-info:hover .ts-info-pop,
-.ts-info:focus .ts-info-pop {
-  opacity: 1;
-  visibility: visible;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* Survey — all answers list */
 .answer-group { margin-bottom: 12px; }
 .answer-group-title {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--muted); margin: 6px 0 4px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); margin: 12px 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--brand, #6366f1) 35%, transparent);
 }
 .answer-row {
   display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;

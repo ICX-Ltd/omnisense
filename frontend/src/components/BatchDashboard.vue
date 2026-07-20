@@ -5,6 +5,7 @@ import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
+import LowConfidenceHelp from "./LowConfidenceHelp.vue";
 import { downloadCsv } from "@/utils/csv";
 
 type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms" | "lowconf";
@@ -771,13 +772,15 @@ onUnmounted(stopPolling);
             <div class="chev" :class="{ open: isOpen('keyterms') }"></div>
           </div>
           <div v-show="isOpen('keyterms')" class="tile-body" @click.stop>
+            <div style="margin-bottom: 12px"><LowConfidenceHelp /></div>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px">
               <label class="label">Window (days)</label>
-              <select v-model.number="keytermDays" class="select" style="max-width: 120px">
+              <select v-model.number="keytermDays" class="select" style="max-width: 140px">
                 <option :value="30">30</option>
                 <option :value="90">90</option>
                 <option :value="180">180</option>
-                <option :value="365">365</option>
+                <option :value="365">365 (1 yr)</option>
+                <option :value="730">730 (2 yrs)</option>
               </select>
               <button class="btn btn--primary" :disabled="loadingKeyterms" @click="loadKeytermSuggestions">
                 {{ loadingKeyterms ? "Analysing…" : "Analyse transcripts" }}
@@ -830,6 +833,7 @@ onUnmounted(stopPolling);
             <div class="chev" :class="{ open: isOpen('lowconf') }"></div>
           </div>
           <div v-show="isOpen('lowconf')" class="tile-body" @click.stop>
+            <div style="margin-bottom: 12px"><LowConfidenceHelp /></div>
             <div v-if="!lowConfList.length && !loadingLowConf" style="margin-bottom: 10px">
               <button class="btn btn--primary" @click="loadLowConfidence">Load lowest-confidence transcripts</button>
               <span class="hint" style="margin-left: 10px">Only Deepgram transcripts report confidence.</span>
