@@ -166,6 +166,73 @@ async function loadSummary() {
   }
 }
 
+// ── Failed records (dead-letter) + reprocessing ─────────────────────────────
+const failedRecords = ref<any[]>([]);
+const loadingFailed = ref(false);
+const requeuing = ref(false);
+const reprocessing = ref(false);
+const reprocessCampaign = ref("");
+const maintMsg = ref("");
+
+async function loadFailed() {
+  loadingFailed.value = true;
+  try {
+    const res = await axios.get(RecordingPath.list, { params: { status: "error", limit: 100 } });
+    failedRecords.value = res.data ?? [];
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || e?.message || "Failed to load failed records";
+  } finally {
+    loadingFailed.value = false;
+  }
+}
+
+async function requeueAllErrors() {
+  requeuing.value = true;
+  maintMsg.value = "";
+  try {
+    const res = await axios.post(RecordingPath.batchRequeueErrors);
+    const d = res.data ?? {};
+    maintMsg.value = `Requeued ${d.requeuedForTranscription ?? 0} for transcription, ${d.requeuedForInsights ?? 0} for insights. Run the batch buttons to process.`;
+    await Promise.all([loadFailed(), loadSummary()]);
+  } catch (e: any) {
+    maintMsg.value = e?.response?.data?.message || e?.message || "Requeue failed";
+  } finally {
+    requeuing.value = false;
+  }
+}
+
+async function requeueRecord(id: string) {
+  maintMsg.value = "";
+  try {
+    await axios.post(RecordingPath.requeue(id));
+    await Promise.all([loadFailed(), loadSummary()]);
+  } catch (e: any) {
+    maintMsg.value = e?.response?.data?.message || e?.message || "Requeue failed";
+  }
+}
+
+async function reprocessInsights() {
+  const camp = reprocessCampaign.value.trim();
+  const scope = camp ? `campaign "${camp}"` : "ALL completed (insights_done) records";
+  if (
+    !window.confirm(
+      `Reprocess insights for ${scope}?\n\nThis DELETES their existing insight rows and re-queues them as 'transcribed' for a fresh insights run. Survey campaigns then need the survey backfill re-run.`
+    )
+  )
+    return;
+  reprocessing.value = true;
+  maintMsg.value = "";
+  try {
+    const res = await axios.post(RecordingPath.batchReprocessInsights, { campaign: camp || undefined });
+    maintMsg.value = `${res.data?.reprocessed ?? 0} record(s) reset to 'transcribed' — run "Call insights" to reprocess.`;
+    await loadSummary();
+  } catch (e: any) {
+    maintMsg.value = e?.response?.data?.message || e?.message || "Reprocess failed";
+  } finally {
+    reprocessing.value = false;
+  }
+}
+
 async function pollJobs() {
   const ids = loadStoredIds();
   if (!ids.length) {
@@ -390,6 +457,7 @@ function fmtDate(d: string | null) {
 onMounted(() => {
   loadSummary();
   loadHistory();
+  loadFailed();
   if (loadStoredIds().length) startPolling();
 });
 
@@ -581,6 +649,52 @@ onUnmounted(stopPolling);
                 <span style="color: var(--danger, #e55); margin-left: 8px">{{ e.message }}</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Failed records (dead-letter) + reprocessing -->
+        <div class="tile tile--accent">
+          <div class="tile-head">
+            <div class="tile-icon">⚠</div>
+            <div class="tile-text">
+              <div class="tile-title">Failed Records &amp; Reprocessing</div>
+              <div class="tile-desc">Records stuck in <code>error</code> with the real cause — requeue them, or reprocess insights after a prompt change.</div>
+            </div>
+            <div class="spacer" />
+            <span class="chip" :class="failedRecords.length ? 'chip--danger' : 'chip--success'" style="margin-right: 8px">{{ failedRecords.length }} error{{ failedRecords.length === 1 ? '' : 's' }}</span>
+            <button class="btn btn--ghost btn--sm" :disabled="loadingFailed" @click.stop="loadFailed">{{ loadingFailed ? "Refreshing…" : "Refresh" }}</button>
+          </div>
+          <div class="tile-body">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
+              <button class="btn btn--primary" :disabled="requeuing || !failedRecords.length" @click="requeueAllErrors">
+                {{ requeuing ? "Requeuing…" : "Requeue all errors" }}
+              </button>
+              <span class="hint">Re-queues errored records: re-transcribe those with no transcript, re-run insights for the rest. Non-destructive.</span>
+            </div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
+              <input v-model="reprocessCampaign" class="select" placeholder="campaign (optional)" style="max-width: 220px" />
+              <button class="btn btn--secondary" :disabled="reprocessing" @click="reprocessInsights">
+                {{ reprocessing ? "Reprocessing…" : "Reprocess insights" }}
+              </button>
+              <span class="hint">Deletes insight rows for completed records &amp; re-queues them as <code>transcribed</code>. Destructive — confirmed before running.</span>
+            </div>
+
+            <div v-if="maintMsg" class="chip chip--primary" style="margin-bottom: 10px">{{ maintMsg }}</div>
+
+            <div v-if="failedRecords.length" style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px">
+              <div v-for="r in failedRecords" :key="r.id" style="padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+                  <span class="chip chip--secondary">{{ r.interactionType || 'call' }}</span>
+                  <span v-if="r.campaign" class="chip">{{ r.campaign }}</span>
+                  <span class="mono" style="opacity: 0.6">{{ (r.id || '').slice(0, 8) }}…</span>
+                  <span class="muted" style="margin-left: auto">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</span>
+                  <button class="btn btn--ghost btn--sm" @click="requeueRecord(r.id)">Requeue</button>
+                </div>
+                <div v-if="r.lastError" style="color: var(--danger, #e55); margin-top: 4px; word-break: break-word">{{ r.lastError }}</div>
+              </div>
+            </div>
+            <div v-else class="hint">No failed records. 🎉</div>
           </div>
         </div>
 

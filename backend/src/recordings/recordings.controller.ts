@@ -134,6 +134,25 @@ export class RecordingsController {
     return this.svc.startBatchInsightsChats(Math.min(parsedLimit, 1000), provider, body?.model?.trim() || undefined);
   }
 
+  // Requeue all errored records (transcript-aware) so the batch buttons re-pick
+  // them. Non-destructive.
+  @Post('batch/requeue-errors')
+  requeueErrors() {
+    return this.svc.requeueErrors();
+  }
+
+  // Reprocess insights for completed records (delete insight row + set back to
+  // 'transcribed'). DESTRUCTIVE — optional campaign scope.
+  @Post('batch/reprocess-insights')
+  reprocessInsights(@Body() body?: { campaign?: string }) {
+    return this.svc.reprocessInsights(body?.campaign);
+  }
+
+  @Post(':id/requeue')
+  requeueOne(@Param('id') id: string) {
+    return this.svc.requeueOne(id);
+  }
+
   @Post(':id/transcribe')
   transcribe(@Param('id') id: string) {
     return this.svc.transcribeRecordingById(id);

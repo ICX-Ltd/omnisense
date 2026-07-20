@@ -681,6 +681,85 @@ export class RecordingsService {
     };
   }
 
+  // ─── error requeue / reprocess (batch maintenance) ──────────────────────────
+
+  // Reset every 'error' record to the right pending state so the normal batch
+  // buttons re-pick it: records that already have a transcript go back to
+  // 'transcribed' (re-run insights); those that never transcribed go back to
+  // 'pending_transcription' (re-transcribe, e.g. after fixing the maxcall/NAT
+  // download issue). Non-destructive — clears lastError, deletes nothing.
+  async requeueErrors() {
+    const m = this.recordingsRepo.manager;
+    const withT = `EXISTS (SELECT 1 FROM app.interaction_transcripts t WHERE t.recordingId = r.id)`;
+    const count = async (extra: string) =>
+      Number(
+        (
+          await m.query(
+            `SELECT COUNT(1) AS n FROM app.interactions r WHERE r.status = 'error' AND ${extra}`,
+          )
+        )[0]?.n ?? 0,
+      );
+    const requeuedForInsights = await count(withT);
+    const requeuedForTranscription = await count(`NOT ${withT}`);
+    if (requeuedForInsights) {
+      await m.query(
+        `UPDATE r SET status = 'transcribed', lastError = NULL FROM app.interactions r WHERE r.status = 'error' AND ${withT}`,
+      );
+    }
+    if (requeuedForTranscription) {
+      await m.query(
+        `UPDATE r SET status = 'pending_transcription', lastError = NULL FROM app.interactions r WHERE r.status = 'error' AND NOT ${withT}`,
+      );
+    }
+    return { requeuedForInsights, requeuedForTranscription };
+  }
+
+  // Requeue a single errored record (transcript-aware, same rule as the bulk op).
+  async requeueOne(id: string) {
+    const rec = await this.recordingsRepo.findOne({ where: { id } });
+    if (!rec) throw new NotFoundException('Recording not found');
+    const t = await this.transcriptsRepo.findOne({ where: { recordingId: id } });
+    const status = t ? 'transcribed' : 'pending_transcription';
+    await this.recordingsRepo.update(id, { status: status as any, lastError: null });
+    return { id, status };
+  }
+
+  // Reprocess insights for already-completed records: delete their insight row
+  // and set them back to 'transcribed' so the next insights batch re-runs them
+  // (e.g. after a prompt change). DESTRUCTIVE (drops interaction_insights rows) —
+  // scoped to status='insights_done', optionally filtered to one campaign.
+  // NOTE: for survey campaigns this nulls campaign_answers_json until the survey
+  // backfill (sql/nmgb_survey_backfill.sql) is re-run.
+  async reprocessInsights(campaign?: string) {
+    const m = this.recordingsRepo.manager;
+    const params: any[] = [];
+    let clause = `r.status = 'insights_done'`;
+    if (campaign?.trim()) {
+      clause += ` AND r.campaign = @0`;
+      params.push(campaign.trim());
+    }
+    const reprocessed = Number(
+      (
+        await m.query(
+          `SELECT COUNT(1) AS n FROM app.interactions r WHERE ${clause}`,
+          params,
+        )
+      )[0]?.n ?? 0,
+    );
+    if (reprocessed) {
+      await m.query(
+        `DELETE ii FROM app.interaction_insights ii
+         INNER JOIN app.interactions r ON r.id = ii.recordingId WHERE ${clause}`,
+        params,
+      );
+      await m.query(
+        `UPDATE r SET status = 'transcribed', lastError = NULL FROM app.interactions r WHERE ${clause}`,
+        params,
+      );
+    }
+    return { reprocessed, campaign: campaign?.trim() || null };
+  }
+
   async batchTranscribe(limit: number) {
     const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
