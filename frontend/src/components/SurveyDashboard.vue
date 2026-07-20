@@ -5,6 +5,7 @@ import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
 import InteractionDetailDrawer from "@/components/InteractionDetailDrawer.vue";
+import Sparkline from "@/components/Sparkline.vue";
 import { downloadCsv } from "@/utils/csv";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -220,6 +221,32 @@ function buildLineChart(
   return { width, height, padL, padR, padT, innerH, lines, xLabels, yTicks, max, n };
 }
 
+// Headline-rate sparklines for the overview strip — monthly defection rate and
+// Chinese-OEM defection rate, derived from the already-loaded monthly trends.
+function rateSeries(numerator: number[] | undefined, denom: number[] | undefined) {
+  const d = monthlyTrends.value;
+  if (!d?.months?.length || !numerator || !denom) return null;
+  const pts = d.months.map((_: string, i: number) => {
+    const num = numerator[i] ?? 0;
+    const den = denom[i] ?? 0;
+    return den ? Math.round((num / den) * 1000) / 10 : 0;
+  });
+  if (pts.length < 2) return null;
+  return { points: pts, first: pts[0] ?? 0, latest: pts[pts.length - 1] ?? 0, months: pts.length };
+}
+const defectionTrend = computed(() =>
+  rateSeries(monthlyTrends.value?.overall?.total_defections, monthlyTrends.value?.overall?.surveyed),
+);
+const chineseTrend = computed(() =>
+  rateSeries(monthlyTrends.value?.overall?.chinese_defections, monthlyTrends.value?.overall?.surveyed),
+);
+function trendArrow(t: { first: number; latest: number } | null) {
+  if (!t) return "";
+  if (t.latest > t.first) return "▲";
+  if (t.latest < t.first) return "▼";
+  return "▶";
+}
+
 const chineseBrandChart = computed(() => {
   const d = monthlyTrends.value;
   if (!d?.months?.length || !d.brands?.length) return null;
@@ -263,9 +290,36 @@ async function loadFilterOptions() {
   } catch { /* non-critical */ }
 }
 
+// ── Deep-linkable state: filters ↔ URL query, so a view can be shared/pasted ──
+function writeUrlState() {
+  const url = new URL(window.location.href);
+  const q = url.searchParams;
+  const setOrDel = (k: string, v: string) => (v ? q.set(k, v) : q.delete(k));
+  setOrDel("campaign", campaign.value);
+  setOrDel("make", manufacture.value);
+  setOrDel("model", model.value);
+  setOrDel("dealer", dealer.value);
+  setOrDel("from", fromDateStr.value);
+  setOrDel("to", toDateStr.value);
+  setOrDel("taken", surveyTakenOnly.value ? "1" : "");
+  window.history.replaceState({}, "", url);
+}
+function readUrlState() {
+  const q = new URLSearchParams(window.location.search);
+  const g = (k: string) => q.get(k) || "";
+  if (g("campaign")) campaign.value = g("campaign");
+  if (g("make")) manufacture.value = g("make");
+  if (g("model")) model.value = g("model");
+  if (g("dealer")) dealer.value = g("dealer");
+  if (g("from")) fromDateStr.value = g("from");
+  if (g("to")) toDateStr.value = g("to");
+  if (q.get("taken") === "1") surveyTakenOnly.value = true;
+}
+
 async function loadAll() {
   loading.value = true;
   error.value = "";
+  writeUrlState();
   expandedCategory.value = null;
   expandedCompetitor.value = null;
   detailId.value = null;
@@ -362,7 +416,7 @@ function exportDrillCsv() {
     "interaction_id", "interaction_tps_id", "id_opportunity", "manufacture", "model",
     "dealer", "allocation_date", "result_code_desc", "survey_flow_status",
     "purchased_make", "purchased_model", "purchased_other_model", "purchased_new_used",
-    "purchase_reason", "agent_notes",
+    "purchase_reason", "agent_notes", "evidence",
   ];
   const rows = drillRecords.value.map((r: any) =>
     Object.fromEntries(cols.map((c) => [c, r[c] ?? ""])),
@@ -483,7 +537,7 @@ async function generateNarrative() {
   }
 }
 
-onMounted(async () => { await loadFilterOptions(); await loadAll(); });
+onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll(); });
 </script>
 
 <template>
@@ -580,6 +634,26 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
         </div>
         <div class="stat stat--click" @click="openDrill('ov:considering', 'Still considering', { stillConsidering: 'true' })">
           <div class="stat-label">Still Considering</div><div class="stat-value chip chip--info">{{ overview.still_considering }}</div>
+        </div>
+      </div>
+
+      <!-- Headline-rate trends (monthly sparklines) -->
+      <div v-if="defectionTrend || chineseTrend" class="spark-strip">
+        <div v-if="defectionTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Defection rate trend</span>
+            <span class="spark-latest">{{ defectionTrend.latest }}% <span :class="defectionTrend.latest > defectionTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(defectionTrend) }}</span></span>
+          </div>
+          <Sparkline :points="defectionTrend.points" color="#dc2626" :width="150" :height="30" />
+          <div class="spark-sub">{{ defectionTrend.first }}% → {{ defectionTrend.latest }}% over {{ defectionTrend.months }} months</div>
+        </div>
+        <div v-if="chineseTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Chinese-OEM defection rate</span>
+            <span class="spark-latest">{{ chineseTrend.latest }}% <span :class="chineseTrend.latest > chineseTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(chineseTrend) }}</span></span>
+          </div>
+          <Sparkline :points="chineseTrend.points" color="#ea580c" :width="150" :height="30" />
+          <div class="spark-sub">{{ chineseTrend.first }}% → {{ chineseTrend.latest }}% over {{ chineseTrend.months }} months</div>
         </div>
       </div>
 
@@ -1455,7 +1529,8 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
               <span v-if="r.purchased_make" class="chip chip--warning" style="font-size: 11px">Bought: {{ r.purchased_make }}<template v-if="r.purchased_model || r.purchased_other_model"> {{ r.purchased_model || r.purchased_other_model }}</template></span>
               <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(r.allocation_date) }}</span>
             </div>
-            <div class="drill-row-summary">{{ r.purchase_reason || r.agent_notes || "(no notes)" }}</div>
+            <div v-if="r.evidence" class="drill-row-summary" style="font-style: italic">&ldquo;{{ r.evidence }}&rdquo;</div>
+            <div v-else class="drill-row-summary">{{ r.purchase_reason || r.agent_notes || "(no notes)" }}</div>
           </div>
         </div>
       </div>
@@ -1531,6 +1606,19 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
   display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px;
   padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
+
+/* ── Headline-rate sparklines ────────────────────────────────────────────── */
+.spark-strip { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.spark-card {
+  flex: 1; min-width: 220px;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.spark-title { font-size: 12px; font-weight: 700; color: var(--ink); }
+.spark-latest { font-size: 13px; font-weight: 800; color: var(--ink); }
+.spark-up { color: #dc2626; font-size: 11px; }
+.spark-down { color: #059669; font-size: 11px; }
+.spark-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 /* ── Bar rows (interest factors, not-purchase reasons) ───────────────────── */
 .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

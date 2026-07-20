@@ -1272,14 +1272,70 @@ export class SurveyAnalyticsService {
     const whereFull = clause + ' AND ' + conds.join(' AND ');
     const offIdx = params.length + extra.length;
 
-    return this.repo.manager.query(
-      `SELECT ${this.recordSelect()}
+    const rows = await this.repo.manager.query<any[]>(
+      `SELECT ${this.recordSelect()}, ii.campaign_transcript_json AS ctj
        ${FROM_SURVEY} ${whereFull}
        ORDER BY ${EFF_DATE} DESC
        OFFSET @${offIdx} ROWS FETCH NEXT @${offIdx + 1} ROWS ONLY`,
       [...params, ...extra, offset, limit],
     );
+
+    // Attach the quote/detail that actually matches the drilled dimension, so a
+    // frustration-theme drill shows THAT frustration's quote rather than the
+    // generic purchase_reason shared across every tile.
+    return rows.map((r) => {
+      let t: any = null;
+      try { t = r.ctj ? JSON.parse(r.ctj) : null; } catch { t = null; }
+      const { ctj, ...rest } = r;
+      return { ...rest, evidence: transcriptEvidence(t, criteria) };
+    });
   }
+}
+
+// Pull the piece of the transcript blob relevant to the drilled criteria.
+function firstStr(...vals: any[]): string | null {
+  for (const v of vals) if (typeof v === 'string' && v.trim()) return v.trim();
+  return null;
+}
+function transcriptEvidence(
+  t: any,
+  c: {
+    sentimentTopic?: string; transcriptBrand?: string;
+    competitorReason?: string; chineseReason?: string;
+    frustrationTheme?: string; frustrationSeverity?: string; frustrationResolvable?: string;
+    priceGap?: boolean; dealerFollowUp?: string; evStance?: string; loyaltyAnswer?: string;
+  },
+): string | null {
+  if (!t) return null;
+  if (c.frustrationTheme || c.frustrationSeverity || c.frustrationResolvable) {
+    const fr = (t.frustrations ?? []).find(
+      (f: any) =>
+        (!c.frustrationTheme || f.theme === c.frustrationTheme) &&
+        (!c.frustrationSeverity || f.severity === c.frustrationSeverity) &&
+        (!c.frustrationResolvable || f.resolvable === c.frustrationResolvable),
+    );
+    if (fr) return firstStr(fr.quote, fr.recommended_action, fr.theme);
+  }
+  if (c.competitorReason || c.chineseReason) {
+    return firstStr(t.competitor_reasons?.quote, t.competitor_reasons?.detail);
+  }
+  if (c.sentimentTopic) {
+    const key =
+      c.sentimentTopic === 'brand' ? 'current_brand_sentiment'
+        : c.sentimentTopic === 'vehicle' ? 'current_vehicle_sentiment'
+          : c.sentimentTopic === 'dealer' ? 'dealer_sentiment' : null;
+    const s = key ? t[key] : null;
+    if (s) return firstStr(s.quote, s.evidence, s.detail);
+  }
+  if (c.transcriptBrand) {
+    const b = (t.competitor_considered?.brands ?? []).find((x: any) => x.brand === c.transcriptBrand);
+    if (b) return firstStr(b.quote, b.context, [b.brand, b.model].filter(Boolean).join(' '));
+  }
+  if (c.loyaltyAnswer) return firstStr(t.loyalty_signal?.quote, t.loyalty_signal?.detail);
+  if (c.evStance) return firstStr(t.ev_sentiment?.quote, t.ev_sentiment?.detail);
+  if (c.dealerFollowUp) return firstStr(t.dealer_follow_up?.quote, t.dealer_follow_up?.detail);
+  if (c.priceGap) return firstStr(t.price_expectation_gap?.quote, t.price_expectation_gap?.detail);
+  return firstStr(t.key_quotes?.[0]?.quote);
 }
 
 // High → low severity ordering for the frustration sample list.

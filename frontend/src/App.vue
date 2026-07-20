@@ -88,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TestLab from "./components/TestLab.vue";
 import DataQueue from "./components/DataQueue.vue";
 import BatchDashboard from "./components/BatchDashboard.vue";
@@ -115,6 +115,20 @@ const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
 const isDataProcessingTab = computed(() => ["test", "data", "batch"].includes(tab.value));
 
+// Deep-linkable active tab — read from ?tab= on load, keep the URL in sync so a
+// view can be shared/pasted (dashboards sync their own filters into the query).
+const VALID_TABS = ["test", "data", "batch", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "settings"] as const;
+function initialTab(): typeof tab.value {
+  const p = new URLSearchParams(window.location.search).get("tab");
+  if (p && (VALID_TABS as readonly string[]).includes(p)) return p as typeof tab.value;
+  return canSeeFullUI.value ? "test" : "ops";
+}
+watch(tab, (t) => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("tab", t);
+  window.history.replaceState({}, "", url);
+});
+
 function onClickOutsideDp(e: MouseEvent) {
   if (dpOpen.value && dpRef.value && !dpRef.value.contains(e.target as Node)) {
     dpOpen.value = false;
@@ -131,7 +145,7 @@ const { user, restore, logout } = useAuth();
 onMounted(async () => {
   const restored = await restore();
   authStep.value = restored ? "app" : "login";
-  if (restored) tab.value = canSeeFullUI.value ? "test" : "ops";
+  if (restored) tab.value = initialTab();
   booting.value = false;
 });
 
@@ -143,7 +157,7 @@ function handleTwoFactorRequired(payload: { twoFactorToken: string }) {
 function handleAuthenticated(_payload: { user: User }) {
   pendingTwoFactorToken.value = "";
   authStep.value = "app";
-  tab.value = canSeeFullUI.value ? "test" : "ops";
+  tab.value = initialTab();
 }
 
 function goToLogin() {
