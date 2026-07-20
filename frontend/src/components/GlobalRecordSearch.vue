@@ -32,6 +32,20 @@
         </button>
       </div>
 
+      <div v-if="mode === 'semantic'" class="grs-filters">
+        <select v-model="semCampaign" class="grs-filter">
+          <option value="">All campaigns</option>
+          <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="semType" class="grs-filter">
+          <option value="">All types</option>
+          <option value="call">Call</option>
+          <option value="chat">Chat</option>
+        </select>
+        <input v-model="semFrom" type="date" class="grs-filter" title="From date" />
+        <input v-model="semTo" type="date" class="grs-filter" title="To date" />
+      </div>
+
       <div class="grs-popover-body">
         <div v-if="!searched" class="grs-hint">
           <template v-if="mode === 'semantic'">Search transcripts by meaning (3+ chars). Only embedded transcripts are searched.</template>
@@ -103,6 +117,8 @@ import {
   type InteractionSearchResult,
   type SemanticSearchResult,
 } from "@/services/interaction-search.service";
+import api from "@/services/api";
+import { ApiPath } from "@/enums/api";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -117,6 +133,21 @@ const semResults = ref<SemanticSearchResult[]>([]);
 const searching = ref(false);
 const searched = ref(false);
 const error = ref("");
+
+// Semantic-mode filters (scope the candidate set like the dashboards).
+const semCampaign = ref("");
+const semType = ref("");
+const semFrom = ref("");
+const semTo = ref("");
+const campaignOptions = ref<string[]>([]);
+async function loadCampaignOptions() {
+  try {
+    const { data } = await api.get(ApiPath.InsightsSummaryFilters);
+    campaignOptions.value = data?.campaigns ?? [];
+  } catch {
+    /* non-fatal — campaign filter just shows "All" */
+  }
+}
 
 const detailId = ref<string | null>(null);
 
@@ -143,7 +174,12 @@ async function runSearch() {
   lastQuery.value = query.value.trim();
   try {
     if (mode.value === "semantic") {
-      const res = await semanticSearchTranscripts(lastQuery.value, 20);
+      const res = await semanticSearchTranscripts(lastQuery.value, 20, {
+        campaign: semCampaign.value || undefined,
+        interactionType: semType.value || undefined,
+        from: semFrom.value || undefined,
+        to: semTo.value || undefined,
+      });
       semResults.value = res.results;
     } else {
       results.value = await searchInteractions(lastQuery.value);
@@ -191,7 +227,10 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener("click", onDocClick));
+onMounted(() => {
+  document.addEventListener("click", onDocClick);
+  loadCampaignOptions();
+});
 onUnmounted(() => document.removeEventListener("click", onDocClick));
 </script>
 
@@ -272,6 +311,26 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   padding: 10px;
   border-bottom: 1px solid #eef1f6;
   background: #f8fafc;
+}
+
+.grs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef1f6;
+  background: #f8fafc;
+}
+.grs-filter {
+  flex: 1;
+  min-width: 90px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 5px 7px;
+  font-size: 0.78rem;
+  background: #fff;
+  color: #1f2937;
+  font-family: inherit;
 }
 
 .grs-score {

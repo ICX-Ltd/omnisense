@@ -74,10 +74,21 @@ export interface SemanticSearchResult {
   score: number;
 }
 
-export async function semanticSearchTranscripts(query: string, limit = 20) {
+export interface SemanticSearchFilters {
+  campaign?: string;
+  from?: string;
+  to?: string;
+  interactionType?: string;
+}
+
+export async function semanticSearchTranscripts(
+  query: string,
+  limit = 20,
+  filters: SemanticSearchFilters = {},
+) {
   const { data } = await api.post<{ results: SemanticSearchResult[]; searched: number }>(
     "/uiapi/recordings/semantic-search",
-    { query, limit },
+    { query, limit, ...filters },
   );
   return data;
 }

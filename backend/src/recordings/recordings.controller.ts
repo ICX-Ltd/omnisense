@@ -92,11 +92,26 @@ export class RecordingsController {
     return this.svc.batchEmbedTranscripts(limit ? parseInt(limit, 10) : 100);
   }
 
-  // Meaning-based transcript search.
+  // Meaning-based transcript search (optional campaign / date / channel filters).
   @Post('semantic-search')
-  semanticSearch(@Body() body: { query?: string; limit?: number }) {
+  semanticSearch(
+    @Body()
+    body: {
+      query?: string;
+      limit?: number;
+      campaign?: string;
+      from?: string;
+      to?: string;
+      interactionType?: string;
+    },
+  ) {
     if (!body?.query?.trim()) throw new BadRequestException('query is required');
-    return this.svc.semanticSearch(body.query, body.limit ?? 20);
+    return this.svc.semanticSearch(body.query, body.limit ?? 20, {
+      campaign: body.campaign,
+      from: body.from,
+      to: body.to,
+      interactionType: body.interactionType,
+    });
   }
 
   // Transcripts ranked by confidence (lowest first) — QA review queue.

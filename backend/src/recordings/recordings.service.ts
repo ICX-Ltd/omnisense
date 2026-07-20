@@ -963,11 +963,42 @@ export class RecordingsService {
   }
 
   // Meaning-based search: embed the query, cosine-rank stored transcript vectors.
-  async semanticSearch(query: string, limit = 20) {
+  // Optional filters (campaign / date range / channel) scope the candidate set
+  // the same way the dashboards do, so a search can be narrowed.
+  async semanticSearch(
+    query: string,
+    limit = 20,
+    filters: { campaign?: string; from?: string; to?: string; interactionType?: string } = {},
+  ) {
     const q = (query || '').trim();
     if (!q) return { results: [], searched: 0 };
     const qvec = await this.embedText(q);
     if (!qvec.length) return { results: [], searched: 0 };
+
+    const conds = ['t.embedding IS NOT NULL'];
+    const params: any[] = [];
+    if (filters.campaign?.trim()) {
+      conds.push(`r.campaign = @${params.length}`);
+      params.push(filters.campaign.trim());
+    }
+    if (filters.from) {
+      conds.push(`COALESCE(r.interactionDateTime, r.createdAt) >= @${params.length}`);
+      params.push(new Date(filters.from));
+    }
+    if (filters.to) {
+      const t = new Date(filters.to);
+      t.setHours(23, 59, 59, 999);
+      conds.push(`COALESCE(r.interactionDateTime, r.createdAt) <= @${params.length}`);
+      params.push(t);
+    }
+    if (filters.interactionType === 'chat') {
+      conds.push(`r.interactionType = @${params.length}`);
+      params.push('chat');
+    } else if (filters.interactionType === 'call') {
+      // Calls may have a null interactionType, so include those too.
+      conds.push(`(r.interactionType = @${params.length} OR r.interactionType IS NULL)`);
+      params.push('call');
+    }
 
     const rows = await this.recordingsRepo.manager.query<Array<any>>(
       `SELECT TOP 3000 t.recordingId AS id, t.embedding AS emb, LEFT(t.text, 240) AS snippet,
@@ -976,8 +1007,9 @@ export class RecordingsService {
          r.outcome AS outcome, COALESCE(r.interactionDateTime, r.createdAt) AS date
        FROM app.interaction_transcripts t
        INNER JOIN app.interactions r ON r.id = t.recordingId
-       WHERE t.embedding IS NOT NULL
+       WHERE ${conds.join(' AND ')}
        ORDER BY t.createdAt DESC`,
+      params,
     );
 
     const scored: Array<{ row: any; score: number }> = [];
