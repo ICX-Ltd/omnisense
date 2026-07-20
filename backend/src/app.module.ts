@@ -9,6 +9,7 @@ import { RecordingsModule } from './recordings/recordings.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { PromptsModule } from './modules/prompts/prompts.module';
+import { HealthModule } from './health/health.module';
 
 import { Interaction } from './db/entities/interaction.entity';
 import { InteractionTranscript } from './db/entities/interaction-transcript.entity';
@@ -66,6 +67,7 @@ import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.ent
     AuthModule,
     UserModule,
     PromptsModule,
+    HealthModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,
