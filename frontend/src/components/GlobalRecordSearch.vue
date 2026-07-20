@@ -14,12 +14,16 @@
     </button>
 
     <div v-if="popoverOpen" class="grs-popover" @click.stop>
+      <div class="grs-mode">
+        <button class="grs-mode-btn" :class="{ 'grs-mode-btn--active': mode === 'id' }" @click="mode = 'id'">ID / TPS</button>
+        <button class="grs-mode-btn" :class="{ 'grs-mode-btn--active': mode === 'semantic' }" @click="mode = 'semantic'">Meaning</button>
+      </div>
       <div class="grs-popover-head">
         <input
           ref="inputRef"
           v-model="query"
           class="grs-input"
-          placeholder="Interaction ID or TPS ID..."
+          :placeholder="mode === 'semantic' ? 'Describe what was said, e.g. “customer mentioned moving abroad”' : 'Interaction ID or TPS ID...'"
           @keydown.esc="closePopover"
           @keydown.enter="runSearch"
         />
@@ -30,10 +34,32 @@
 
       <div class="grs-popover-body">
         <div v-if="!searched" class="grs-hint">
-          Paste a full or partial ID and hit Search (3+ chars).
+          <template v-if="mode === 'semantic'">Search transcripts by meaning (3+ chars). Only embedded transcripts are searched.</template>
+          <template v-else>Paste a full or partial ID and hit Search (3+ chars).</template>
         </div>
         <div v-else-if="searching" class="grs-hint">Searching...</div>
         <div v-else-if="error" class="grs-hint grs-hint--error">{{ error }}</div>
+
+        <!-- Semantic results -->
+        <template v-else-if="mode === 'semantic'">
+          <div v-if="semResults.length === 0" class="grs-hint">No transcripts matched “{{ lastQuery }}”.</div>
+          <ul v-else class="grs-results">
+            <li v-for="r in semResults" :key="r.id" class="grs-result" @click="openDetailId(r.id)">
+              <div class="grs-result-head">
+                <span class="grs-chip" :class="typeChipClass(r.interactionType)">{{ r.interactionType || "?" }}</span>
+                <span v-if="r.campaign" class="grs-chip grs-chip--campaign">{{ r.campaign }}</span>
+                <span class="grs-score">{{ Math.round(r.score * 100) }}% match</span>
+                <span class="grs-result-date">{{ formatDate(r.date) }}</span>
+              </div>
+              <div class="grs-result-ids mono">
+                <span v-if="r.interactionId"><strong>ID</strong> {{ r.interactionId }}</span>
+                <span v-if="r.interactionTpsId"><strong>TPS</strong> {{ r.interactionTpsId }}</span>
+              </div>
+              <div v-if="r.snippet" class="grs-result-summary">{{ r.snippet }}</div>
+            </li>
+          </ul>
+        </template>
+
         <div v-else-if="results.length === 0" class="grs-hint">
           No interactions matched “{{ lastQuery }}”.
         </div>
@@ -73,7 +99,9 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
   searchInteractions,
+  semanticSearchTranscripts,
   type InteractionSearchResult,
+  type SemanticSearchResult,
 } from "@/services/interaction-search.service";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 
@@ -81,9 +109,11 @@ const rootRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 
 const popoverOpen = ref(false);
+const mode = ref<"id" | "semantic">("id");
 const query = ref("");
 const lastQuery = ref("");
 const results = ref<InteractionSearchResult[]>([]);
+const semResults = ref<SemanticSearchResult[]>([]);
 const searching = ref(false);
 const searched = ref(false);
 const error = ref("");
@@ -112,10 +142,16 @@ async function runSearch() {
   searched.value = true;
   lastQuery.value = query.value.trim();
   try {
-    results.value = await searchInteractions(lastQuery.value);
+    if (mode.value === "semantic") {
+      const res = await semanticSearchTranscripts(lastQuery.value, 20);
+      semResults.value = res.results;
+    } else {
+      results.value = await searchInteractions(lastQuery.value);
+    }
   } catch (e: any) {
     error.value = e?.response?.data?.message ?? "Search failed";
     results.value = [];
+    semResults.value = [];
   } finally {
     searching.value = false;
   }
@@ -124,6 +160,11 @@ async function runSearch() {
 function openDetail(r: InteractionSearchResult) {
   closePopover();
   detailId.value = r.id;
+}
+
+function openDetailId(id: string) {
+  closePopover();
+  detailId.value = id;
 }
 
 function closeDetail() {
@@ -202,12 +243,41 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   color: #1f2937;
 }
 
+.grs-mode {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 0;
+  background: #f8fafc;
+}
+.grs-mode-btn {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.grs-mode-btn--active {
+  background: linear-gradient(135deg, #1a3a5c, #2b6cb0);
+  color: #fff;
+  border-color: transparent;
+}
+
 .grs-popover-head {
   display: flex;
   gap: 6px;
   padding: 10px;
   border-bottom: 1px solid #eef1f6;
   background: #f8fafc;
+}
+
+.grs-score {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #059669;
 }
 
 .grs-input {

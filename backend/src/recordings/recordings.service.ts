@@ -129,10 +129,28 @@ function pickFilename(url: string, buf: Buffer) {
   }
 }
 
+// Cosine similarity between two equal-length embedding vectors (0..1 for the
+// non-negative-ish space OpenAI embeddings occupy; higher = more similar).
+function cosineSim(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    dot += x * y; na += x * x; nb += y * y;
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom ? dot / denom : 0;
+}
+
 @Injectable()
 export class RecordingsService {
   private readonly logger = new Logger(RecordingsService.name);
   private client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // Semantic-search embedding config (cheap: text-embedding-3-small, shortened
+  // to 512 dims to keep the stored JSON small and the cosine loop fast).
+  private embeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+  private embeddingDims = parseInt(process.env.OPENAI_EMBEDDING_DIMS || '512', 10) || 512;
 
   constructor(
     @InjectRepository(Interaction)
@@ -891,6 +909,89 @@ export class RecordingsService {
         snippet: r.snippet,
       };
     });
+  }
+
+  // ─── semantic search (embeddings) ───────────────────────────────────────────
+
+  private async embedText(text: string): Promise<number[]> {
+    // Keep input well under the model's token limit; the head of a call carries
+    // most of the topical signal for retrieval.
+    const input = (text || '').slice(0, 20000);
+    const res = await this.client.embeddings.create({
+      model: this.embeddingModel,
+      input,
+      dimensions: this.embeddingDims,
+    });
+    return res.data[0]?.embedding ?? [];
+  }
+
+  // Embed transcripts that don't yet have a vector. Bounded per call; run
+  // repeatedly to work through the backlog (cheap — text-embedding-3-small).
+  async batchEmbedTranscripts(limit = 100) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 100;
+    const todo = await this.recordingsRepo.manager.query<Array<{ id: string; text: string }>>(
+      `SELECT TOP (@0) id, text FROM app.interaction_transcripts
+       WHERE embedding IS NULL AND text IS NOT NULL AND LEN(text) > 20
+       ORDER BY createdAt DESC`,
+      [n],
+    );
+    let embedded = 0;
+    for (const t of todo) {
+      try {
+        const vec = await this.embedText(t.text);
+        if (vec.length) {
+          await this.transcriptsRepo.update(t.id, {
+            embedding: JSON.stringify(vec),
+            embeddingModel: this.embeddingModel,
+          });
+          embedded++;
+        }
+      } catch (e) {
+        this.logger.warn(`Embed failed for transcript ${t.id}: ${describeError(e)}`);
+      }
+    }
+    const remainingRow = await this.recordingsRepo.manager.query<Array<{ n: number }>>(
+      `SELECT COUNT(1) AS n FROM app.interaction_transcripts
+       WHERE embedding IS NULL AND text IS NOT NULL AND LEN(text) > 20`,
+    );
+    return {
+      embedded,
+      attempted: todo.length,
+      remaining: Number(remainingRow[0]?.n ?? 0),
+      model: this.embeddingModel,
+    };
+  }
+
+  // Meaning-based search: embed the query, cosine-rank stored transcript vectors.
+  async semanticSearch(query: string, limit = 20) {
+    const q = (query || '').trim();
+    if (!q) return { results: [], searched: 0 };
+    const qvec = await this.embedText(q);
+    if (!qvec.length) return { results: [], searched: 0 };
+
+    const rows = await this.recordingsRepo.manager.query<Array<any>>(
+      `SELECT TOP 3000 t.recordingId AS id, t.embedding AS emb, LEFT(t.text, 240) AS snippet,
+         r.campaign AS campaign, r.interactionType AS interactionType, r.agent AS agent,
+         r.interactionId AS interactionId, r.interactionTpsId AS interactionTpsId,
+         r.outcome AS outcome, COALESCE(r.interactionDateTime, r.createdAt) AS date
+       FROM app.interaction_transcripts t
+       INNER JOIN app.interactions r ON r.id = t.recordingId
+       WHERE t.embedding IS NOT NULL
+       ORDER BY t.createdAt DESC`,
+    );
+
+    const scored: Array<{ row: any; score: number }> = [];
+    for (const row of rows) {
+      let vec: number[] = [];
+      try { vec = JSON.parse(row.emb); } catch { continue; }
+      scored.push({ row, score: cosineSim(qvec, vec) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.slice(0, Math.min(Number(limit) || 20, 50)).map(({ row, score }) => {
+      const { emb, ...rest } = row;
+      return { ...rest, score: Math.round(score * 1000) / 1000 };
+    });
+    return { results: top, searched: rows.length };
   }
 
   async batchTranscribe(limit: number) {

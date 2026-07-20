@@ -86,6 +86,19 @@ export class RecordingsController {
     return this.svc.listJobs(20);
   }
 
+  // Embed transcripts for semantic search (bounded per call; run repeatedly).
+  @Post('batch/embed')
+  batchEmbed(@Query('limit') limit?: string) {
+    return this.svc.batchEmbedTranscripts(limit ? parseInt(limit, 10) : 100);
+  }
+
+  // Meaning-based transcript search.
+  @Post('semantic-search')
+  semanticSearch(@Body() body: { query?: string; limit?: number }) {
+    if (!body?.query?.trim()) throw new BadRequestException('query is required');
+    return this.svc.semanticSearch(body.query, body.limit ?? 20);
+  }
+
   // Transcripts ranked by confidence (lowest first) — QA review queue.
   @Get('low-confidence')
   lowConfidenceTranscripts(@Query('limit') limit?: string) {

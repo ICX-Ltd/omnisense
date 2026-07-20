@@ -270,6 +270,24 @@ function confPct(c: number) {
   return Math.round((c ?? 0) * 100);
 }
 
+// ── Semantic search: embed transcripts ──────────────────────────────────────
+const embedding = ref(false);
+const embedLimit = ref(200);
+const embedStatus = ref("");
+async function runEmbed() {
+  embedding.value = true;
+  embedStatus.value = "";
+  try {
+    const res = await axios.post(RecordingPath.batchEmbed, null, { params: { limit: embedLimit.value } });
+    const d = res.data ?? {};
+    embedStatus.value = `Embedded ${d.embedded ?? 0} (${d.remaining ?? 0} remaining) via ${d.model ?? "?"}.`;
+  } catch (e: any) {
+    embedStatus.value = e?.response?.data?.message || e?.message || "Embed failed";
+  } finally {
+    embedding.value = false;
+  }
+}
+
 // ── Lowest-confidence transcripts (QA review queue) ─────────────────────────
 const lowConfList = ref<any[]>([]);
 const loadingLowConf = ref(false);
@@ -811,6 +829,32 @@ onUnmounted(stopPolling);
               <div v-else class="hint">No new low-confidence terms in this window — either vocabulary coverage is good, or no Deepgram transcripts have run yet.</div>
             </div>
             <div v-else class="hint">Click Analyse to mine recent transcripts for shaky terms.</div>
+          </div>
+        </div>
+
+        <!-- Semantic search — embed transcripts -->
+        <div class="tile tile--accent">
+          <div class="tile-head">
+            <div class="tile-icon">🧭</div>
+            <div class="tile-text">
+              <div class="tile-title">Semantic Search — Embed Transcripts</div>
+              <div class="tile-desc">Generate meaning vectors so transcripts are searchable by phrase (Find record → Meaning). Cheap; run repeatedly to clear the backlog.</div>
+            </div>
+            <div class="spacer" />
+          </div>
+          <div class="tile-body">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+              <label class="label">Batch size</label>
+              <select v-model.number="embedLimit" class="select" style="max-width: 120px">
+                <option :value="100">100</option>
+                <option :value="200">200</option>
+                <option :value="500">500</option>
+              </select>
+              <button class="btn btn--primary" :disabled="embedding" @click="runEmbed">
+                {{ embedding ? "Embedding…" : `Embed next ${embedLimit}` }}
+              </button>
+              <span v-if="embedStatus" class="chip chip--primary">{{ embedStatus }}</span>
+            </div>
           </div>
         </div>
 

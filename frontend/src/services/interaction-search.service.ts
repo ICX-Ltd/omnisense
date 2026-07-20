@@ -61,6 +61,27 @@ export async function searchInteractions(q: string) {
   return data;
 }
 
+export interface SemanticSearchResult {
+  id: string;
+  campaign: string | null;
+  interactionType: string | null;
+  agent: string | null;
+  interactionId: string | null;
+  interactionTpsId: string | null;
+  outcome: string | null;
+  date: string | null;
+  snippet: string | null;
+  score: number;
+}
+
+export async function semanticSearchTranscripts(query: string, limit = 20) {
+  const { data } = await api.post<{ results: SemanticSearchResult[]; searched: number }>(
+    "/uiapi/recordings/semantic-search",
+    { query, limit },
+  );
+  return data;
+}
+
 export async function getInteractionDetail(id: string) {
   const { data } = await api.get<InteractionDetail>(
     `/uiapi/insights/ops/interaction-detail/${id}`,
