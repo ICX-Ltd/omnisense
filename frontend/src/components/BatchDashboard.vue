@@ -291,6 +291,7 @@ async function runEmbed() {
 // ── Lowest-confidence transcripts (QA review queue) ─────────────────────────
 const lowConfList = ref<any[]>([]);
 const loadingLowConf = ref(false);
+const lowConfLoaded = ref(false);
 const reviewDrawerId = ref<string | null>(null);
 
 async function loadLowConfidence() {
@@ -298,6 +299,7 @@ async function loadLowConfidence() {
   try {
     const res = await axios.get(RecordingPath.lowConfidence, { params: { limit: 50 } });
     lowConfList.value = res.data ?? [];
+    lowConfLoaded.value = true;
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load low-confidence transcripts";
   } finally {
@@ -878,9 +880,15 @@ onUnmounted(stopPolling);
           </div>
           <div v-show="isOpen('lowconf')" class="tile-body" @click.stop>
             <div style="margin-bottom: 12px"><LowConfidenceHelp /></div>
-            <div v-if="!lowConfList.length && !loadingLowConf" style="margin-bottom: 10px">
+            <div v-if="!lowConfList.length && !loadingLowConf && !lowConfLoaded" style="margin-bottom: 10px">
               <button class="btn btn--primary" @click="loadLowConfidence">Load lowest-confidence transcripts</button>
               <span class="hint" style="margin-left: 10px">Only Deepgram transcripts report confidence.</span>
+            </div>
+            <div v-else-if="!lowConfList.length && !loadingLowConf && lowConfLoaded" class="hint" style="line-height: 1.5">
+              No transcripts have a confidence score yet. Confidence is captured only for <strong>Deepgram</strong> transcripts made <strong>after</strong> the
+              <code>add-transcription-confidence.sql</code> migration is applied — so existing transcripts read as null until they're re-transcribed.
+              To populate this: run that migration (System Health lists it), then <strong>Requeue all errors</strong> / re-run <strong>Transcribe</strong>.
+              <button class="btn btn--ghost btn--sm" style="margin-left: 8px" @click="loadLowConfidence">Retry</button>
             </div>
             <table v-if="lowConfList.length" class="usage-table">
               <thead>
