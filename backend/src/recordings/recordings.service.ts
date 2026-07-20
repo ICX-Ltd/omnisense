@@ -299,6 +299,8 @@ export class RecordingsService {
 
     let model = '';
     let audioSeconds: number | null = null;
+    let confidence: number | null = null;
+    let lowConfidenceJson: string | null = null;
     let txOutcome: 'success' | 'error' = 'error';
 
     try {
@@ -321,6 +323,11 @@ export class RecordingsService {
         model = 'deepgram:nova-2-phonecall';
         audioSeconds =
           typeof dg.durationSeconds === 'number' ? dg.durationSeconds : null;
+        confidence = typeof dg.confidence === 'number' ? dg.confidence : null;
+        lowConfidenceJson =
+          dg.lowConfidenceWords && dg.lowConfidenceWords.length
+            ? JSON.stringify(dg.lowConfidenceWords)
+            : null;
       } else if (provider === 'openai' || provider === 'manual') {
         const audio = await this.downloadAudio(rec.recordingUrl || '');
         const file = await toFile(audio.buffer, audio.filename);
@@ -342,6 +349,8 @@ export class RecordingsService {
           recordingId: rec.id,
           text,
           model,
+          confidence,
+          lowConfidenceJson,
         },
         ['recordingId'],
       );

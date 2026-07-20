@@ -620,6 +620,13 @@
                   <div class="drawer-section-title">
                     {{ isChat ? 'Chat Conversation' : 'Transcript' }}
                     <span v-if="!isChat && detailData.transcript.model" class="hint" style="font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px">{{ detailData.transcript.model }}</span>
+                    <span
+                      v-if="!isChat && transcriptConfidence !== null"
+                      class="chip"
+                      :class="confidenceClass(transcriptConfidence)"
+                      style="font-size: 10px; margin-left: 6px"
+                      title="Overall transcription confidence (Deepgram)"
+                    >{{ confidencePct(transcriptConfidence) }}% confidence</span>
                     <div v-if="(isChat && chatMessages.length) || (!isChat && callTurns.length)" class="chat-view-toggle">
                       <button
                         type="button"
@@ -633,6 +640,19 @@
                         :class="{ 'chat-view-btn--active': chatView === 'raw' }"
                         @click="chatView = 'raw'"
                       >Raw</button>
+                    </div>
+                  </div>
+
+                  <div v-if="!isChat && lowConfidenceTerms.length" class="ts-lowconf">
+                    <span class="drawer-label">Low-confidence terms — check these against the audio</span>
+                    <div class="ts-lowconf-chips">
+                      <span
+                        v-for="(t, i) in lowConfidenceTerms"
+                        :key="i"
+                        class="chip chip--warning"
+                        style="font-size: 10px"
+                        :title="`${Math.round(t.confidence * 100)}% confidence · heard ${t.count}×`"
+                      >{{ t.word }}</span>
                     </div>
                   </div>
 
@@ -1089,6 +1109,24 @@ const callTurns = computed<CallTurn[]>(() => {
   }
   return turns;
 });
+
+// ─── transcription confidence (Deepgram) ────────────────────────────────────
+const transcriptConfidence = computed<number | null>(() => {
+  const c = detailData.value?.transcript?.confidence;
+  return typeof c === "number" ? c : null;
+});
+const lowConfidenceTerms = computed<Array<{ word: string; confidence: number; count: number }>>(
+  () => detailData.value?.transcript?.low_confidence ?? [],
+);
+function confidencePct(c: number) {
+  return Math.round(c * 100);
+}
+function confidenceClass(c: number | null) {
+  if (c == null) return "chip--secondary";
+  if (c >= 0.9) return "chip--success";
+  if (c >= 0.75) return "chip--warning";
+  return "chip--danger";
+}
 
 // ─── survey record (NMGB Survey etc.) ────────────────────────────────────────
 // Present only for conversation_type='survey' interactions; carries the full
@@ -1859,6 +1897,21 @@ const answerGroups = computed(() => {
 
 .mono {
   font-family: ui-monospace, "Courier New", monospace;
+}
+
+/* Transcription low-confidence terms */
+.ts-lowconf {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, #f59e0b 8%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+  border-radius: 6px;
+}
+.ts-lowconf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
 }
 
 /* Survey — all answers list */

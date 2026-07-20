@@ -159,13 +159,22 @@ export class TranscriptionDeepgramService {
     //console.log('utterances length', utterances.length);
     //console.dir(utterances.slice(0, 2), { depth: null });
 
-    const fullText =
-      json?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
+    const alt = json?.results?.channels?.[0]?.alternatives?.[0] ?? {};
+    const fullText = alt.transcript ?? '';
+
+    // Overall alternative confidence (0–1) + the words the model was least sure
+    // about. Low-confidence proper nouns (makes/models mis-heard) are the signal
+    // for spot-checking a call and for growing the vehicle keyterm/replace lists.
+    const overallConfidence =
+      typeof alt.confidence === 'number' ? alt.confidence : null;
+    const lowConfidenceWords = summariseLowConfidence(alt.words ?? []);
 
     return {
       provider: 'deepgram',
       text: fullText,
       turns,
+      confidence: overallConfidence,
+      lowConfidenceWords,
       // Audio length (seconds) for per-minute cost tracking. Deepgram returns it
       // in metadata.duration.
       durationSeconds:
@@ -175,4 +184,34 @@ export class TranscriptionDeepgramService {
       // raw: json, // keep for testing; remove for production
     };
   }
+}
+
+// Deepgram per-word confidence → deduped list of the shakiest words, worst
+// first. Punctuation/short filler is skipped; each entry keeps its lowest seen
+// confidence and how many times it appeared low. Capped so the blob stays small.
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
+const LOW_CONFIDENCE_MAX = 25;
+
+function summariseLowConfidence(
+  words: Array<{ word?: string; punctuated_word?: string; confidence?: number }>,
+): Array<{ word: string; confidence: number; count: number }> {
+  const agg = new Map<string, { word: string; confidence: number; count: number }>();
+  for (const w of words) {
+    const conf = typeof w.confidence === 'number' ? w.confidence : 1;
+    if (conf >= LOW_CONFIDENCE_THRESHOLD) continue;
+    const raw = (w.punctuated_word || w.word || '').trim();
+    const clean = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    if (clean.length < 3) continue; // skip filler / stray punctuation
+    const key = clean.toLowerCase();
+    const existing = agg.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.confidence = Math.min(existing.confidence, conf);
+    } else {
+      agg.set(key, { word: clean, confidence: conf, count: 1 });
+    }
+  }
+  return [...agg.values()]
+    .sort((a, b) => a.confidence - b.confidence)
+    .slice(0, LOW_CONFIDENCE_MAX);
 }

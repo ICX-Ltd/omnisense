@@ -3209,7 +3209,16 @@ ${prompt}
         recordingUrl: interaction.recordingUrl,
         outcome: interaction.outcome,
       },
-      transcript: transcript ? { text: transcript.text, model: transcript.model } : null,
+      transcript: transcript
+        ? {
+            text: transcript.text,
+            model: transcript.model,
+            confidence: transcript.confidence ?? null,
+            low_confidence: transcript.lowConfidenceJson
+              ? safeParseJson(transcript.lowConfidenceJson)
+              : null,
+          }
+        : null,
       insight: insight ? (() => {
         // Extract operations.scoring_flags from the raw LLM JSON — not stored
         // in operations_scores_json, but lives inside the full `json` blob.

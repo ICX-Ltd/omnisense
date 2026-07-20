@@ -118,6 +118,13 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     columns: [['interaction_insights', 'campaign_transcript_json']],
   },
   {
+    file: 'add-transcription-confidence.sql',
+    columns: [
+      ['interaction_transcripts', 'confidence'],
+      ['interaction_transcripts', 'lowConfidenceJson'],
+    ],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],

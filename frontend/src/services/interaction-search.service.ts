@@ -26,7 +26,12 @@ export interface InteractionDetail {
     recordingUrl: string | null;
     outcome: string | null;
   };
-  transcript: { text: string; model: string | null } | null;
+  transcript: {
+    text: string;
+    model: string | null;
+    confidence?: number | null;
+    low_confidence?: Array<{ word: string; confidence: number; count: number }> | null;
+  } | null;
   insight: {
     summary_short: string | null;
     summary_detailed: string | null;
