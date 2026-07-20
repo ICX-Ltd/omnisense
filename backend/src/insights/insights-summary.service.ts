@@ -2528,6 +2528,74 @@ ${prompt}
   // same shape can be reused for future Q&A campaigns sharing the schema.
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Monthly trend of the two Campaign-Insights headline rates — negative-view
+  // rate and opportunity rate — over the window, for sparklines. Mirrors the
+  // numerators/denominators of getParityCampaignAnalysis + getOpportunityMetrics,
+  // bucketed by month.
+  async getClientServicesTrends(
+    from: Date,
+    to: Date,
+    filterKey: InteractionFilter = 'calls',
+    campaign?: string,
+    agent?: string,
+    excludeOutcomes?: string[],
+    vehicleMake?: string, vehicleModels?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(
+      filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels,
+    );
+    const effDate = 'COALESCE(ia.interactionDateTime, ia.createdAt)';
+    const jv = (p: string) => `JSON_VALUE(ii.campaign_answers_json, '${p}')`;
+
+    const parityRows = await this.insightsRepo.manager.query<Array<{ yr: string; mo: string; total: string; any_neg: string }>>(
+      `SELECT YEAR(${effDate}) AS yr, MONTH(${effDate}) AS mo,
+         COUNT(1) AS total,
+         SUM(CASE WHEN ${jv('$.view_on_brand.answer')} = 'yes'
+               OR ${jv('$.view_on_current_vehicle.answer')} = 'yes'
+               OR ${jv('$.view_on_dealer.answer')} = 'yes'
+               OR ${jv('$.view_on_finance_agreement.answer')} = 'yes' THEN 1 ELSE 0 END) AS any_neg
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.campaign_answers_json IS NOT NULL
+         AND ${effDate} >= @0 AND ${effDate} < @1 ${filterClause}
+       GROUP BY YEAR(${effDate}), MONTH(${effDate})`,
+      [from, to, ...extraParams],
+    );
+
+    const oppRows = await this.insightsRepo.manager.query<Array<{ yr: string; mo: string; classified: string; opportunities: string }>>(
+      `SELECT YEAR(${effDate}) AS yr, MONTH(${effDate}) AS mo,
+         SUM(CASE WHEN ii.is_opportunity IS NOT NULL THEN 1 ELSE 0 END) AS classified,
+         SUM(CASE WHEN ii.is_opportunity = 1 THEN 1 ELSE 0 END) AS opportunities
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE (ii.is_opportunity IS NOT NULL OR ii.opportunity_json IS NOT NULL)
+         AND ${effDate} >= @0 AND ${effDate} < @1 ${filterClause}
+       GROUP BY YEAR(${effDate}), MONTH(${effDate})`,
+      [from, to, ...extraParams],
+    );
+
+    const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`;
+    const months: string[] = [];
+    const end = new Date(to.getTime() - 1);
+    let y = from.getFullYear(), m = from.getMonth() + 1, guard = 0;
+    while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && guard < 120) {
+      months.push(monthKey(y, m)); m++; if (m > 12) { m = 1; y++; } guard++;
+    }
+
+    const parityByMonth = new Map<string, { total: number; any_neg: number }>();
+    for (const r of parityRows) parityByMonth.set(monthKey(+r.yr, +r.mo), { total: +r.total, any_neg: +r.any_neg });
+    const oppByMonth = new Map<string, { classified: number; opportunities: number }>();
+    for (const r of oppRows) oppByMonth.set(monthKey(+r.yr, +r.mo), { classified: +r.classified, opportunities: +r.opportunities });
+
+    return {
+      months,
+      parity_total: months.map((k) => parityByMonth.get(k)?.total ?? 0),
+      any_negative_view: months.map((k) => parityByMonth.get(k)?.any_neg ?? 0),
+      opp_classified: months.map((k) => oppByMonth.get(k)?.classified ?? 0),
+      opportunities: months.map((k) => oppByMonth.get(k)?.opportunities ?? 0),
+    };
+  }
+
   async getParityCampaignAnalysis(
     from: Date,
     to: Date,

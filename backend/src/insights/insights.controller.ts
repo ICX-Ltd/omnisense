@@ -398,6 +398,25 @@ export class InsightsController {
     );
   }
 
+  @Get('client-services/trends')
+  async clientServicesTrends(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getClientServicesTrends(
+      fromDate, toDate, filter, campaign, agent,
+      parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw),
+    );
+  }
+
   @Get('parity/interactions')
   async parityInteractions(
     @Query('from') from?: string,

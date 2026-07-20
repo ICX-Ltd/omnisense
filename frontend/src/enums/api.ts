@@ -31,6 +31,7 @@ export const ApiPath = {
   OpsRecomputeChatResponseTime: "/uiapi/insights/ops/recompute-chat-response-time",
 
   ParityCampaignAnalysis: "/uiapi/insights/parity/campaign-analysis",
+  ClientServicesTrends: "/uiapi/insights/client-services/trends",
   ParityInteractions: "/uiapi/insights/parity/interactions",
 
   SurveyFilters: "/uiapi/survey/filters",

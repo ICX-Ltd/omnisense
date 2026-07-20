@@ -7,6 +7,7 @@ import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import ParityBar from "./ParityBar.vue";
 import ParitySegmentBar from "./ParitySegmentBar.vue";
 import OutcomeDonut from "./OutcomeDonut.vue";
+import Sparkline from "./Sparkline.vue";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
@@ -118,6 +119,25 @@ const error = ref("");
 
 const csData = ref<any>(null);
 const opportunityData = ref<any>(null);
+const trendsData = ref<any>(null);
+
+// Monthly trend series for the two headline rates → sparklines.
+function csRateSeries(numerator: number[] | undefined, denom: number[] | undefined) {
+  const d = trendsData.value;
+  if (!d?.months?.length || !numerator || !denom) return null;
+  const pts = d.months.map((_: string, i: number) => {
+    const den = denom[i] ?? 0;
+    return den ? Math.round(((numerator[i] ?? 0) / den) * 1000) / 10 : 0;
+  });
+  if (pts.length < 2) return null;
+  return { points: pts, first: pts[0] ?? 0, latest: pts[pts.length - 1] ?? 0, months: pts.length };
+}
+const negativeViewTrend = computed(() =>
+  csRateSeries(trendsData.value?.any_negative_view, trendsData.value?.parity_total),
+);
+const opportunityTrend = computed(() =>
+  csRateSeries(trendsData.value?.opportunities, trendsData.value?.opp_classified),
+);
 
 // Interest level drill-down
 // Each drill row tracks its own open state + interactions so multiple rows
@@ -402,6 +422,7 @@ async function loadAll() {
       csRes,
       oppRes,
       parityRes,
+      trendsRes,
       csResCompare,
       oppResCompare,
       parityResCompare,
@@ -411,6 +432,7 @@ async function loadAll() {
       isParity
         ? axios.get(ApiPath.ParityCampaignAnalysis, { params: sharedParams.value }).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
+      axios.get(ApiPath.ClientServicesTrends, { params: sharedParams.value }).catch(() => ({ data: null })),
       compareP
         ? axios.get(ApiPath.InsightsSummaryClientServices, { params: compareP }).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
@@ -424,6 +446,7 @@ async function loadAll() {
     csData.value = csRes.data;
     opportunityData.value = oppRes.data;
     parityData.value = parityRes.data;
+    trendsData.value = trendsRes.data;
     csDataCompare.value = csResCompare.data;
     opportunityDataCompare.value = oppResCompare.data;
     parityDataCompare.value = parityResCompare.data;
@@ -929,6 +952,10 @@ onMounted(async () => {
                 {{ compareDelta(negativeViewRate, negativeViewRateCompare).pctLabel }}
               </span>
             </div>
+            <div v-if="negativeViewTrend" class="trend-spark" :title="`Monthly trend: ${negativeViewTrend.first}% → ${negativeViewTrend.latest}% over ${negativeViewTrend.months} months`">
+              <Sparkline :points="negativeViewTrend.points" color="#dc2626" :width="140" :height="26" />
+              <span class="trend-spark-cap">monthly trend</span>
+            </div>
           </template>
           <template v-else>
             <div class="stat-value chip chip--secondary">—</div>
@@ -954,6 +981,10 @@ onMounted(async () => {
                   Math.round(opportunityDataCompare.opportunities / opportunityDataCompare.classified * 100)
                 ).pctLabel }}
               </span>
+            </div>
+            <div v-if="opportunityTrend" class="trend-spark" :title="`Monthly trend: ${opportunityTrend.first}% → ${opportunityTrend.latest}% over ${opportunityTrend.months} months`">
+              <Sparkline :points="opportunityTrend.points" color="#059669" :width="140" :height="26" />
+              <span class="trend-spark-cap">monthly trend</span>
             </div>
           </div>
         </template>
@@ -2496,6 +2527,20 @@ onMounted(async () => {
   gap: 6px;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.trend-spark {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.trend-spark-cap {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
 }
 
 .cmp-line strong {
