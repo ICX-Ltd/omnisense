@@ -644,7 +644,16 @@
                   </div>
 
                   <div v-if="!isChat && lowConfidenceTerms.length" class="ts-lowconf">
-                    <span class="drawer-label">Low-confidence terms — check these against the audio</span>
+                    <span class="drawer-label">
+                      Low-confidence terms — check these against the audio
+                      <span class="ts-info" tabindex="0">&#9432;<span class="ts-info-pop">
+                        These are the words the transcription AI (Deepgram) was <strong>least sure about</strong> — below 60% confidence. They're often mis-heard vehicle makes/models or unusual names, so the transcript wording here may be wrong.
+                        <br /><br />
+                        <strong>What to do:</strong> play the recording above and check each term. The chip tooltip shows the model's confidence and how many times the word came up shaky in this call.
+                        <br /><br />
+                        If a real make/model keeps appearing here across calls, add it to the transcription vocabulary — see <strong>Batch Dashboard → Transcription Vocabulary Suggestions</strong>, which aggregates these across all calls.
+                      </span></span>
+                    </span>
                     <div class="ts-lowconf-chips">
                       <span
                         v-for="(t, i) in lowConfidenceTerms"
@@ -1912,6 +1921,48 @@ const answerGroups = computed(() => {
   flex-wrap: wrap;
   gap: 5px;
   margin-top: 5px;
+}
+.ts-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  border-radius: 50%;
+  font-size: 11px;
+  color: var(--brand, #6366f1);
+  cursor: help;
+  vertical-align: middle;
+  outline: none;
+}
+.ts-info-pop {
+  position: absolute;
+  top: 130%;
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  padding: 10px 12px;
+  background: var(--surface, #fff);
+  color: var(--ink, #1e293b);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+  pointer-events: none;
+}
+.ts-info:hover .ts-info-pop,
+.ts-info:focus .ts-info-pop {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Survey — all answers list */

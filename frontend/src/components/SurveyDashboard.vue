@@ -5,6 +5,7 @@ import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
 import InteractionDetailDrawer from "@/components/InteractionDetailDrawer.vue";
+import { downloadCsv } from "@/utils/csv";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
@@ -352,6 +353,23 @@ function openDetail(id: string | number) {
 }
 
 function closeDetail() { detailId.value = null; }
+
+// Export the currently-loaded drill records to CSV (client-side). Projects the
+// stable, human-useful columns in a sensible order.
+function exportDrillCsv() {
+  if (!drillRecords.value.length) return;
+  const cols = [
+    "interaction_id", "interaction_tps_id", "id_opportunity", "manufacture", "model",
+    "dealer", "allocation_date", "result_code_desc", "survey_flow_status",
+    "purchased_make", "purchased_model", "purchased_other_model", "purchased_new_used",
+    "purchase_reason", "agent_notes",
+  ];
+  const rows = drillRecords.value.map((r: any) =>
+    Object.fromEntries(cols.map((c) => [c, r[c] ?? ""])),
+  );
+  const safeName = (drillTitle.value || "survey-records").replace(/[^\w.-]+/g, "_").slice(0, 80);
+  downloadCsv(safeName, rows, cols);
+}
 
 // Open a drill list for any stat-tile selection. Toggling the same key closes
 // it. Records reuse the existing detail drawer via openDetail(). `endpoint`
@@ -1417,7 +1435,15 @@ onMounted(async () => { await loadFilterOptions(); await loadAll(); });
             <div class="drill-modal-title">{{ drillTitle }}</div>
             <div class="drill-modal-sub">{{ loadingDrill ? 'Loading…' : drillRecords.length + ' record(s) — click a row for full detail' }}</div>
           </div>
-          <button class="drawer-close" @click="closeDrill">&times;</button>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <button
+              v-if="drillRecords.length"
+              class="btn btn--ghost btn--sm"
+              title="Export these records to CSV"
+              @click="exportDrillCsv"
+            >Export CSV</button>
+            <button class="drawer-close" @click="closeDrill">&times;</button>
+          </div>
         </div>
         <div class="drill-modal-body">
           <div v-if="loadingDrill" class="hint">Loading…</div>

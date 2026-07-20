@@ -236,7 +236,7 @@ onMounted(load);
           </div>
           <table v-if="data.transcription.by_model.length" class="usage-table">
             <thead>
-              <tr><th>Provider / model</th><th class="num">Count</th><th class="num">Minutes</th><th class="num">Est. cost</th></tr>
+              <tr><th>Provider / model</th><th class="num">Attempts</th><th class="num">Succeeded</th><th class="num">Minutes</th><th class="num">Est. cost</th></tr>
             </thead>
             <tbody>
               <tr v-for="(t, i) in data.transcription.by_model" :key="'tx' + i">
@@ -245,6 +245,9 @@ onMounted(load);
                   <span class="mono" style="font-size: 11px; margin-left: 6px">{{ t.model || "unknown" }}</span>
                 </td>
                 <td class="num">{{ fmtInt(t.transcriptions) }}</td>
+                <td class="num" :style="t.successes < t.transcriptions ? 'color: var(--danger, #dc2626); font-weight: 700' : ''">
+                  {{ fmtInt(t.successes) }}<span v-if="t.successes < t.transcriptions" style="font-weight: 400; opacity: 0.8"> ({{ t.transcriptions - t.successes }} failed)</span>
+                </td>
                 <td class="num">{{ t.audio_seconds ? t.audio_minutes.toLocaleString() : "—" }}</td>
                 <td class="num">{{ t.priced && t.audio_seconds ? fmtMoney(t.est_cost) : "—" }}</td>
               </tr>

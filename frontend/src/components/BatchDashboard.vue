@@ -4,8 +4,10 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
+import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
+import { downloadCsv } from "@/utils/csv";
 
-type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms";
+type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms" | "lowconf";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
 type BatchJobStatus = "running" | "completed" | "failed";
 
@@ -49,6 +51,7 @@ const open = ref<Record<SectionKey, boolean>>({
   lastRun: false,
   history: false,
   keyterms: false,
+  lowconf: false,
 });
 
 const toggle = (key: SectionKey) => { open.value[key] = !open.value[key]; };
@@ -202,6 +205,15 @@ async function requeueAllErrors() {
   }
 }
 
+function exportFailedCsv() {
+  if (!failedRecords.value.length) return;
+  const cols = ["id", "interactionType", "campaign", "status", "recordingUrl", "interactionDateTime", "createdAt", "lastError"];
+  const rows = failedRecords.value.map((r: any) =>
+    Object.fromEntries(cols.map((c) => [c, r[c] ?? ""])),
+  );
+  downloadCsv("failed-records", rows, cols);
+}
+
 async function requeueRecord(id: string) {
   maintMsg.value = "";
   try {
@@ -255,6 +267,30 @@ async function loadKeytermSuggestions() {
 
 function confPct(c: number) {
   return Math.round((c ?? 0) * 100);
+}
+
+// ── Lowest-confidence transcripts (QA review queue) ─────────────────────────
+const lowConfList = ref<any[]>([]);
+const loadingLowConf = ref(false);
+const reviewDrawerId = ref<string | null>(null);
+
+async function loadLowConfidence() {
+  loadingLowConf.value = true;
+  try {
+    const res = await axios.get(RecordingPath.lowConfidence, { params: { limit: 50 } });
+    lowConfList.value = res.data ?? [];
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || e?.message || "Failed to load low-confidence transcripts";
+  } finally {
+    loadingLowConf.value = false;
+  }
+}
+
+function confClass(c: number) {
+  const p = confPct(c);
+  if (p >= 90) return "chip--success";
+  if (p >= 75) return "chip--warning";
+  return "chip--danger";
 }
 
 async function pollJobs() {
@@ -686,6 +722,7 @@ onUnmounted(stopPolling);
             </div>
             <div class="spacer" />
             <span class="chip" :class="failedRecords.length ? 'chip--danger' : 'chip--success'" style="margin-right: 8px">{{ failedRecords.length }} error{{ failedRecords.length === 1 ? '' : 's' }}</span>
+            <button v-if="failedRecords.length" class="btn btn--ghost btn--sm" style="margin-right: 6px" @click.stop="exportFailedCsv">Export CSV</button>
             <button class="btn btn--ghost btn--sm" :disabled="loadingFailed" @click.stop="loadFailed">{{ loadingFailed ? "Refreshing…" : "Refresh" }}</button>
           </div>
           <div class="tile-body">
@@ -771,6 +808,46 @@ onUnmounted(stopPolling);
               <div v-else class="hint">No new low-confidence terms in this window — either vocabulary coverage is good, or no Deepgram transcripts have run yet.</div>
             </div>
             <div v-else class="hint">Click Analyse to mine recent transcripts for shaky terms.</div>
+          </div>
+        </div>
+
+        <!-- Lowest-confidence transcripts (QA review queue) -->
+        <div class="tile tile--accent" @click="toggle('lowconf')">
+          <div class="tile-head">
+            <div class="tile-icon">🎧</div>
+            <div class="tile-text">
+              <div class="tile-title">Review: Lowest-Confidence Transcripts</div>
+              <div class="tile-desc">Calls the transcription AI was least sure about — ranked worst first for spot-checking. Click a row to open the transcript.</div>
+            </div>
+            <div class="spacer" />
+            <button
+              v-if="isOpen('lowconf')"
+              class="btn btn--ghost btn--sm"
+              style="margin-right: 8px"
+              :disabled="loadingLowConf"
+              @click.stop="loadLowConfidence"
+            >{{ loadingLowConf ? "Loading…" : "Refresh" }}</button>
+            <div class="chev" :class="{ open: isOpen('lowconf') }"></div>
+          </div>
+          <div v-show="isOpen('lowconf')" class="tile-body" @click.stop>
+            <div v-if="!lowConfList.length && !loadingLowConf" style="margin-bottom: 10px">
+              <button class="btn btn--primary" @click="loadLowConfidence">Load lowest-confidence transcripts</button>
+              <span class="hint" style="margin-left: 10px">Only Deepgram transcripts report confidence.</span>
+            </div>
+            <table v-if="lowConfList.length" class="usage-table">
+              <thead>
+                <tr><th class="num">Confidence</th><th class="num">Shaky terms</th><th>Campaign</th><th>Date</th><th>Snippet</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in lowConfList" :key="r.id" class="lc-row" @click="reviewDrawerId = r.id">
+                  <td class="num"><span class="chip" :class="confClass(r.confidence)" style="font-size: 11px">{{ confPct(r.confidence) }}%</span></td>
+                  <td class="num">{{ r.lowConfidenceCount }}</td>
+                  <td>{{ r.campaign || "—" }}</td>
+                  <td>{{ fmtDate(r.date) }}</td>
+                  <td style="max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted)">{{ r.snippet }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -946,6 +1023,9 @@ onUnmounted(stopPolling);
         </div>
       </div>
     </div>
+
+    <!-- Shared detail drawer (opened from the low-confidence review list) -->
+    <InteractionDetailDrawer :recording-id="reviewDrawerId" @close="reviewDrawerId = null" />
   </div>
 </template>
 
@@ -1003,5 +1083,11 @@ onUnmounted(stopPolling);
 .usage-table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.usage-table .lc-row {
+  cursor: pointer;
+}
+.usage-table .lc-row:hover {
+  background: var(--surface-soft, rgba(99, 102, 241, 0.06));
 }
 </style>

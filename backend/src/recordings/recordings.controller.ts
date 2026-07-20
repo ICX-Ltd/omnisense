@@ -86,6 +86,12 @@ export class RecordingsController {
     return this.svc.listJobs(20);
   }
 
+  // Transcripts ranked by confidence (lowest first) — QA review queue.
+  @Get('low-confidence')
+  lowConfidenceTranscripts(@Query('limit') limit?: string) {
+    return this.svc.lowConfidenceTranscripts(limit ? parseInt(limit, 10) : 50);
+  }
+
   // Suggested vehicle keyterms mined from low-confidence transcription words.
   @Get('keyterm-suggestions')
   keytermSuggestions(

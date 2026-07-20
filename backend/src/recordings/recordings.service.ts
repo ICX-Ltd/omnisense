@@ -844,6 +844,55 @@ export class RecordingsService {
     };
   }
 
+  // Transcripts ranked by confidence, lowest first — a QA review queue for the
+  // calls the transcription model was least sure about. Each row links to the
+  // detail drawer (which shows the transcript + the low-confidence terms).
+  async lowConfidenceTranscripts(limit = 50) {
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 500) : 50;
+    const rows = await this.recordingsRepo.manager.query<
+      Array<{
+        id: string;
+        confidence: number;
+        model: string;
+        lowJson: string | null;
+        snippet: string | null;
+        campaign: string | null;
+        interactionType: string | null;
+        date: Date | null;
+      }>
+    >(
+      `SELECT TOP (@0)
+         t.recordingId AS id, t.confidence AS confidence, t.model AS model,
+         t.lowConfidenceJson AS lowJson, LEFT(t.text, 160) AS snippet,
+         r.campaign AS campaign, r.interactionType AS interactionType,
+         COALESCE(r.interactionDateTime, r.createdAt) AS date
+       FROM app.interaction_transcripts t
+       INNER JOIN app.interactions r ON r.id = t.recordingId
+       WHERE t.confidence IS NOT NULL
+       ORDER BY t.confidence ASC`,
+      [n],
+    );
+    return rows.map((r) => {
+      let lowConfidenceCount = 0;
+      try {
+        const a = JSON.parse(r.lowJson || '[]');
+        lowConfidenceCount = Array.isArray(a) ? a.length : 0;
+      } catch {
+        /* ignore */
+      }
+      return {
+        id: r.id,
+        confidence: r.confidence,
+        model: r.model,
+        campaign: r.campaign,
+        interactionType: r.interactionType,
+        date: r.date,
+        lowConfidenceCount,
+        snippet: r.snippet,
+      };
+    });
+  }
+
   async batchTranscribe(limit: number) {
     const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 10;
 
