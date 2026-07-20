@@ -15,6 +15,7 @@ export const RecordingPath = {
   batchInsightsChats: `${ApiPath.Recordings}/batch/insights/chats`,
   batchRequeueErrors: `${ApiPath.Recordings}/batch/requeue-errors`,
   batchReprocessInsights: `${ApiPath.Recordings}/batch/reprocess-insights`,
+  keytermSuggestions: `${ApiPath.Recordings}/keyterm-suggestions`,
   batchJobs: `${ApiPath.Recordings}/jobs`,
   batchJob: (id: string) => `${ApiPath.Recordings}/jobs/${id}`,
 } as const;

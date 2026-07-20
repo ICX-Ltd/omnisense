@@ -17,6 +17,7 @@ import { LlmUsageLog } from '../db/entities/llm-usage-log.entity';
 import { TranscriptionUsageLog } from '../db/entities/transcription-usage-log.entity';
 
 import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
+import { VEHICLE_KEYTERMS, VEHICLE_REPLACEMENTS } from '../transcription/vehicle-vocab';
 import {
   ChatResponseMetrics,
   InsightsService,
@@ -758,6 +759,89 @@ export class RecordingsService {
       );
     }
     return { reprocessed, campaign: campaign?.trim() || null };
+  }
+
+  // ─── transcription vocabulary suggestions (keyterm feedback loop) ────────────
+
+  // Mine the persisted low-confidence words (lowConfidenceJson) across recent
+  // transcripts and surface the terms Deepgram most often struggles with, so a
+  // dev can promote the real makes/models into VEHICLE_KEYTERMS (or add a
+  // VEHICLE_REPLACEMENTS mapping). Terms already covered by the vocab are
+  // excluded from suggestions — this only shows NEW candidates.
+  async keytermSuggestions(days = 90, limit = 40) {
+    const since = new Date();
+    since.setDate(since.getDate() - (Number.isFinite(days) && days > 0 ? days : 90));
+
+    const rows = await this.recordingsRepo.manager.query<Array<{ j: string }>>(
+      `SELECT TOP 5000 t.lowConfidenceJson AS j
+       FROM app.interaction_transcripts t
+       INNER JOIN app.interactions r ON r.id = t.recordingId
+       WHERE t.lowConfidenceJson IS NOT NULL
+         AND COALESCE(r.interactionDateTime, r.createdAt) >= @0
+       ORDER BY t.createdAt DESC`,
+      [since],
+    );
+
+    // Everything the vocab already handles (keyterms + both sides of each
+    // replacement), lower-cased, so covered terms drop out of the suggestions.
+    const covered = new Set<string>();
+    for (const k of VEHICLE_KEYTERMS) covered.add(k.toLowerCase());
+    for (const [from, to] of VEHICLE_REPLACEMENTS) {
+      covered.add(from.toLowerCase());
+      covered.add(to.toLowerCase());
+    }
+
+    const agg = new Map<
+      string,
+      { word: string; calls: number; occurrences: number; minConfidence: number; sumConfidence: number }
+    >();
+    let analysed = 0;
+    for (const row of rows) {
+      let words: Array<{ word?: string; confidence?: number; count?: number }> = [];
+      try {
+        words = JSON.parse(row.j) ?? [];
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(words) || !words.length) continue;
+      analysed++;
+      for (const w of words) {
+        const word = (w.word || '').trim();
+        if (word.length < 3) continue;
+        const key = word.toLowerCase();
+        if (covered.has(key)) continue;
+        const conf = typeof w.confidence === 'number' ? w.confidence : 0.5;
+        const occ = typeof w.count === 'number' && w.count > 0 ? w.count : 1;
+        const e = agg.get(key);
+        if (e) {
+          e.calls += 1;
+          e.occurrences += occ;
+          e.minConfidence = Math.min(e.minConfidence, conf);
+          e.sumConfidence += conf;
+        } else {
+          agg.set(key, { word, calls: 1, occurrences: occ, minConfidence: conf, sumConfidence: conf });
+        }
+      }
+    }
+
+    const suggestions = [...agg.values()]
+      // Worth acting on = seen across multiple calls, worst confidence first.
+      .sort((a, b) => b.calls - a.calls || a.minConfidence - b.minConfidence)
+      .slice(0, Number.isFinite(limit) && limit > 0 ? limit : 40)
+      .map((e) => ({
+        word: e.word,
+        calls: e.calls,
+        occurrences: e.occurrences,
+        minConfidence: Math.round(e.minConfidence * 100) / 100,
+        avgConfidence: Math.round((e.sumConfidence / e.calls) * 100) / 100,
+      }));
+
+    return {
+      analysed,
+      distinctTerms: agg.size,
+      since: since.toISOString(),
+      suggestions,
+    };
   }
 
   async batchTranscribe(limit: number) {

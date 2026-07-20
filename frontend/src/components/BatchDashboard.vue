@@ -5,7 +5,7 @@ import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
 
-type SectionKey = "summary" | "actions" | "lastRun" | "history";
+type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
 type BatchJobStatus = "running" | "completed" | "failed";
 
@@ -48,6 +48,7 @@ const open = ref<Record<SectionKey, boolean>>({
   actions: true,
   lastRun: false,
   history: false,
+  keyterms: false,
 });
 
 const toggle = (key: SectionKey) => { open.value[key] = !open.value[key]; };
@@ -231,6 +232,29 @@ async function reprocessInsights() {
   } finally {
     reprocessing.value = false;
   }
+}
+
+// ── Transcription vocabulary suggestions (keyterm feedback loop) ────────────
+const keytermData = ref<any>(null);
+const loadingKeyterms = ref(false);
+const keytermDays = ref(90);
+
+async function loadKeytermSuggestions() {
+  loadingKeyterms.value = true;
+  try {
+    const res = await axios.get(RecordingPath.keytermSuggestions, {
+      params: { days: keytermDays.value, limit: 40 },
+    });
+    keytermData.value = res.data;
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || e?.message || "Failed to load keyterm suggestions";
+  } finally {
+    loadingKeyterms.value = false;
+  }
+}
+
+function confPct(c: number) {
+  return Math.round((c ?? 0) * 100);
 }
 
 async function pollJobs() {
@@ -698,6 +722,58 @@ onUnmounted(stopPolling);
           </div>
         </div>
 
+        <!-- Transcription vocabulary suggestions (keyterm feedback loop) -->
+        <div class="tile tile--accent" @click="toggle('keyterms')">
+          <div class="tile-head">
+            <div class="tile-icon">🔤</div>
+            <div class="tile-text">
+              <div class="tile-title">Transcription Vocabulary Suggestions</div>
+              <div class="tile-desc">Words Deepgram was least sure about, mined from transcripts — candidates for the vehicle keyterm list.</div>
+            </div>
+            <div class="spacer" />
+            <div class="chev" :class="{ open: isOpen('keyterms') }"></div>
+          </div>
+          <div v-show="isOpen('keyterms')" class="tile-body" @click.stop>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px">
+              <label class="label">Window (days)</label>
+              <select v-model.number="keytermDays" class="select" style="max-width: 120px">
+                <option :value="30">30</option>
+                <option :value="90">90</option>
+                <option :value="180">180</option>
+                <option :value="365">365</option>
+              </select>
+              <button class="btn btn--primary" :disabled="loadingKeyterms" @click="loadKeytermSuggestions">
+                {{ loadingKeyterms ? "Analysing…" : "Analyse transcripts" }}
+              </button>
+            </div>
+
+            <div v-if="keytermData">
+              <div class="hint" style="margin-bottom: 8px">
+                {{ keytermData.analysed }} transcript(s) with low-confidence words analysed ·
+                {{ keytermData.distinctTerms }} distinct new terms.
+                Promising makes/models can be added to <code>VEHICLE_KEYTERMS</code> (or a
+                <code>VEHICLE_REPLACEMENTS</code> mapping) in <code>backend/src/transcription/vehicle-vocab.ts</code>.
+              </div>
+              <table v-if="keytermData.suggestions.length" class="usage-table">
+                <thead>
+                  <tr><th>Term</th><th class="num">Calls</th><th class="num">Occurrences</th><th class="num">Min conf</th><th class="num">Avg conf</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(s, i) in keytermData.suggestions" :key="i">
+                    <td><span class="mono">{{ s.word }}</span></td>
+                    <td class="num">{{ s.calls }}</td>
+                    <td class="num">{{ s.occurrences }}</td>
+                    <td class="num">{{ confPct(s.minConfidence) }}%</td>
+                    <td class="num">{{ confPct(s.avgConfidence) }}%</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="hint">No new low-confidence terms in this window — either vocabulary coverage is good, or no Deepgram transcripts have run yet.</div>
+            </div>
+            <div v-else class="hint">Click Analyse to mine recent transcripts for shaky terms.</div>
+          </div>
+        </div>
+
         <!-- Active jobs tile -->
         <div v-if="activeJobs.length" class="tile">
           <div class="tile-head">
@@ -903,5 +979,29 @@ onUnmounted(stopPolling);
 
 .batch-grid .select {
   width: 100%;
+}
+
+/* Keyterm-suggestion table */
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.usage-table th,
+.usage-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  text-align: left;
+}
+.usage-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #64748b);
+  font-weight: 700;
+}
+.usage-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 </style>

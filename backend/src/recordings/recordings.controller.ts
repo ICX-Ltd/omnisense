@@ -86,6 +86,18 @@ export class RecordingsController {
     return this.svc.listJobs(20);
   }
 
+  // Suggested vehicle keyterms mined from low-confidence transcription words.
+  @Get('keyterm-suggestions')
+  keytermSuggestions(
+    @Query('days') days?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.svc.keytermSuggestions(
+      days ? parseInt(days, 10) : 90,
+      limit ? parseInt(limit, 10) : 40,
+    );
+  }
+
   @Get('jobs/:jobId')
   getJob(@Param('jobId') jobId: string) {
     return this.svc.getJob(jobId);
