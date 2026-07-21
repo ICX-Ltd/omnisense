@@ -183,6 +183,27 @@ const loadingOpportunityReason = ref(false);
 // Detail drawer
 const detailId = ref<string | null>(null);
 
+// Vulnerable customers (Consumer Duty — QA Q13)
+const vulnData = ref<any>(null);
+const vulnList = ref<any[]>([]);
+const vulnAnswer = ref<"yes" | "no" | null>(null);
+const loadingVuln = ref(false);
+async function loadVulnList(answer: "yes" | "no") {
+  if (vulnAnswer.value === answer) { vulnAnswer.value = null; vulnList.value = []; return; }
+  vulnAnswer.value = answer;
+  loadingVuln.value = true;
+  try {
+    const res = await axios.get(ApiPath.OpsVulnerabilityInteractions, {
+      params: { ...sharedParams.value, answer, limit: 200 },
+    });
+    vulnList.value = res.data ?? [];
+  } catch {
+    vulnList.value = [];
+  } finally {
+    loadingVuln.value = false;
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtScore(v: number | null | undefined) {
   if (typeof v !== "number" || v === null) return "n/a";
@@ -460,18 +481,22 @@ async function loadAll() {
   detailId.value = null;
 
   try {
-    const [opsRes, dimRes, oppRes, chatRtRes] = await Promise.all([
+    const [opsRes, dimRes, oppRes, chatRtRes, vulnRes] = await Promise.all([
       axios.get(ApiPath.InsightsSummaryOperations, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsDimensions, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsOpportunity, { params: sharedParams.value }).catch(() => ({ data: null })),
       showChatResponse.value
         ? axios.get(ApiPath.OpsChatResponseTime, { params: sharedParams.value }).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
+      axios.get(ApiPath.OpsVulnerability, { params: sharedParams.value }).catch(() => ({ data: null })),
     ]);
     opsData.value = opsRes.data;
     dimData.value = dimRes.data;
     opportunityData.value = oppRes.data;
     chatResponseData.value = chatRtRes.data;
+    vulnData.value = vulnRes.data;
+    vulnList.value = [];
+    vulnAnswer.value = null;
     await fetchObjectionAssessments();
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
@@ -1515,6 +1540,55 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+      </div>
+
+      <!-- Vulnerable Customers (Consumer Duty — QA Q13) -->
+      <div v-if="vulnData" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128735;</div>
+          <div class="tile-text">
+            <div class="tile-title">Vulnerable Customers (Consumer Duty)</div>
+            <div class="tile-desc">From QA Q13 — where a vulnerable customer was identified and whether they were handled appropriately. {{ vulnData.total_qa }} QA-scored interactions in range.</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div style="display: flex; gap: 24px; flex-wrap: wrap; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg)">
+            <div><div class="opp-stat-label">Identified vulnerable</div><div class="opp-stat-value">{{ vulnData.identified }}</div></div>
+            <div><div class="opp-stat-label">Handled &#10003;</div><div class="opp-stat-value" style="color: #059669">{{ vulnData.handled }}</div></div>
+            <div><div class="opp-stat-label">NOT handled &#10007;</div><div class="opp-stat-value" style="color: #dc2626">{{ vulnData.not_handled }}</div></div>
+          </div>
+
+          <div v-if="!vulnData.identified" class="hint" style="margin-top: 10px">No vulnerable customers identified in the QA-scored interactions for this range / filter.</div>
+
+          <div v-if="vulnData.identified" style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap">
+            <button
+              class="btn btn--secondary btn--sm"
+              :style="vulnAnswer === 'no' ? 'outline: 2px solid #dc2626' : ''"
+              @click="loadVulnList('no')"
+            >Review not-handled ({{ vulnData.not_handled }})</button>
+            <button
+              class="btn btn--ghost btn--sm"
+              :style="vulnAnswer === 'yes' ? 'outline: 2px solid #059669' : ''"
+              @click="loadVulnList('yes')"
+            >View handled ({{ vulnData.handled }})</button>
+          </div>
+
+          <div v-if="vulnAnswer" class="drill-panel" style="margin-top: 10px">
+            <div v-if="loadingVuln" class="hint">Loading…</div>
+            <div v-else-if="!vulnList.length" class="hint">None found.</div>
+            <div v-else v-for="ix in vulnList" :key="ix.recordingId" class="drill-row" @click="openDetail(ix.recordingId)">
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+                <span class="chip" :class="ix.vuln_answer === 'no' ? 'chip--danger' : 'chip--success'" style="font-size: 10px">{{ ix.vuln_answer === 'no' ? 'Not handled' : 'Handled' }}</span>
+                <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 10px">{{ ix.campaign }}</span>
+                <span v-if="ix.agent" style="font-size: 12px">{{ ix.agent }}</span>
+                <span v-if="ix.interactionTpsId" class="mono" style="font-size: 11px; opacity: 0.6">TPS {{ ix.interactionTpsId }}</span>
+                <span class="mono" style="font-size: 11px; opacity: 0.6; margin-left: auto">{{ fmtDate(ix.interactionDateTime) }}</span>
+              </div>
+              <div v-if="ix.vuln_rationale" class="drill-row-summary" style="font-style: italic">{{ ix.vuln_rationale }}</div>
+              <div v-else class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="grid grid-3" style="margin-top: 14px">

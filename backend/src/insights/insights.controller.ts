@@ -332,6 +332,44 @@ export class InsightsController {
     return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
   }
 
+  @Get('ops/vulnerability')
+  async opsVulnerability(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    return this.svcSummary.getVulnerabilityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
+  }
+
+  @Get('ops/vulnerability-interactions')
+  async opsVulnerabilityInteractions(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('answer') answer?: string,
+    @Query('limit') limit?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('vehicleMake') vehicleMake?: string,
+    @Query('vehicleModels') vehicleModelsRaw?: string,
+  ) {
+    const { fromDate, toDate } = parseDateRange(from, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    const parsedLimit = Math.min(parseInt(limit ?? '200', 10) || 200, 500);
+    return this.svcSummary.getVulnerabilityInteractions(
+      fromDate, toDate, filter, answer, parsedLimit, 0,
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw),
+    );
+  }
+
   @Get('ops/interactions-by-opportunity-reason')
   async opsByOpportunityReason(
     @Query('from') from?: string,

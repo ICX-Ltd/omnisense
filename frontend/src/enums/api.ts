@@ -25,6 +25,8 @@ export const ApiPath = {
   OpsInteractionsByPartialOutcome: "/uiapi/insights/ops/interactions-by-partial-outcome",
   OpsInteractionsByLowScoreAgent: "/uiapi/insights/ops/interactions-by-low-score-agent",
   OpsOpportunity: "/uiapi/insights/ops/opportunity",
+  OpsVulnerability: "/uiapi/insights/ops/vulnerability",
+  OpsVulnerabilityInteractions: "/uiapi/insights/ops/vulnerability-interactions",
   OpsInteractionsByOpportunityReason: "/uiapi/insights/ops/interactions-by-opportunity-reason",
   OpsInteractionDetail: "/uiapi/insights/ops/interaction-detail",
   OpsChatResponseTime: "/uiapi/insights/ops/chat-response-time",

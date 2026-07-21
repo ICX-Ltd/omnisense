@@ -2147,6 +2147,76 @@ ${prompt}
   // OPS: INTERACTIONS BY OUTCOME
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // OPS: VULNERABLE CUSTOMERS (Consumer Duty) — from QA question Q13.
+  // q13_vulnerability.answer = 'yes' (vulnerable + handled well), 'no' (vulnerable
+  // + NOT handled — the compliance risk), or n/a/missing (no vulnerability).
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private readonly Q13_ANSWER =
+    `JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q13_vulnerability.answer')`;
+  private readonly Q13_RATIONALE =
+    `JSON_VALUE(ii.qa_scores_json, '$.scores.right_outcome.q13_vulnerability.rationale')`;
+
+  async getVulnerabilityMetrics(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    campaign?: string, agent?: string, excludeOutcomes?: string[],
+    vehicleMake?: string, vehicleModels?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const rows = await this.insightsRepo.manager.query<Array<{ handled: string; not_handled: string; total_qa: string }>>(
+      `SELECT
+         SUM(CASE WHEN ${this.Q13_ANSWER} = 'yes' THEN 1 ELSE 0 END) AS handled,
+         SUM(CASE WHEN ${this.Q13_ANSWER} = 'no' THEN 1 ELSE 0 END) AS not_handled,
+         COUNT(1) AS total_qa
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ii.qa_scores_json IS NOT NULL
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}`,
+      [from, to, ...extraParams],
+    );
+    const r = rows[0];
+    const handled = parseInt(r?.handled ?? '0', 10);
+    const not_handled = parseInt(r?.not_handled ?? '0', 10);
+    return {
+      window: { from: from.toISOString(), to: to.toISOString() },
+      total_qa: parseInt(r?.total_qa ?? '0', 10),
+      identified: handled + not_handled,
+      handled,
+      not_handled,
+    };
+  }
+
+  async getVulnerabilityInteractions(
+    from: Date, to: Date, filterKey: InteractionFilter = 'calls',
+    answer?: string, limit = 200, offset = 0,
+    campaign?: string, agent?: string, excludeOutcomes?: string[],
+    vehicleMake?: string, vehicleModels?: string[],
+  ) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const conds = [`${this.Q13_ANSWER} IN ('yes', 'no')`];
+    const params: any[] = [from, to, ...extraParams];
+    if (answer === 'yes' || answer === 'no') {
+      conds.push(`${this.Q13_ANSWER} = @${params.length}`);
+      params.push(answer);
+    }
+    const offIdx = params.length;
+    return this.insightsRepo.manager.query(
+      `SELECT ii.recordingId, ii.summary_short, ii.overall_score,
+              ia.agent, ia.interactionDateTime, ia.campaign, ia.outcome, ia.interactionTpsId,
+              ${this.Q13_ANSWER} AS vuln_answer, ${this.Q13_RATIONALE} AS vuln_rationale
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE ${conds.join(' AND ')}
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) >= @0 AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       ORDER BY CASE WHEN ${this.Q13_ANSWER} = 'no' THEN 0 ELSE 1 END, COALESCE(ia.interactionDateTime, ia.createdAt) DESC
+       OFFSET @${offIdx} ROWS FETCH NEXT @${offIdx + 1} ROWS ONLY`,
+      [...params, offset, limit],
+    );
+  }
+
   async getInteractionsByOutcome(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     outcome: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],

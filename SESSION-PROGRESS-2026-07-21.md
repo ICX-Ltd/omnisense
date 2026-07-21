@@ -1,7 +1,7 @@
-# Session progress & test plan — 2026-07-21 (app v1.44.0)
+# Session progress & test plan — 2026-07-21 (app v1.45.0)
 
 Everything shipped this session, with **where it is** and **how to test it**.
-12 commits, all local/unpushed. Backend + frontend both build clean.
+All local/unpushed. Backend + frontend both build clean.
 
 ---
 
@@ -106,6 +106,17 @@ tell you exactly which SQL migrations are missing.**
 
 ## 15. Better transcription error messages
 **What:** Node's bare "fetch failed" now records the real cause (DNS/TCP/TLS/timeout) with the host — visible in Failed Records `lastError`.
+
+## 16. Vulnerable Customers (Consumer Duty)  (NEW)
+**What:** a rollup of the QA **Q13 vulnerability** signal — where a vulnerable customer was identified, and whether they were **handled appropriately**.
+**Where:** **Operations (QC)** dashboard → new **Vulnerable Customers (Consumer Duty)** tile (below Objection Handling / Sales Opportunity).
+**Prereq:** only appears for interactions that have **QA scores** (QC-scored calls); honours all Operations filters (campaign / agent / date / make / model / outcomes).
+**Test:**
+- Three counts: **Identified vulnerable**, **Handled ✓** (green), **NOT handled ✗** (red), out of the QA-scored total in range.
+- **Review not-handled (N)** → lists those interactions (the compliance priority — vulnerable but not handled well), each with the Q13 **rationale**; click a row → opens the drawer.
+- **View handled (N)** → the handled ones.
+- Empty state explains it when no vulnerable customers were identified.
+- Note: Q13 semantics — `no` = vulnerable **and not** handled (the risk), `yes` = vulnerable **and** handled, missing/n-a = no vulnerability present.
 
 ---
 
