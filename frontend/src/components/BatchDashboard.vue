@@ -4,11 +4,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
 import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
-import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
-import LowConfidenceHelp from "./LowConfidenceHelp.vue";
 import { downloadCsv } from "@/utils/csv";
 
-type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms" | "lowconf" | "failed";
+type SectionKey = "summary" | "actions" | "lastRun" | "history" | "failed";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
 type BatchJobStatus = "running" | "completed" | "failed";
 
@@ -51,8 +49,6 @@ const open = ref<Record<SectionKey, boolean>>({
   actions: true,
   lastRun: false,
   history: false,
-  keyterms: false,
-  lowconf: false,
   failed: false,
 });
 
@@ -246,88 +242,6 @@ async function reprocessInsights() {
   } finally {
     reprocessing.value = false;
   }
-}
-
-// ── Transcription vocabulary suggestions (keyterm feedback loop) ────────────
-const keytermData = ref<any>(null);
-const loadingKeyterms = ref(false);
-const keytermDays = ref(90);
-
-async function loadKeytermSuggestions() {
-  loadingKeyterms.value = true;
-  try {
-    const res = await axios.get(RecordingPath.keytermSuggestions, {
-      params: { days: keytermDays.value, limit: 40 },
-    });
-    keytermData.value = res.data;
-  } catch (e: any) {
-    error.value = e?.response?.data?.message || e?.message || "Failed to load keyterm suggestions";
-  } finally {
-    loadingKeyterms.value = false;
-  }
-}
-
-function confPct(c: number) {
-  return Math.round((c ?? 0) * 100);
-}
-
-// ── Semantic search: embed transcripts ──────────────────────────────────────
-const embedding = ref(false);
-const embedLimit = ref(200);
-const embedStatus = ref("");
-const embedCoverage = ref<{ embedded: number; remaining: number; total: number } | null>(null);
-const embedPct = computed(() => {
-  const c = embedCoverage.value;
-  if (!c) return 0;
-  const denom = c.embedded + c.remaining;
-  return denom ? Math.round((c.embedded / denom) * 100) : 0;
-});
-async function loadEmbedStatus() {
-  try {
-    embedCoverage.value = (await axios.get(RecordingPath.embedStatus)).data;
-  } catch {
-    /* non-fatal — hides the coverage line */
-  }
-}
-async function runEmbed() {
-  embedding.value = true;
-  embedStatus.value = "";
-  try {
-    const res = await axios.post(RecordingPath.batchEmbed, null, { params: { limit: embedLimit.value } });
-    const d = res.data ?? {};
-    embedStatus.value = `Embedded ${d.embedded ?? 0} (${d.remaining ?? 0} remaining) via ${d.model ?? "?"}.`;
-    await loadEmbedStatus();
-  } catch (e: any) {
-    embedStatus.value = e?.response?.data?.message || e?.message || "Embed failed";
-  } finally {
-    embedding.value = false;
-  }
-}
-
-// ── Lowest-confidence transcripts (QA review queue) ─────────────────────────
-const lowConfList = ref<any[]>([]);
-const loadingLowConf = ref(false);
-const lowConfLoaded = ref(false);
-const reviewDrawerId = ref<string | null>(null);
-
-async function loadLowConfidence() {
-  loadingLowConf.value = true;
-  try {
-    const res = await axios.get(RecordingPath.lowConfidence, { params: { limit: 50 } });
-    lowConfList.value = res.data ?? [];
-    lowConfLoaded.value = true;
-  } catch (e: any) {
-    error.value = e?.response?.data?.message || e?.message || "Failed to load low-confidence transcripts";
-  } finally {
-    loadingLowConf.value = false;
-  }
-}
-
-function confClass(c: number) {
-  const p = confPct(c);
-  if (p >= 90) return "chip--success";
-  if (p >= 75) return "chip--warning";
-  return "chip--danger";
 }
 
 async function pollJobs() {
@@ -555,7 +469,6 @@ onMounted(() => {
   loadSummary();
   loadHistory();
   loadFailed();
-  loadEmbedStatus();
   if (loadStoredIds().length) startPolling();
 });
 
@@ -798,149 +711,6 @@ onUnmounted(stopPolling);
           </div>
         </div>
 
-        <!-- Transcription vocabulary suggestions (keyterm feedback loop) -->
-        <div class="tile tile--accent" @click="toggle('keyterms')">
-          <div class="tile-head">
-            <div class="tile-icon">🔤</div>
-            <div class="tile-text">
-              <div class="tile-title">Transcription Vocabulary Suggestions</div>
-              <div class="tile-desc">Words Deepgram was least sure about, mined from transcripts — candidates for the vehicle keyterm list.</div>
-            </div>
-            <div class="spacer" />
-            <div class="chev" :class="{ open: isOpen('keyterms') }"></div>
-          </div>
-          <div v-show="isOpen('keyterms')" class="tile-body" @click.stop>
-            <div style="margin-bottom: 12px"><LowConfidenceHelp /></div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px">
-              <label class="label">Window (days)</label>
-              <select v-model.number="keytermDays" class="select" style="max-width: 140px">
-                <option :value="30">30</option>
-                <option :value="90">90</option>
-                <option :value="180">180</option>
-                <option :value="365">365 (1 yr)</option>
-                <option :value="730">730 (2 yrs)</option>
-              </select>
-              <button class="btn btn--primary" :disabled="loadingKeyterms" @click="loadKeytermSuggestions">
-                {{ loadingKeyterms ? "Analysing…" : "Analyse transcripts" }}
-              </button>
-            </div>
-
-            <div v-if="keytermData">
-              <div class="hint" style="margin-bottom: 8px">
-                {{ keytermData.analysed }} transcript(s) with low-confidence words analysed ·
-                {{ keytermData.distinctTerms }} distinct new terms.
-                Promising makes/models can be added to <code>VEHICLE_KEYTERMS</code> (or a
-                <code>VEHICLE_REPLACEMENTS</code> mapping) in <code>backend/src/transcription/vehicle-vocab.ts</code>.
-              </div>
-              <table v-if="keytermData.suggestions.length" class="usage-table">
-                <thead>
-                  <tr><th>Term</th><th class="num">Calls</th><th class="num">Occurrences</th><th class="num">Min conf</th><th class="num">Avg conf</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(s, i) in keytermData.suggestions" :key="i">
-                    <td><span class="mono">{{ s.word }}</span></td>
-                    <td class="num">{{ s.calls }}</td>
-                    <td class="num">{{ s.occurrences }}</td>
-                    <td class="num">{{ confPct(s.minConfidence) }}%</td>
-                    <td class="num">{{ confPct(s.avgConfidence) }}%</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div v-else class="hint">No new low-confidence terms in this window — either vocabulary coverage is good, or no Deepgram transcripts have run yet.</div>
-            </div>
-            <div v-else class="hint">Click Analyse to mine recent transcripts for shaky terms.</div>
-          </div>
-        </div>
-
-        <!-- Semantic search — embed transcripts -->
-        <div class="tile tile--accent">
-          <div class="tile-head">
-            <div class="tile-icon">🧭</div>
-            <div class="tile-text">
-              <div class="tile-title">Semantic Search — Embed Transcripts</div>
-              <div class="tile-desc">Generate meaning vectors so transcripts are searchable by phrase (Find record → Meaning). Cheap; run repeatedly to clear the backlog.</div>
-            </div>
-            <div class="spacer" />
-          </div>
-          <div class="tile-body">
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
-              <label class="label">Batch size</label>
-              <select v-model.number="embedLimit" class="select" style="max-width: 120px">
-                <option :value="100">100</option>
-                <option :value="200">200</option>
-                <option :value="500">500</option>
-              </select>
-              <button class="btn btn--primary" :disabled="embedding" @click="runEmbed">
-                {{ embedding ? "Embedding…" : `Embed next ${embedLimit}` }}
-              </button>
-              <button class="btn btn--ghost btn--sm" @click="loadEmbedStatus">Refresh</button>
-              <span v-if="embedStatus" class="chip chip--primary">{{ embedStatus }}</span>
-            </div>
-
-            <div v-if="embedCoverage" style="margin-top: 12px; max-width: 420px">
-              <div class="hint">
-                <strong>{{ embedCoverage.embedded }}</strong> of
-                <strong>{{ embedCoverage.embedded + embedCoverage.remaining }}</strong>
-                transcripts embedded ({{ embedPct }}%) ·
-                <strong>{{ embedCoverage.remaining }}</strong> remaining
-                <span v-if="embedCoverage.total > embedCoverage.embedded + embedCoverage.remaining">
-                  · {{ embedCoverage.total }} transcripts total
-                </span>
-              </div>
-              <div style="height: 8px; background: var(--surface-2, #e0e0e0); border-radius: 4px; overflow: hidden; margin-top: 5px">
-                <div :style="{ width: embedPct + '%', height: '100%', background: '#6366f1', transition: 'width 0.4s' }" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Lowest-confidence transcripts (QA review queue) -->
-        <div class="tile tile--accent" @click="toggle('lowconf')">
-          <div class="tile-head">
-            <div class="tile-icon">🎧</div>
-            <div class="tile-text">
-              <div class="tile-title">Review: Lowest-Confidence Transcripts</div>
-              <div class="tile-desc">Calls the transcription AI was least sure about — ranked worst first for spot-checking. Click a row to open the transcript.</div>
-            </div>
-            <div class="spacer" />
-            <button
-              v-if="isOpen('lowconf')"
-              class="btn btn--ghost btn--sm"
-              style="margin-right: 8px"
-              :disabled="loadingLowConf"
-              @click.stop="loadLowConfidence"
-            >{{ loadingLowConf ? "Loading…" : "Refresh" }}</button>
-            <div class="chev" :class="{ open: isOpen('lowconf') }"></div>
-          </div>
-          <div v-show="isOpen('lowconf')" class="tile-body" @click.stop>
-            <div style="margin-bottom: 12px"><LowConfidenceHelp /></div>
-            <div v-if="!lowConfList.length && !loadingLowConf && !lowConfLoaded" style="margin-bottom: 10px">
-              <button class="btn btn--primary" @click="loadLowConfidence">Load lowest-confidence transcripts</button>
-              <span class="hint" style="margin-left: 10px">Only Deepgram transcripts report confidence.</span>
-            </div>
-            <div v-else-if="!lowConfList.length && !loadingLowConf && lowConfLoaded" class="hint" style="line-height: 1.5">
-              No transcripts have a confidence score yet. Confidence is captured only for <strong>Deepgram</strong> transcripts made <strong>after</strong> the
-              <code>add-transcription-confidence.sql</code> migration is applied — so existing transcripts read as null until they're re-transcribed.
-              To populate this: run that migration (System Health lists it), then <strong>Requeue all errors</strong> / re-run <strong>Transcribe</strong>.
-              <button class="btn btn--ghost btn--sm" style="margin-left: 8px" @click="loadLowConfidence">Retry</button>
-            </div>
-            <table v-if="lowConfList.length" class="usage-table">
-              <thead>
-                <tr><th class="num">Confidence</th><th class="num">Shaky terms</th><th>Campaign</th><th>Date</th><th>Snippet</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="r in lowConfList" :key="r.id" class="lc-row" @click="reviewDrawerId = r.id">
-                  <td class="num"><span class="chip" :class="confClass(r.confidence)" style="font-size: 11px">{{ confPct(r.confidence) }}%</span></td>
-                  <td class="num">{{ r.lowConfidenceCount }}</td>
-                  <td>{{ r.campaign || "—" }}</td>
-                  <td>{{ fmtDate(r.date) }}</td>
-                  <td style="max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted)">{{ r.snippet }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <!-- Active jobs tile -->
         <div v-if="activeJobs.length" class="tile">
           <div class="tile-head">
@@ -1114,8 +884,6 @@ onUnmounted(stopPolling);
       </div>
     </div>
 
-    <!-- Shared detail drawer (opened from the low-confidence review list) -->
-    <InteractionDetailDrawer :recording-id="reviewDrawerId" @close="reviewDrawerId = null" />
   </div>
 </template>
 

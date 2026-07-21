@@ -22,6 +22,7 @@ import { PromptTemplate } from './db/entities/prompt-template.entity';
 import { PromptTemplateHistory } from './db/entities/prompt-template-history.entity';
 import { LlmUsageLog } from './db/entities/llm-usage-log.entity';
 import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.entity';
+import { TranscriptionVocab } from './db/entities/transcription-vocab.entity';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.ent
             PromptTemplateHistory,
             LlmUsageLog,
             TranscriptionUsageLog,
+            TranscriptionVocab,
           ],
           synchronize: false,
           logging: false,

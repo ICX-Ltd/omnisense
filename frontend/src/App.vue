@@ -56,6 +56,7 @@
               <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'test' }" @click="tab = 'test'; dpOpen = false">Test Lab</button>
               <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'data' }" @click="tab = 'data'; dpOpen = false">Data Queue</button>
               <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'batch' }" @click="tab = 'batch'; dpOpen = false">Batch Dashboard</button>
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'transcription' }" @click="tab = 'transcription'; dpOpen = false">Transcription Tools</button>
             </div>
           </div>
           <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Summary</button>
@@ -73,6 +74,7 @@
           <TestLab v-if="tab === 'test'" />
           <DataQueue v-else-if="tab === 'data'" />
           <BatchDashboard v-else-if="tab === 'batch'" />
+          <TranscriptionToolsPage v-else-if="tab === 'transcription'" />
           <SummaryDashboard v-else-if="tab === 'summary'" />
           <OperationsDashboard v-else-if="tab === 'ops'" />
           <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
@@ -92,6 +94,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TestLab from "./components/TestLab.vue";
 import DataQueue from "./components/DataQueue.vue";
 import BatchDashboard from "./components/BatchDashboard.vue";
+import TranscriptionToolsPage from "./components/TranscriptionToolsPage.vue";
 import SummaryDashboard from "./components/SummaryDashboard.vue";
 import OperationsDashboard from "./components/OperationsDashboard.vue";
 import ClientServicesDashboard from "./components/ClientServicesDashboard.vue";
@@ -110,14 +113,14 @@ import logoUrl from "./assets/ai-icon.png";
 const { canSeeAdminTools, canSeeDevTools } = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
 
-const tab = ref<"test" | "data" | "batch" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "prompts" | "health" | "settings">("ops");
+const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "prompts" | "health" | "settings">("ops");
 const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
-const isDataProcessingTab = computed(() => ["test", "data", "batch"].includes(tab.value));
+const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcription"].includes(tab.value));
 
 // Deep-linkable active tab — read from ?tab= on load, keep the URL in sync so a
 // view can be shared/pasted (dashboards sync their own filters into the query).
-const VALID_TABS = ["test", "data", "batch", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "settings"] as const;
+const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "settings"] as const;
 function initialTab(): typeof tab.value {
   const p = new URLSearchParams(window.location.search).get("tab");
   if (p && (VALID_TABS as readonly string[]).includes(p)) return p as typeof tab.value;

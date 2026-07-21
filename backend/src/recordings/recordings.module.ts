@@ -9,14 +9,16 @@ import { TranscriptionUsageLog } from '../db/entities/transcription-usage-log.en
 import { RecordingsController } from './recordings.controller';
 import { RecordingsService } from './recordings.service';
 import { InsightsModule } from '../insights/insights.module';
-import { TranscriptionDeepgramService } from '../transcription/transcriptionDeepgram.service';
+import { TranscriptionModule } from '../transcription/transcription.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Interaction, InteractionTranscript, InteractionInsight, BatchJob, LlmUsageLog, TranscriptionUsageLog]),
     InsightsModule,
+    // Provides the shared TranscriptionDeepgramService (+ its editable vocab).
+    TranscriptionModule,
   ],
   controllers: [RecordingsController],
-  providers: [RecordingsService, TranscriptionDeepgramService],
+  providers: [RecordingsService],
 })
 export class RecordingsModule {}

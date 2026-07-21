@@ -132,6 +132,10 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     ],
   },
   {
+    file: 'add-transcription-vocab.sql',
+    tables: ['transcription_vocab'],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],

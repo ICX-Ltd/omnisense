@@ -1,6 +1,10 @@
 import {
   Controller,
+  Get,
   Post,
+  Delete,
+  Patch,
+  Param,
   Body,
   UploadedFile,
   UseInterceptors,
@@ -9,13 +13,37 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TranscriptionOpenAiService } from './transcriptionOpenAi.service';
 import { TranscriptionDeepgramService } from './transcriptionDeepgram.service';
+import { TranscriptionVocabService } from './transcription-vocab.service';
 
 @Controller('uiapi/transcription')
 export class TranscriptionController {
   constructor(
     private readonly svcOa: TranscriptionOpenAiService,
     private readonly svcDg: TranscriptionDeepgramService,
+    private readonly vocab: TranscriptionVocabService,
   ) {}
+
+  // ─── editable vehicle vocabulary (keyterms + replacements) ─────────────────
+  @Get('vocab')
+  listVocab() {
+    return this.vocab.list();
+  }
+
+  @Post('vocab')
+  addVocab(@Body() body: { kind?: string; term?: string; replaceWith?: string }) {
+    const kind = body?.kind === 'replacement' ? 'replacement' : 'keyterm';
+    return this.vocab.add(kind, body?.term ?? '', body?.replaceWith);
+  }
+
+  @Patch('vocab/:id')
+  setVocabActive(@Param('id') id: string, @Body() body: { active?: boolean }) {
+    return this.vocab.setActive(id, body?.active !== false);
+  }
+
+  @Delete('vocab/:id')
+  removeVocab(@Param('id') id: string) {
+    return this.vocab.remove(id);
+  }
 
   @Post('call')
   @UseInterceptors(FileInterceptor('file'))

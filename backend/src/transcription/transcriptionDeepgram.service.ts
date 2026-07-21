@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { VEHICLE_KEYTERMS, VEHICLE_REPLACEMENTS } from './vehicle-vocab';
 import { describeError } from '../utils/describe-error.util';
+import { TranscriptionVocabService } from './transcription-vocab.service';
 
 type DiarizedTurn = {
   speaker: number;
@@ -44,8 +44,11 @@ function smoothTurns(turns: DiarizedTurn[]) {
 export class TranscriptionDeepgramService {
   private readonly apiKey = process.env.DEEPGRAM_API_KEY;
 
+  constructor(private readonly vocab: TranscriptionVocabService) {}
+
   // Builds the model + query string shared by both the URL and buffer paths.
-  private buildEndpoint() {
+  // keyterms/replacements come from the editable vocab (DB, with defaults).
+  private buildEndpoint(keyterms: string[], replacements: [string, string][]) {
     // Model is env-tunable so we can A/B nova-3 (keyterm prompting) against the
     // phone-tuned nova-2-phonecall on real calls without redeploying.
     const model = process.env.DEEPGRAM_MODEL || 'nova-2-phonecall';
@@ -64,15 +67,14 @@ export class TranscriptionDeepgramService {
     // Bias recognition toward our vehicle vocabulary. nova-3 supports the newer,
     // stronger keyterm prompting; nova-2 only supports keyword boosting.
     if (model.startsWith('nova-3')) {
-      for (const term of VEHICLE_KEYTERMS) params.append('keyterm', term);
+      for (const term of keyterms) params.append('keyterm', term);
     } else {
       // :2 intensifier nudges weighting up without over-biasing.
-      for (const term of VEHICLE_KEYTERMS)
-        params.append('keywords', `${term}:2`);
+      for (const term of keyterms) params.append('keywords', `${term}:2`);
     }
 
     // Deterministic safety net for stubborn, well-known mishears (blind swap).
-    for (const [from, to] of VEHICLE_REPLACEMENTS) {
+    for (const [from, to] of replacements) {
       params.append('replace', `${from}:${to}`);
     }
 
@@ -101,7 +103,8 @@ export class TranscriptionDeepgramService {
     body: Buffer | string,
     contentType: string,
   ) {
-    const endpoint = this.buildEndpoint();
+    const { keyterms, replacements } = await this.vocab.getActive();
+    const endpoint = this.buildEndpoint(keyterms, replacements);
     const host = new URL(endpoint).host;
 
     let res: Response;

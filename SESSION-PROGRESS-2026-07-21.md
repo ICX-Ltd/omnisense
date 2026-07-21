@@ -14,6 +14,7 @@ tell you exactly which SQL migrations are missing.**
    - `backend/sql/add-nmgb-survey-transcript.sql`  → `campaign_transcript_json` + reseed `call.base`
    - `backend/sql/add-transcription-confidence.sql` → `confidence`, `lowConfidenceJson`
    - `backend/sql/add-transcript-embeddings.sql`    → `embedding`, `embeddingModel`
+   - `backend/sql/add-transcription-vocab.sql`      → `transcription_vocab` table (editable keyterms; backend seeds it from defaults on boot)
    ```
    sqlcmd -S <host>,1433 -U <ddl_login> -P <pw> -d ai_insight -C -I -i backend\sql\<file>.sql
    ```
@@ -118,10 +119,22 @@ tell you exactly which SQL migrations are missing.**
 - Empty state explains it when no vulnerable customers were identified.
 - Note: Q13 semantics — `no` = vulnerable **and not** handled (the risk), `yes` = vulnerable **and** handled, missing/n-a = no vulnerability present.
 
+## 17. Transcription Tools page + editable vocabulary  (NEW)
+**What:** the three transcription tiles moved off the Batch dashboard into their own page, and the vehicle vocabulary is now **editable at runtime** — no code deploy to change keyterms/replacements.
+**Where:** top nav → **Data Processing → Transcription Tools**.
+**Prereq:** `add-transcription-vocab.sql` (backend seeds the table from the built-in defaults on first boot, so it starts populated).
+**Test:**
+- **Vehicle Vocabulary** editor — two columns, **Keyterms** and **Replacements**:
+  - Add a keyterm (a model); add a replacement (heard → fix, e.g. Duke → Juke).
+  - Toggle a row on/off, or delete it (confirmed).
+  - Changes apply to **new transcriptions within ~1 min** (60s cache); re-transcribe to see the effect. Falls back to built-in defaults if the table is empty/unreachable.
+- **Embed Transcripts**, **Vocabulary Suggestions**, **Review: Lowest-Confidence Transcripts** all moved here (gone from the Batch dashboard). Suggestions rows now have a **"+ keyterm"** button that adds straight into the editor.
+- Batch dashboard: **Insights Usage & Cost** and **Failed Records** are now **collapsible** (collapsed by default; usage panel lazy-loads on expand).
+
 ---
 
 ## Notes / known follow-ups
 - Semantic search scores the most recent ~3,000 embedded transcripts per query (perf guard).
 - Trend sparklines/embeddings/confidence all depend on data existing — empty until section 0 is done + a batch run.
-- Roadmap still open: golden-set harness, alerting/auto-ingest, PII redaction / Consumer-Duty rollup, Operations trend charts, agent trajectory.
-- 12 commits are **local/unpushed** — push when you're happy.
+- Roadmap still open (see FUTURE_SUGGESTIONS.md): golden-set harness, alerting/auto-ingest, PII redaction, prompt-version stamping, Operations trend charts, agent trajectory.
+- All work is pushed to `origin/main`.
