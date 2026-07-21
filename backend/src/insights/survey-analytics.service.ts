@@ -308,17 +308,38 @@ export class SurveyAnalyticsService {
     );
 
     const r = rows[0] ?? {};
-    return {
-      surveyed: parseInt(r.surveyed ?? '0', 10),
-      reasons: [
-        { reason: 'Price', key: 'price', count: parseInt(r.price ?? '0', 10) },
-        { reason: 'Expectations Not Met', key: 'expectations', count: parseInt(r.expectations ?? '0', 10) },
-        { reason: 'Purchased Different Brand', key: 'different_brand', count: parseInt(r.different_brand ?? '0', 10) },
-        { reason: 'Purchased Different Model', key: 'different_model', count: parseInt(r.different_model ?? '0', 10) },
-        { reason: 'Financing', key: 'financing', count: parseInt(r.financing ?? '0', 10) },
-        { reason: 'Dealership Experience', key: 'dealership_experience', count: parseInt(r.dealership_experience ?? '0', 10) },
-      ].sort((a, b) => b.count - a.count),
+
+    // Sub-reasons: for each reason that carries one, tally its values among the
+    // records where that reason flag is set (second level of the breakdown).
+    const subFor = async (reasonKey: string) => {
+      const reasonPath = SurveyAnalyticsService.REASON_PATHS[reasonKey];
+      const subPath = SurveyAnalyticsService.SUB_REASON_PATHS[reasonKey];
+      if (!reasonPath || !subPath) return [];
+      const subRows = await this.repo.manager.query<Array<{ sub: string; cnt: string }>>(
+        `SELECT ${CA(subPath)} AS sub, COUNT(1) AS cnt
+         ${FROM_SURVEY} ${baseFilter} AND ${CA(reasonPath)} IN ${TRUTHY}
+           AND ${CA(subPath)} IS NOT NULL AND ${CA(subPath)} <> ''
+         GROUP BY ${CA(subPath)} ORDER BY COUNT(1) DESC`,
+        params,
+      );
+      return subRows.map((s) => ({ value: s.sub, count: parseInt(s.cnt, 10) }));
     };
+
+    const reasons = [
+      { reason: 'Price', key: 'price', count: parseInt(r.price ?? '0', 10) },
+      { reason: 'Expectations Not Met', key: 'expectations', count: parseInt(r.expectations ?? '0', 10) },
+      { reason: 'Purchased Different Brand', key: 'different_brand', count: parseInt(r.different_brand ?? '0', 10) },
+      { reason: 'Purchased Different Model', key: 'different_model', count: parseInt(r.different_model ?? '0', 10) },
+      { reason: 'Financing', key: 'financing', count: parseInt(r.financing ?? '0', 10) },
+      { reason: 'Dealership Experience', key: 'dealership_experience', count: parseInt(r.dealership_experience ?? '0', 10) },
+    ].sort((a, b) => b.count - a.count);
+
+    // Attach sub-reason breakdowns (only the four reasons that have them).
+    for (const item of reasons) {
+      (item as any).subReasons = await subFor(item.key);
+    }
+
+    return { surveyed: parseInt(r.surveyed ?? '0', 10), reasons };
   }
 
   // ── Competitor purchases ──────────────────────────────────────────────────
@@ -500,6 +521,13 @@ export class SurveyAnalyticsService {
     financing: '$.not_purchased_reasons.financing',
     dealership_experience: '$.not_purchased_reasons.dealership_experience',
   };
+  // Reasons that carry a free-text/category sub-reason in the survey data.
+  private static readonly SUB_REASON_PATHS: Record<string, string> = {
+    price: '$.not_purchased_reasons.price_sub_reason',
+    expectations: '$.not_purchased_reasons.expectations_sub_reason',
+    financing: '$.not_purchased_reasons.financing_sub_reason',
+    dealership_experience: '$.not_purchased_reasons.dealership_experience_sub_reason',
+  };
   private static readonly INTEREST_PATHS: Record<string, string> = {
     styling: '$.initial_interest.styling_design',
     brand_reputation: '$.initial_interest.brand_reputation',
@@ -513,7 +541,7 @@ export class SurveyAnalyticsService {
     f: SurveyFilter,
     criteria: {
       competitorMake?: string; chineseOnly?: boolean; excludeChinese?: boolean;
-      notPurchaseReason?: string; interestFactor?: string; model?: string;
+      notPurchaseReason?: string; notPurchaseSubReason?: string; interestFactor?: string; model?: string;
       defectedOnly?: boolean; wonOnly?: boolean;
       flowStatus?: string; stillConsidering?: boolean; ratingScore?: number; dealerVisit?: string;
       ratedOnly?: boolean;
@@ -540,6 +568,11 @@ export class SurveyAnalyticsService {
     if (criteria.notPurchaseReason) {
       const path = SurveyAnalyticsService.REASON_PATHS[criteria.notPurchaseReason];
       if (path) conds.push(`${CA(path)} IN ${TRUTHY}`);
+      // Second level: a specific sub-reason within that reason.
+      if (criteria.notPurchaseSubReason) {
+        const subPath = SurveyAnalyticsService.SUB_REASON_PATHS[criteria.notPurchaseReason];
+        if (subPath) conds.push(`${CA(subPath)} = ${pushParam(criteria.notPurchaseSubReason)}`);
+      }
     }
     if (criteria.interestFactor) {
       const path = SurveyAnalyticsService.INTEREST_PATHS[criteria.interestFactor];

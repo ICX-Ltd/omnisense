@@ -770,19 +770,32 @@ onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll
             </div>
           </div>
           <div class="tile-body">
-            <div
-              v-if="notPurchaseReasons"
-              v-for="r in notPurchaseReasons.reasons"
-              :key="r.reason"
-              class="bar-row bar-row--click"
-              @click="openDrill(`npr:${r.key}`, `Not purchased — ${r.reason}`, { notPurchaseReason: r.key })"
-            >
-              <div class="bar-label">{{ r.reason }}</div>
-              <div class="bar-track">
-                <div class="bar-fill bar-fill--red" :style="{ width: pct(r.count, notPurchaseReasons.surveyed) + '%' }" />
+            <template v-if="notPurchaseReasons">
+              <div v-for="r in notPurchaseReasons.reasons" :key="r.key" class="npr-group">
+                <div
+                  class="bar-row bar-row--click"
+                  @click="openDrill(`npr:${r.key}`, `Not purchased — ${r.reason}`, { notPurchaseReason: r.key })"
+                >
+                  <div class="bar-label">{{ r.reason }}</div>
+                  <div class="bar-track">
+                    <div class="bar-fill bar-fill--red" :style="{ width: pct(r.count, notPurchaseReasons.surveyed) + '%' }" />
+                  </div>
+                  <div class="bar-value">{{ r.count }} <span class="pct-label">{{ pct(r.count, notPurchaseReasons.surveyed) }}%</span></div>
+                </div>
+                <!-- Sub-reasons (second level) — click to drill to those records -->
+                <div v-if="r.subReasons && r.subReasons.length" class="npr-subs">
+                  <div
+                    v-for="s in r.subReasons"
+                    :key="s.value"
+                    class="npr-sub"
+                    @click="openDrill(`npr:${r.key}:${s.value}`, `${r.reason}: ${s.value}`, { notPurchaseReason: r.key, notPurchaseSubReason: s.value })"
+                  >
+                    <span class="npr-sub-label">&#8627; {{ s.value }}</span>
+                    <span class="count-pill" style="font-size: 11px">{{ s.count }}</span>
+                  </div>
+                </div>
               </div>
-              <div class="bar-value">{{ r.count }} <span class="pct-label">{{ pct(r.count, notPurchaseReasons.surveyed) }}%</span></div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -1646,6 +1659,18 @@ onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll
 .bar-fill--grey { background: linear-gradient(90deg, #cbd5e1, #64748b); }
 .bar-value { font-size: 12px; min-width: 70px; text-align: right; font-weight: 700; color: var(--ink); }
 .pct-label { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+/* ── Not-purchase reason sub-levels ──────────────────────────────────────── */
+.npr-group { margin-bottom: 8px; }
+.npr-subs { margin: 2px 0 4px 18px; display: flex; flex-direction: column; gap: 2px; }
+.npr-sub {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 8px; font-size: 12px; color: var(--muted);
+  border-left: 2px solid var(--border); border-radius: 0 4px 4px 0; cursor: pointer;
+  transition: background 0.12s;
+}
+.npr-sub:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); color: var(--ink); }
+.npr-sub-label { flex: 1; word-break: break-word; }
 
 /* ── Model performance rows ──────────────────────────────────────────────── */
 .model-row { margin-bottom: 12px; }
