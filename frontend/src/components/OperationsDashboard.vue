@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
 import { toPrettyInsights } from "@/utils/insights-response";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
+import Sparkline from "@/components/Sparkline.vue";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 const campaignOptions = ref<string[]>([]);
@@ -97,6 +98,50 @@ const flagCounts = computed(() => ({
   qaPartial: opsData.value?.scoring_flags?.qa_partial_count ?? 0,
   qaLowScore: opsData.value?.scoring_flags?.qa_low_score_count ?? 0,
 }));
+
+// ── Monthly headline trends (rolling 12-month sparklines) ─────────────────────
+const opsTrends = ref<any>(null);
+
+// Builds a sparkline series from an aggregate array. `betterWhenHigher` colours
+// the trend arrow green/red appropriately (QC score up = good; alert rate up =
+// bad). `asRateOf` turns a count into a % of another per-month array.
+function opsTrend(
+  values: Array<number | null> | undefined,
+  betterWhenHigher: boolean,
+  asRateOf?: Array<number | null>,
+) {
+  const t = opsTrends.value;
+  if (!t?.months?.length || !values) return null;
+  const pts = t.months.map((_: string, i: number) => {
+    const raw = values[i];
+    if (asRateOf) {
+      const den = asRateOf[i] ?? 0;
+      return den ? Math.round(((Number(raw) || 0) / den) * 1000) / 10 : 0;
+    }
+    return raw == null ? 0 : Math.round(Number(raw) * 10) / 10;
+  });
+  if (pts.length < 2) return null;
+  const first = pts[0] ?? 0;
+  const latest = pts[pts.length - 1] ?? 0;
+  const improving = betterWhenHigher ? latest >= first : latest <= first;
+  return { points: pts, first, latest, months: pts.length, betterWhenHigher, improving };
+}
+
+const avgScoreTrend = computed(() => opsTrend(opsTrends.value?.avg_score, true));
+const avgQaScoreTrend = computed(() => opsTrend(opsTrends.value?.avg_qa_score, true));
+const lowScoreAlertTrend = computed(() =>
+  opsTrend(opsTrends.value?.low_score_alerts, false, opsTrends.value?.total),
+);
+const volumeTrend = computed(() => opsTrend(opsTrends.value?.total, true));
+const hasOpsTrends = computed(
+  () => !!(avgScoreTrend.value || avgQaScoreTrend.value || lowScoreAlertTrend.value || volumeTrend.value),
+);
+function trendArrow(t: { improving: boolean; first: number; latest: number } | null) {
+  if (!t) return "";
+  if (t.latest > t.first) return "▲";
+  if (t.latest < t.first) return "▼";
+  return "▶";
+}
 
 // ── Data state ───────────────────────────────────────────────────────────────
 const loading = ref(false);
@@ -481,7 +526,7 @@ async function loadAll() {
   detailId.value = null;
 
   try {
-    const [opsRes, dimRes, oppRes, chatRtRes, vulnRes] = await Promise.all([
+    const [opsRes, dimRes, oppRes, chatRtRes, vulnRes, trendRes] = await Promise.all([
       axios.get(ApiPath.InsightsSummaryOperations, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsDimensions, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsOpportunity, { params: sharedParams.value }).catch(() => ({ data: null })),
@@ -489,12 +534,14 @@ async function loadAll() {
         ? axios.get(ApiPath.OpsChatResponseTime, { params: sharedParams.value }).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
       axios.get(ApiPath.OpsVulnerability, { params: sharedParams.value }).catch(() => ({ data: null })),
+      axios.get(ApiPath.InsightsSummaryOperationsTrends, { params: sharedParams.value }).catch(() => ({ data: null })),
     ]);
     opsData.value = opsRes.data;
     dimData.value = dimRes.data;
     opportunityData.value = oppRes.data;
     chatResponseData.value = chatRtRes.data;
     vulnData.value = vulnRes.data;
+    opsTrends.value = trendRes.data;
     vulnList.value = [];
     vulnAnswer.value = null;
     await fetchObjectionAssessments();
@@ -764,6 +811,42 @@ onMounted(async () => {
     </div>
 
     <template v-if="opsData && dimData">
+      <!-- Rolling 12-month headline trends (sparklines) -->
+      <div v-if="hasOpsTrends" class="spark-strip">
+        <div v-if="avgScoreTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Avg QC score</span>
+            <span class="spark-latest">{{ avgScoreTrend.latest }} <span :class="avgScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgScoreTrend) }}</span></span>
+          </div>
+          <Sparkline :points="avgScoreTrend.points" :color="avgScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+          <div class="spark-sub">{{ avgScoreTrend.first }} → {{ avgScoreTrend.latest }} over {{ avgScoreTrend.months }} months</div>
+        </div>
+        <div v-if="avgQaScoreTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Avg QA score</span>
+            <span class="spark-latest">{{ avgQaScoreTrend.latest }} <span :class="avgQaScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgQaScoreTrend) }}</span></span>
+          </div>
+          <Sparkline :points="avgQaScoreTrend.points" :color="avgQaScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+          <div class="spark-sub">{{ avgQaScoreTrend.first }} → {{ avgQaScoreTrend.latest }} over {{ avgQaScoreTrend.months }} months</div>
+        </div>
+        <div v-if="lowScoreAlertTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Low-score alert rate</span>
+            <span class="spark-latest">{{ lowScoreAlertTrend.latest }}% <span :class="lowScoreAlertTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(lowScoreAlertTrend) }}</span></span>
+          </div>
+          <Sparkline :points="lowScoreAlertTrend.points" :color="lowScoreAlertTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+          <div class="spark-sub">{{ lowScoreAlertTrend.first }}% → {{ lowScoreAlertTrend.latest }}% over {{ lowScoreAlertTrend.months }} months</div>
+        </div>
+        <div v-if="volumeTrend" class="spark-card">
+          <div class="spark-head">
+            <span class="spark-title">Volume</span>
+            <span class="spark-latest">{{ volumeTrend.latest }} <span class="spark-neutral">{{ trendArrow(volumeTrend) }}</span></span>
+          </div>
+          <Sparkline :points="volumeTrend.points" color="#6366f1" :width="150" :height="30" />
+          <div class="spark-sub">{{ volumeTrend.first }} → {{ volumeTrend.latest }} interactions/month</div>
+        </div>
+      </div>
+
       <!-- Score overview: interactions + grouped ops/qa panels + flag tiles -->
       <div class="summary-grid">
         <div class="summary-hero">
@@ -2287,6 +2370,20 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--brand, #6366f1) 10%, var(--surface));
   color: var(--brand, #6366f1);
 }
+
+/* ── Headline trend sparklines ─────────────────────────────────────────────── */
+.spark-strip { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.spark-card {
+  flex: 1; min-width: 200px;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.spark-title { font-size: 12px; font-weight: 700; color: var(--ink); }
+.spark-latest { font-size: 13px; font-weight: 800; color: var(--ink); }
+.spark-good { color: #059669; font-size: 11px; }
+.spark-bad { color: #dc2626; font-size: 11px; }
+.spark-neutral { color: var(--muted); font-size: 11px; }
+.spark-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 /* ── Stats strip ───────────────────────────────────────────────────────────── */
 .stats-strip {

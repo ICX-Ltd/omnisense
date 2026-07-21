@@ -344,6 +344,74 @@ export class InsightsSummaryService {
     return { clause, extraParams };
   }
 
+  // Monthly Operations headline trends for the sparklines on the QC dashboard.
+  // One point per calendar month: volume, avg overall (QC) score, avg QA score,
+  // low-score-alert count and opportunity count. Uses a rolling `monthsBack`
+  // window ending at `to` — independent of the dashboard's (often day-level)
+  // date filter, which would otherwise collapse to a single bucket — but honours
+  // the same campaign/agent/outcome/vehicle filters so the trend tracks whatever
+  // slice the dashboard is showing.
+  async getOperationsMonthlyTrends(
+    to: Date,
+    filterKey: InteractionFilter = 'calls',
+    campaign?: string, agent?: string,
+    excludeOutcomes?: string[],
+    vehicleMake?: string, vehicleModels?: string[],
+    monthsBack = 12,
+  ) {
+    const start = new Date(
+      Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - (monthsBack - 1), 1),
+    );
+    const { clause: filterClause, extraParams } = this.buildRawFilters(
+      filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels,
+    );
+
+    const rows = await this.insightsRepo.manager.query<Array<{
+      ym: string;
+      total: number; scored: number;
+      avg_score: number | null; avg_qa_score: number | null;
+      low_score_alerts: number; opportunities: number;
+    }>>(
+      `SELECT
+         FORMAT(COALESCE(ia.interactionDateTime, ia.createdAt), 'yyyy-MM') AS ym,
+         COUNT(1) AS total,
+         SUM(CASE WHEN ii.overall_score IS NOT NULL THEN 1 ELSE 0 END) AS scored,
+         AVG(ii.overall_score) AS avg_score,
+         AVG(CAST(JSON_VALUE(ii.qa_scores_json, '$.overall_score') AS FLOAT)) AS avg_qa_score,
+         SUM(CASE WHEN ii.operations_low_score_alert = 1 THEN 1 ELSE 0 END) AS low_score_alerts,
+         SUM(CASE WHEN ii.is_opportunity = 1 THEN 1 ELSE 0 END) AS opportunities
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         ${filterClause}
+       GROUP BY FORMAT(COALESCE(ia.interactionDateTime, ia.createdAt), 'yyyy-MM')`,
+      [start, to, ...extraParams],
+    );
+
+    const byMonth = new Map(rows.map((r) => [r.ym, r]));
+    const months: string[] = [];
+    for (let i = 0; i < monthsBack; i++) {
+      const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+      months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const round1 = (v: number | null | undefined) =>
+      v == null ? null : Math.round(Number(v) * 10) / 10;
+    const num = (v: unknown) => Number(v) || 0;
+    const at = (m: string) => byMonth.get(m);
+
+    return {
+      months,
+      total: months.map((m) => num(at(m)?.total)),
+      scored: months.map((m) => num(at(m)?.scored)),
+      avg_score: months.map((m) => round1(at(m)?.avg_score)),
+      avg_qa_score: months.map((m) => round1(at(m)?.avg_qa_score)),
+      low_score_alerts: months.map((m) => num(at(m)?.low_score_alerts)),
+      opportunities: months.map((m) => num(at(m)?.opportunities)),
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // GENERAL METRICS
   // ─────────────────────────────────────────────────────────────────────────────

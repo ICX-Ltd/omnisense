@@ -24,15 +24,13 @@ Status key: **[next]** · **[planned]** · **[parked]**
   - **Open decision:** fixture source — hand-authored synthetic (no PII, safe to
     commit) vs real anonymised interactions pulled from the DB (more
     representative, need scrubbing first).
-- **In-drawer QA correction loop** **[planned]** — let a reviewer override an
-  insight field in the drawer and persist the correction → instant golden-set
-  fodder + a mistranscription feedback channel for the Deepgram keyword list.
+  - **Note:** the in-drawer correction loop now writes reviewer overrides to
+    `app.insight_corrections` — a ready source of labelled fixtures for this.
 
 ## Analytics depth
-- **Agent trajectory over time** **[planned]** — per-agent QC scores as a trend,
-  not just a leaderboard snapshot.
-- **Operations trend sparklines** **[planned]** — extend the Survey / Campaign
-  Insights sparklines to the Operations dashboard headline metrics.
+- **Agent trajectory over time** **[next]** — per-agent QC scores as a trend,
+  not just a leaderboard snapshot. (The rolling monthly Operations trend endpoint
+  `getOperationsMonthlyTrends` is a starting point — extend it to group by agent.)
 - **Saved (named) views** **[planned]** — build on the deep-linkable URL state so
   a tester can save and re-open named filter sets, not just paste a link.
 
@@ -50,16 +48,8 @@ Status key: **[next]** · **[planned]** · **[parked]**
 - **PII redaction before LLM send** **[planned]** — full transcripts (names,
   finance detail) go to US providers and are stored; decide redaction / data-flow
   posture deliberately.
-- **Prompt-version stamping** **[planned]** — `prompt_template_history` exists;
-  stamp which prompt version produced each insight, for reproducibility / audit.
 
 ## AI / model
-- **Model registry (editable model lists)** **[planned]** — the insights/narrative
-  model dropdowns are hardcoded in the frontend; the transcription model is an env
-  var. Move both to a DB table (provider, kind: insights|transcription, model id,
-  label, active, default) with an admin editor (like the transcription vocab), so
-  new models can be added/enabled without a deploy. Dashboards + the Deepgram/
-  provider services read from it. Pairs well with model routing below.
 - **Model routing / cost optimisation** **[planned]** — cheap model first,
   escalate on low confidence; caching; tie prompt A/B to the golden set.
 - **Full json_schema structured output for Anthropic** **[parked]** — hard schema

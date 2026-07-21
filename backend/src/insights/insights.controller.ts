@@ -572,6 +572,25 @@ export class InsightsController {
     );
   }
 
+  @Get('summary/operations-trends')
+  async summaryOperationsTrends(
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('agent') agent?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('monthsBack') monthsBack?: string,
+  ) {
+    const { toDate } = parseDateRange(undefined, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    const mb = Math.min(Math.max(parseInt(monthsBack ?? '12', 10) || 12, 2), 60);
+    return this.svcSummary.getOperationsMonthlyTrends(
+      toDate, filter, campaign, agent,
+      parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, mb,
+    );
+  }
+
   @Get('summary/client-services')
   async summaryClientServices(
     @Query('from') from?: string,
