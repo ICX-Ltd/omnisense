@@ -143,6 +143,10 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     tables: ['transcription_vocab'],
   },
   {
+    file: 'add-model-options.sql',
+    tables: ['model_options'],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],

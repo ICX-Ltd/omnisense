@@ -23,6 +23,8 @@ import { PromptTemplateHistory } from './db/entities/prompt-template-history.ent
 import { LlmUsageLog } from './db/entities/llm-usage-log.entity';
 import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.entity';
 import { TranscriptionVocab } from './db/entities/transcription-vocab.entity';
+import { ModelOption } from './db/entities/model-option.entity';
+import { ModelsModule } from './models/models.module';
 
 @Module({
   imports: [
@@ -51,6 +53,7 @@ import { TranscriptionVocab } from './db/entities/transcription-vocab.entity';
             LlmUsageLog,
             TranscriptionUsageLog,
             TranscriptionVocab,
+            ModelOption,
           ],
           synchronize: false,
           logging: false,
@@ -70,6 +73,7 @@ import { TranscriptionVocab } from './db/entities/transcription-vocab.entity';
     UserModule,
     PromptsModule,
     HealthModule,
+    ModelsModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,

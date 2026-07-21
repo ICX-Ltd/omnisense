@@ -34,6 +34,8 @@ export const ApiPath = {
 
   ParityCampaignAnalysis: "/uiapi/insights/parity/campaign-analysis",
   ClientServicesTrends: "/uiapi/insights/client-services/trends",
+  Models: "/uiapi/models",
+  ModelInsightsOptions: "/uiapi/models/insights-options",
   ParityInteractions: "/uiapi/insights/parity/interactions",
 
   SurveyFilters: "/uiapi/survey/filters",

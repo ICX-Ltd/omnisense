@@ -63,26 +63,18 @@ const insightsProvider = ref<InsightsProvider>(InsightsProvider.OpenAI);
 // (fast/cheap tier). Suggestions are curated per provider; a higher-quality
 // model materially improves extraction (quotes, frustrations, competitor recovery).
 const insightsModel = ref<string>("");
-const MODEL_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
-  [InsightsProvider.OpenAI]: [
-    { value: "", label: "Default — gpt-4o-mini (fast)" },
-    { value: "gpt-4o", label: "gpt-4o (higher quality)" },
-  ],
-  [InsightsProvider.Anthropic]: [
-    { value: "", label: "Default — claude-haiku-4-5 (fast)" },
-    { value: "claude-sonnet-5", label: "claude-sonnet-5 (higher quality)" },
-    { value: "claude-opus-4-8", label: "claude-opus-4-8 (highest quality)" },
-  ],
-  [InsightsProvider.Grok]: [
-    { value: "", label: "Default — grok-4-1-fast" },
-  ],
-  [InsightsProvider.Gemini]: [
-    { value: "", label: "Default — gemini-1.5-flash (fast)" },
-    { value: "gemini-1.5-pro", label: "gemini-1.5-pro (higher quality)" },
-  ],
-};
+// Model options now come from the editable registry (Models admin page) rather
+// than a hardcoded list. Fetched once on mount, grouped by provider.
+const modelOptionsByProvider = ref<Record<string, Array<{ value: string; label: string }>>>({});
+async function loadModelOptions() {
+  try {
+    modelOptionsByProvider.value = (await axios.get(ApiPath.ModelInsightsOptions)).data ?? {};
+  } catch {
+    /* non-fatal — dropdown falls back to Default */
+  }
+}
 const modelOptions = computed(
-  () => MODEL_OPTIONS[insightsProvider.value] ?? [{ value: "", label: "Default" }]
+  () => modelOptionsByProvider.value[insightsProvider.value] ?? [{ value: "", label: "Default" }]
 );
 // Reset the model override when the provider changes so we never send one
 // provider's model id to another.
@@ -499,6 +491,7 @@ onMounted(() => {
   loadHistory();
   loadFailed();
   loadReprocessCampaigns();
+  loadModelOptions();
   if (loadStoredIds().length) startPolling();
 });
 

@@ -5,9 +5,10 @@ import { TranscriptionOpenAiService } from './transcriptionOpenAi.service';
 import { TranscriptionDeepgramService } from './transcriptionDeepgram.service';
 import { TranscriptionVocabService } from './transcription-vocab.service';
 import { TranscriptionVocab } from '../db/entities/transcription-vocab.entity';
+import { ModelsModule } from '../models/models.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TranscriptionVocab])],
+  imports: [TypeOrmModule.forFeature([TranscriptionVocab]), ModelsModule],
   controllers: [TranscriptionController],
   providers: [
     TranscriptionOpenAiService,

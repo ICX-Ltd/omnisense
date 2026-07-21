@@ -484,26 +484,18 @@ const narrativeError = ref("");
 // helpers live in the shared <NarrativeBriefing> component so the Narratives
 // page renders saved briefings identically.
 
-// A capable model materially improves the executive briefing. Options mirror the
-// batch dashboard; "" = the provider's default. Reset on provider change.
-const NARR_MODEL_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
-  openai: [
-    { value: "", label: "Default — gpt-4o-mini (fast)" },
-    { value: "gpt-4o", label: "gpt-4o (higher quality)" },
-  ],
-  anthropic: [
-    { value: "", label: "Default — claude-haiku-4-5 (fast)" },
-    { value: "claude-sonnet-5", label: "claude-sonnet-5 (higher quality)" },
-    { value: "claude-opus-4-8", label: "claude-opus-4-8 (highest quality)" },
-  ],
-  grok: [{ value: "", label: "Default — grok-4-1-fast" }],
-  gemini: [
-    { value: "", label: "Default — gemini-1.5-flash (fast)" },
-    { value: "gemini-1.5-pro", label: "gemini-1.5-pro (higher quality)" },
-  ],
-};
+// Model options come from the editable registry (Models admin page); "" = the
+// provider's default. Reset on provider change.
+const modelOptionsByProvider = ref<Record<string, Array<{ value: string; label: string }>>>({});
+async function loadModelOptions() {
+  try {
+    modelOptionsByProvider.value = (await axios.get(ApiPath.ModelInsightsOptions)).data ?? {};
+  } catch {
+    /* non-fatal */
+  }
+}
 const narrativeModelOptions = computed(
-  () => NARR_MODEL_OPTIONS[narrativeProvider.value] ?? [{ value: "", label: "Default" }]
+  () => modelOptionsByProvider.value[narrativeProvider.value] ?? [{ value: "", label: "Default" }]
 );
 watch(narrativeProvider, () => { narrativeModel.value = ""; });
 
@@ -537,7 +529,7 @@ async function generateNarrative() {
   }
 }
 
-onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll(); });
+onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOptions(); await loadAll(); });
 </script>
 
 <template>

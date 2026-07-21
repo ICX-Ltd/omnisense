@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { describeError } from '../utils/describe-error.util';
 import { TranscriptionVocabService } from './transcription-vocab.service';
+import { ModelRegistryService } from '../models/model-registry.service';
 
 type DiarizedTurn = {
   speaker: number;
@@ -44,15 +45,14 @@ function smoothTurns(turns: DiarizedTurn[]) {
 export class TranscriptionDeepgramService {
   private readonly apiKey = process.env.DEEPGRAM_API_KEY;
 
-  constructor(private readonly vocab: TranscriptionVocabService) {}
+  constructor(
+    private readonly vocab: TranscriptionVocabService,
+    private readonly models: ModelRegistryService,
+  ) {}
 
   // Builds the model + query string shared by both the URL and buffer paths.
-  // keyterms/replacements come from the editable vocab (DB, with defaults).
-  private buildEndpoint(keyterms: string[], replacements: [string, string][]) {
-    // Model is env-tunable. Default nova-3 — newer, better on accents, and its
-    // keyterm prompting is contextual (smarter than nova-2's blunt keyword boost).
-    const model = process.env.DEEPGRAM_MODEL || 'nova-3';
-
+  // model + keyterms/replacements come from the editable registry/vocab (DB).
+  private buildEndpoint(model: string, keyterms: string[], replacements: [string, string][]) {
     const params = new URLSearchParams({
       model,
       // UK English nudges British vocabulary/pronunciation; env-overridable in
@@ -103,8 +103,9 @@ export class TranscriptionDeepgramService {
     body: Buffer | string,
     contentType: string,
   ) {
+    const model = await this.models.activeDeepgramModel();
     const { keyterms, replacements } = await this.vocab.getActive();
-    const endpoint = this.buildEndpoint(keyterms, replacements);
+    const endpoint = this.buildEndpoint(model, keyterms, replacements);
     const host = new URL(endpoint).host;
 
     let res: Response;
@@ -183,6 +184,7 @@ export class TranscriptionDeepgramService {
 
     return {
       provider: 'deepgram',
+      deepgramModel: model,
       text: fullText,
       turns,
       confidence: overallConfidence,

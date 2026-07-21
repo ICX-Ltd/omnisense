@@ -341,7 +341,7 @@ export class RecordingsService {
           text = dg.text ?? '';
         }
 
-        model = `deepgram:${process.env.DEEPGRAM_MODEL || 'nova-3'}`;
+        model = `deepgram:${dg.deepgramModel || process.env.DEEPGRAM_MODEL || 'nova-3'}`;
         audioSeconds =
           typeof dg.durationSeconds === 'number' ? dg.durationSeconds : null;
         confidence = typeof dg.confidence === 'number' ? dg.confidence : null;

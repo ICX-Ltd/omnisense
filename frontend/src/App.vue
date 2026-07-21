@@ -66,6 +66,7 @@
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
           <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'prompts' }" @click="tab = 'prompts'">Prompts</button>
           <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'health' }" @click="tab = 'health'">System Health</button>
+          <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'models' }" @click="tab = 'models'">Models</button>
         </nav>
       </div>
 
@@ -82,6 +83,7 @@
           <NarrativesPage v-else-if="tab === 'narratives'" />
           <PromptsAdmin v-else-if="tab === 'prompts'" />
           <SystemHealthPanel v-else-if="tab === 'health'" />
+          <ModelRegistryPage v-else-if="tab === 'models'" />
           <SettingsPanel v-else />
         </keep-alive>
       </div>
@@ -102,6 +104,7 @@ import SurveyDashboard from "./components/SurveyDashboard.vue";
 import NarrativesPage from "./components/NarrativesPage.vue";
 import PromptsAdmin from "./components/PromptsAdmin.vue";
 import SystemHealthPanel from "./components/SystemHealthPanel.vue";
+import ModelRegistryPage from "./components/ModelRegistryPage.vue";
 import GlobalRecordSearch from "./components/GlobalRecordSearch.vue";
 import LoginPanel from "./components/auth/LoginPanel.vue";
 import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
@@ -113,14 +116,14 @@ import logoUrl from "./assets/ai-icon.png";
 const { canSeeAdminTools, canSeeDevTools } = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
 
-const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "prompts" | "health" | "settings">("ops");
+const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "prompts" | "health" | "models" | "settings">("ops");
 const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
 const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcription"].includes(tab.value));
 
 // Deep-linkable active tab — read from ?tab= on load, keep the URL in sync so a
 // view can be shared/pasted (dashboards sync their own filters into the query).
-const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "settings"] as const;
+const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "models", "settings"] as const;
 function initialTab(): typeof tab.value {
   const p = new URLSearchParams(window.location.search).get("tab");
   if (p && (VALID_TABS as readonly string[]).includes(p)) return p as typeof tab.value;
