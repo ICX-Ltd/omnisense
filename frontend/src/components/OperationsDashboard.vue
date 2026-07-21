@@ -154,7 +154,7 @@ type AgentTraj = {
   avg: number | null;
   delta: number | null;
 };
-const agentTrajectory = ref<{ months: string[]; agents: AgentTraj[] } | null>(null);
+const agentTrajectory = ref<{ months: string[]; agents: AgentTraj[]; considered?: number } | null>(null);
 const trajSort = ref<"latest" | "improved" | "declined">("latest");
 const trajShowAll = ref(false);
 
@@ -177,6 +177,7 @@ const sortedTrajectory = computed<AgentTraj[]>(() => {
 const visibleTrajectory = computed<AgentTraj[]>(() =>
   trajShowAll.value ? sortedTrajectory.value : sortedTrajectory.value.slice(0, 12),
 );
+const trajConsidered = computed<number>(() => agentTrajectory.value?.considered ?? 0);
 function deltaClass(d: number | null) {
   if (d == null || d === 0) return "traj-flat";
   return d > 0 ? "traj-up" : "traj-down";
@@ -1033,21 +1034,21 @@ onMounted(async () => {
       </div>
 
       <!-- Agent Trajectory — per-agent QC score trend over a rolling 12 months -->
-      <div v-if="agentTrajectory?.agents?.length" class="tile" style="margin-top: 14px">
+      <div class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <div class="tile-icon">&#128200;</div>
           <div class="tile-text">
             <div class="tile-title">Agent Trajectory</div>
             <div class="tile-desc">Rolling 12-month average QC score per agent — the trend, not just a snapshot. Click an agent to filter the dashboard.</div>
           </div>
-          <div class="traj-sort">
+          <div v-if="sortedTrajectory.length" class="traj-sort">
             <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'latest' }" @click="trajSort = 'latest'">Latest score</button>
             <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'improved' }" @click="trajSort = 'improved'">Most improved</button>
             <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'declined' }" @click="trajSort = 'declined'">Biggest decline</button>
           </div>
         </div>
         <div class="tile-body">
-          <div class="traj-list">
+          <div v-if="sortedTrajectory.length" class="traj-list">
             <div
               v-for="a in visibleTrajectory"
               :key="a.agent"
@@ -1070,6 +1071,22 @@ onMounted(async () => {
           >
             {{ trajShowAll ? "Show top 12" : `Show all ${sortedTrajectory.length}` }}
           </button>
+
+          <!-- Empty states — never hide the tile silently -->
+          <p v-if="!sortedTrajectory.length && agentTrajectory && trajConsidered > 0" class="traj-empty">
+            {{ trajConsidered }} agent{{ trajConsidered === 1 ? '' : 's' }} have scored interactions, but none span 2+ calendar months in the last 12 —
+            a trajectory needs at least two months of scored work per agent. Once QC scores exist across
+            multiple months this fills in automatically.
+          </p>
+          <p v-else-if="!sortedTrajectory.length && agentTrajectory" class="traj-empty">
+            No scored interactions in the last 12 months for the current filters
+            (channel: <strong>{{ interactionFilter }}</strong>{{ campaign ? `, campaign: ${campaign}` : '' }}).
+            Agent trajectory is based on <code>overall_score</code> — run insights so calls are QC-scored.
+          </p>
+          <p v-else-if="!agentTrajectory" class="traj-empty">
+            Agent-trajectory data didn't load. If you've just deployed, restart the backend so the
+            <code>/uiapi/insights/summary/agent-trajectory</code> endpoint is available.
+          </p>
         </div>
       </div>
 
@@ -2495,6 +2512,8 @@ onMounted(async () => {
 .traj-down { color: #dc2626; }
 .traj-flat { color: var(--muted); }
 .traj-total { font-size: 11px; color: var(--muted); justify-self: end; }
+.traj-empty { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 4px 0 0; }
+.traj-empty code { font-family: ui-monospace, "Courier New", monospace; font-size: 11px; }
 @media (max-width: 640px) {
   .traj-row { grid-template-columns: 1fr auto; row-gap: 4px; }
   .traj-row .spark { grid-column: 1 / -1; }

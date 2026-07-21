@@ -581,7 +581,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('monthsBack') monthsBack?: string,
   ) {
-    const { toDate } = parseDateRange(undefined, to);
+    const toDate = parseToDate(to);
     const filter = normalizeInteractionFilter(filterKey);
     const mb = Math.min(Math.max(parseInt(monthsBack ?? '12', 10) || 12, 2), 60);
     return this.svcSummary.getOperationsMonthlyTrends(
@@ -599,7 +599,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('monthsBack') monthsBack?: string,
   ) {
-    const { toDate } = parseDateRange(undefined, to);
+    const toDate = parseToDate(to);
     const filter = normalizeInteractionFilter(filterKey);
     const mb = Math.min(Math.max(parseInt(monthsBack ?? '12', 10) || 12, 2), 60);
     return this.svcSummary.getAgentTrajectory(
@@ -752,6 +752,16 @@ export class InsightsController {
       createdTo,
     });
   }
+}
+
+// For rolling-window endpoints that only need an end date (they derive their own
+// start): parse `to`, defaulting to now, so a missing `from` is not an error.
+function parseToDate(to?: string): Date {
+  const d = to ? new Date(to) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    throw new BadRequestException('to must be a valid ISO date/time value');
+  }
+  return d;
 }
 
 function parseDateRange(from?: string, to?: string) {

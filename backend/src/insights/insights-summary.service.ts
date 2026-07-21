@@ -467,30 +467,35 @@ export class InsightsSummaryService {
       byAgent.set(r.agent, m);
     }
 
-    const agents = [...byAgent.entries()]
-      .map(([agent, m]) => {
-        // Monthly QC average aligned to the shared axis (null = no scored work).
-        const points = months.map((mm) => {
-          const cell = m.get(mm);
-          return cell && cell.scored > 0 ? cell.avg : null;
-        });
-        const scoredPoints = points.filter((p): p is number => p != null);
-        const scoredMonths = scoredPoints.length;
-        const total = months.reduce((s, mm) => s + (m.get(mm)?.total ?? 0), 0);
-        const first = scoredPoints[0] ?? null;
-        const latest = scoredPoints[scoredPoints.length - 1] ?? null;
-        const avg =
-          scoredMonths > 0
-            ? Math.round((scoredPoints.reduce((s, p) => s + p, 0) / scoredMonths) * 10) / 10
-            : null;
-        const delta =
-          first != null && latest != null ? Math.round((latest - first) * 10) / 10 : null;
-        return { agent, points, scoredMonths, total, first, latest, avg, delta };
-      })
+    const mapped = [...byAgent.entries()].map(([agent, m]) => {
+      // Monthly QC average aligned to the shared axis (null = no scored work).
+      const points = months.map((mm) => {
+        const cell = m.get(mm);
+        return cell && cell.scored > 0 ? cell.avg : null;
+      });
+      const scoredPoints = points.filter((p): p is number => p != null);
+      const scoredMonths = scoredPoints.length;
+      const total = months.reduce((s, mm) => s + (m.get(mm)?.total ?? 0), 0);
+      const first = scoredPoints[0] ?? null;
+      const latest = scoredPoints[scoredPoints.length - 1] ?? null;
+      const avg =
+        scoredMonths > 0
+          ? Math.round((scoredPoints.reduce((s, p) => s + p, 0) / scoredMonths) * 10) / 10
+          : null;
+      const delta =
+        first != null && latest != null ? Math.round((latest - first) * 10) / 10 : null;
+      return { agent, points, scoredMonths, total, first, latest, avg, delta };
+    });
+
+    // A trajectory needs at least two scored months to draw a line. `considered`
+    // (agents with any scored work) lets the UI explain an empty result rather
+    // than silently hiding the tile.
+    const considered = mapped.filter((a) => a.scoredMonths >= 1).length;
+    const agents = mapped
       .filter((a) => a.scoredMonths >= 2)
       .sort((a, b) => (b.latest ?? -1) - (a.latest ?? -1));
 
-    return { months, agents };
+    return { months, agents, considered };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
