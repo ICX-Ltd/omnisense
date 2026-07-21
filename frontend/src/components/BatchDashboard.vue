@@ -274,6 +274,20 @@ function confPct(c: number) {
 const embedding = ref(false);
 const embedLimit = ref(200);
 const embedStatus = ref("");
+const embedCoverage = ref<{ embedded: number; remaining: number; total: number } | null>(null);
+const embedPct = computed(() => {
+  const c = embedCoverage.value;
+  if (!c) return 0;
+  const denom = c.embedded + c.remaining;
+  return denom ? Math.round((c.embedded / denom) * 100) : 0;
+});
+async function loadEmbedStatus() {
+  try {
+    embedCoverage.value = (await axios.get(RecordingPath.embedStatus)).data;
+  } catch {
+    /* non-fatal — hides the coverage line */
+  }
+}
 async function runEmbed() {
   embedding.value = true;
   embedStatus.value = "";
@@ -281,6 +295,7 @@ async function runEmbed() {
     const res = await axios.post(RecordingPath.batchEmbed, null, { params: { limit: embedLimit.value } });
     const d = res.data ?? {};
     embedStatus.value = `Embedded ${d.embedded ?? 0} (${d.remaining ?? 0} remaining) via ${d.model ?? "?"}.`;
+    await loadEmbedStatus();
   } catch (e: any) {
     embedStatus.value = e?.response?.data?.message || e?.message || "Embed failed";
   } finally {
@@ -539,6 +554,7 @@ onMounted(() => {
   loadSummary();
   loadHistory();
   loadFailed();
+  loadEmbedStatus();
   if (loadStoredIds().length) startPolling();
 });
 
@@ -855,7 +871,23 @@ onUnmounted(stopPolling);
               <button class="btn btn--primary" :disabled="embedding" @click="runEmbed">
                 {{ embedding ? "Embedding…" : `Embed next ${embedLimit}` }}
               </button>
+              <button class="btn btn--ghost btn--sm" @click="loadEmbedStatus">Refresh</button>
               <span v-if="embedStatus" class="chip chip--primary">{{ embedStatus }}</span>
+            </div>
+
+            <div v-if="embedCoverage" style="margin-top: 12px; max-width: 420px">
+              <div class="hint">
+                <strong>{{ embedCoverage.embedded }}</strong> of
+                <strong>{{ embedCoverage.embedded + embedCoverage.remaining }}</strong>
+                transcripts embedded ({{ embedPct }}%) ·
+                <strong>{{ embedCoverage.remaining }}</strong> remaining
+                <span v-if="embedCoverage.total > embedCoverage.embedded + embedCoverage.remaining">
+                  · {{ embedCoverage.total }} transcripts total
+                </span>
+              </div>
+              <div style="height: 8px; background: var(--surface-2, #e0e0e0); border-radius: 4px; overflow: hidden; margin-top: 5px">
+                <div :style="{ width: embedPct + '%', height: '100%', background: '#6366f1', transition: 'width 0.4s' }" />
+              </div>
             </div>
           </div>
         </div>

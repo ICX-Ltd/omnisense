@@ -86,6 +86,12 @@ export class RecordingsController {
     return this.svc.listJobs(20);
   }
 
+  // Embedding coverage (embedded vs remaining) for the semantic-search panel.
+  @Get('embed-status')
+  embedStatus() {
+    return this.svc.embedStatus();
+  }
+
   // Embed transcripts for semantic search (bounded per call; run repeatedly).
   @Post('batch/embed')
   batchEmbed(@Query('limit') limit?: string) {

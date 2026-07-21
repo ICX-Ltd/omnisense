@@ -14,6 +14,7 @@ export const RecordingPath = {
   batchInsights: `${ApiPath.Recordings}/batch/insights`,
   batchInsightsChats: `${ApiPath.Recordings}/batch/insights/chats`,
   batchEmbed: `${ApiPath.Recordings}/batch/embed`,
+  embedStatus: `${ApiPath.Recordings}/embed-status`,
   batchRequeueErrors: `${ApiPath.Recordings}/batch/requeue-errors`,
   batchReprocessInsights: `${ApiPath.Recordings}/batch/reprocess-insights`,
   keytermSuggestions: `${ApiPath.Recordings}/keyterm-suggestions`,

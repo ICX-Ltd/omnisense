@@ -925,6 +925,23 @@ export class RecordingsService {
     return res.data[0]?.embedding ?? [];
   }
 
+  // Embedding coverage — how many transcripts are searchable vs still to embed.
+  async embedStatus() {
+    const rows = await this.recordingsRepo.manager.query<Array<{ embedded: string; remaining: string; total: string }>>(
+      `SELECT
+         SUM(CASE WHEN embedding IS NOT NULL THEN 1 ELSE 0 END) AS embedded,
+         SUM(CASE WHEN embedding IS NULL AND text IS NOT NULL AND LEN(text) > 20 THEN 1 ELSE 0 END) AS remaining,
+         COUNT(1) AS total
+       FROM app.interaction_transcripts`,
+    );
+    const r = rows[0];
+    return {
+      embedded: Number(r?.embedded ?? 0),
+      remaining: Number(r?.remaining ?? 0),
+      total: Number(r?.total ?? 0),
+    };
+  }
+
   // Embed transcripts that don't yet have a vector. Bounded per call; run
   // repeatedly to work through the backlog (cheap — text-embedding-3-small).
   async batchEmbedTranscripts(limit = 100) {
