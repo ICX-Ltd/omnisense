@@ -173,7 +173,8 @@ async function loadSummary() {
 const failedRecords = ref<any[]>([]);
 const loadingFailed = ref(false);
 const requeuing = ref(false);
-const requeuingRow = ref<string | null>(null);
+const requeuingIds = ref<Set<string>>(new Set());
+const isRequeuing = (id: string) => requeuingIds.value.has(id);
 const reprocessing = ref(false);
 const reprocessCampaign = ref("");
 const reprocessCampaigns = ref<string[]>([]);
@@ -225,17 +226,23 @@ function exportFailedCsv() {
 }
 
 async function requeueRecord(id: string) {
-  if (requeuingRow.value) return; // one at a time; avoids a stuck in-flight state
-  requeuingRow.value = id;
+  if (requeuingIds.value.has(id)) return;
+  requeuingIds.value = new Set(requeuingIds.value).add(id);
   maintMsg.value = "";
   try {
     const res = await axios.post(RecordingPath.requeue(id));
-    maintMsg.value = `Requeued ${(id || "").slice(0, 8)}… as ${res.data?.status ?? "queued"}.`;
+    const d = res.data ?? {};
+    maintMsg.value =
+      d.affected === 0
+        ? `No change for ${(id || "").slice(0, 8)}… (already requeued?).`
+        : `Requeued ${(id || "").slice(0, 8)}… as ${d.status ?? "queued"}.`;
     await Promise.all([loadFailed(), loadSummary()]);
   } catch (e: any) {
     maintMsg.value = e?.response?.data?.message || e?.message || "Requeue failed";
   } finally {
-    requeuingRow.value = null;
+    const s = new Set(requeuingIds.value);
+    s.delete(id);
+    requeuingIds.value = s;
   }
 }
 
@@ -702,7 +709,7 @@ onUnmounted(stopPolling);
           </div>
           <div v-show="isOpen('failed')" class="tile-body" @click.stop>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
-              <button class="btn btn--primary" :disabled="requeuing || !!requeuingRow || !failedRecords.length" @click.stop="requeueAllErrors">
+              <button class="btn btn--primary" :disabled="requeuing || requeuingIds.size > 0 || !failedRecords.length" @click.stop="requeueAllErrors">
                 {{ requeuing ? "Requeuing…" : "Requeue all errors" }}
               </button>
               <span class="hint">Re-queues errored records: re-transcribe those with no transcript, re-run insights for the rest.</span>
@@ -717,7 +724,7 @@ onUnmounted(stopPolling);
                   <span v-if="r.campaign" class="chip">{{ r.campaign }}</span>
                   <span class="mono" style="opacity: 0.6">{{ (r.id || '').slice(0, 8) }}…</span>
                   <span class="muted" style="margin-left: auto">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</span>
-                  <button class="btn btn--ghost btn--sm" :disabled="requeuingRow === r.id" @click.stop="requeueRecord(r.id)">{{ requeuingRow === r.id ? "…" : "Requeue" }}</button>
+                  <button class="btn btn--ghost btn--sm" :disabled="isRequeuing(r.id)" @click.stop="requeueRecord(r.id)">{{ isRequeuing(r.id) ? "…" : "Requeue" }}</button>
                 </div>
                 <div v-if="r.lastError" style="color: var(--danger, #e55); margin-top: 4px; word-break: break-word">{{ r.lastError }}</div>
               </div>

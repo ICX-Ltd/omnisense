@@ -735,12 +735,22 @@ export class RecordingsService {
 
   // Requeue a single errored record (transcript-aware, same rule as the bulk op).
   async requeueOne(id: string) {
-    const rec = await this.recordingsRepo.findOne({ where: { id } });
-    if (!rec) throw new NotFoundException('Recording not found');
-    const t = await this.transcriptsRepo.findOne({ where: { recordingId: id } });
-    const status = t ? 'transcribed' : 'pending_transcription';
-    await this.recordingsRepo.update(id, { status: status as any, lastError: null });
-    return { id, status };
+    const m = this.recordingsRepo.manager;
+    const exists = Number(
+      (await m.query(`SELECT COUNT(1) AS n FROM app.interactions WHERE id = @0`, [id]))[0]?.n ?? 0,
+    );
+    if (!exists) throw new NotFoundException('Recording not found');
+    // Raw UPDATE keyed on id — mirrors the (working) bulk requeue path exactly.
+    const hasT = Number(
+      (await m.query(`SELECT COUNT(1) AS n FROM app.interaction_transcripts WHERE recordingId = @0`, [id]))[0]?.n ?? 0,
+    );
+    const status = hasT ? 'transcribed' : 'pending_transcription';
+    const res = await m.query(
+      `UPDATE app.interactions SET status = @1, lastError = NULL WHERE id = @0; SELECT @@ROWCOUNT AS affected`,
+      [id, status],
+    );
+    const affected = Number(res?.[0]?.affected ?? 0);
+    return { id, status, affected };
   }
 
   // Reprocess insights for already-completed records: delete their insight row
