@@ -591,6 +591,24 @@ export class InsightsController {
     );
   }
 
+  @Get('summary/agent-trajectory')
+  async summaryAgentTrajectory(
+    @Query('to') to?: string,
+    @Query('filterKey') filterKey?: string,
+    @Query('campaign') campaign?: string,
+    @Query('excludeOutcomes') excludeOutcomesRaw?: string,
+    @Query('monthsBack') monthsBack?: string,
+  ) {
+    const { toDate } = parseDateRange(undefined, to);
+    const filter = normalizeInteractionFilter(filterKey);
+    const mb = Math.min(Math.max(parseInt(monthsBack ?? '12', 10) || 12, 2), 60);
+    return this.svcSummary.getAgentTrajectory(
+      toDate, filter, campaign,
+      parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, mb,
+    );
+  }
+
   @Get('summary/client-services')
   async summaryClientServices(
     @Query('from') from?: string,

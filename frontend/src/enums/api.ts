@@ -6,6 +6,7 @@ export const ApiPath = {
   InsightsSummary: "/uiapi/insights/summary",
   InsightsSummaryOperations: "/uiapi/insights/summary/operations",
   InsightsSummaryOperationsTrends: "/uiapi/insights/summary/operations-trends",
+  InsightsSummaryAgentTrajectory: "/uiapi/insights/summary/agent-trajectory",
   InsightsSummaryClientServices: "/uiapi/insights/summary/client-services",
   InsightsSummaryObjections: "/uiapi/insights/summary/objections",
   InsightsSummaryObjectionAssessments: "/uiapi/insights/summary/objection-assessments",

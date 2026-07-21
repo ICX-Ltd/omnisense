@@ -412,6 +412,87 @@ export class InsightsSummaryService {
     };
   }
 
+  // Per-agent QC-score trajectory over a rolling `monthsBack` window — a trend
+  // per agent, not just a leaderboard snapshot. Deliberately does NOT apply an
+  // agent filter (every agent is returned so they can be compared); honours the
+  // campaign/outcome/vehicle filters. Points are the agent's monthly average QC
+  // score aligned to a shared month axis (null for months with no scored work);
+  // only agents scored in >= 2 distinct months are returned so a trend exists.
+  async getAgentTrajectory(
+    to: Date,
+    filterKey: InteractionFilter = 'calls',
+    campaign?: string,
+    excludeOutcomes?: string[],
+    vehicleMake?: string, vehicleModels?: string[],
+    monthsBack = 12,
+  ) {
+    const start = new Date(
+      Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - (monthsBack - 1), 1),
+    );
+    const { clause: filterClause, extraParams } = this.buildRawFilters(
+      filterKey, campaign, undefined, excludeOutcomes, vehicleMake, vehicleModels,
+    );
+
+    const rows = await this.insightsRepo.manager.query<Array<{
+      agent: string; ym: string;
+      avg_score: number | null; scored: number; total: number;
+    }>>(
+      `SELECT
+         ia.agent AS agent,
+         FORMAT(COALESCE(ia.interactionDateTime, ia.createdAt), 'yyyy-MM') AS ym,
+         AVG(ii.overall_score) AS avg_score,
+         SUM(CASE WHEN ii.overall_score IS NOT NULL THEN 1 ELSE 0 END) AS scored,
+         COUNT(1) AS total
+       FROM app.interaction_insights ii
+       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
+       WHERE COALESCE(ia.interactionDateTime, ia.createdAt) >= @0
+         AND COALESCE(ia.interactionDateTime, ia.createdAt) < @1
+         AND ia.agent IS NOT NULL AND LTRIM(RTRIM(ia.agent)) <> ''
+         ${filterClause}
+       GROUP BY ia.agent, FORMAT(COALESCE(ia.interactionDateTime, ia.createdAt), 'yyyy-MM')`,
+      [start, to, ...extraParams],
+    );
+
+    const months: string[] = [];
+    for (let i = 0; i < monthsBack; i++) {
+      const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+      months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const round1 = (v: number | null) => (v == null ? null : Math.round(Number(v) * 10) / 10);
+    const byAgent = new Map<string, Map<string, { avg: number | null; scored: number; total: number }>>();
+    for (const r of rows) {
+      const m = byAgent.get(r.agent) ?? new Map();
+      m.set(r.ym, { avg: round1(r.avg_score), scored: Number(r.scored) || 0, total: Number(r.total) || 0 });
+      byAgent.set(r.agent, m);
+    }
+
+    const agents = [...byAgent.entries()]
+      .map(([agent, m]) => {
+        // Monthly QC average aligned to the shared axis (null = no scored work).
+        const points = months.map((mm) => {
+          const cell = m.get(mm);
+          return cell && cell.scored > 0 ? cell.avg : null;
+        });
+        const scoredPoints = points.filter((p): p is number => p != null);
+        const scoredMonths = scoredPoints.length;
+        const total = months.reduce((s, mm) => s + (m.get(mm)?.total ?? 0), 0);
+        const first = scoredPoints[0] ?? null;
+        const latest = scoredPoints[scoredPoints.length - 1] ?? null;
+        const avg =
+          scoredMonths > 0
+            ? Math.round((scoredPoints.reduce((s, p) => s + p, 0) / scoredMonths) * 10) / 10
+            : null;
+        const delta =
+          first != null && latest != null ? Math.round((latest - first) * 10) / 10 : null;
+        return { agent, points, scoredMonths, total, first, latest, avg, delta };
+      })
+      .filter((a) => a.scoredMonths >= 2)
+      .sort((a, b) => (b.latest ?? -1) - (a.latest ?? -1));
+
+    return { months, agents };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // GENERAL METRICS
   // ─────────────────────────────────────────────────────────────────────────────

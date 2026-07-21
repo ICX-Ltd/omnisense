@@ -143,6 +143,50 @@ function trendArrow(t: { improving: boolean; first: number; latest: number } | n
   return "▶";
 }
 
+// ── Agent trajectory (per-agent QC-score trend over rolling months) ───────────
+type AgentTraj = {
+  agent: string;
+  points: Array<number | null>;
+  scoredMonths: number;
+  total: number;
+  first: number | null;
+  latest: number | null;
+  avg: number | null;
+  delta: number | null;
+};
+const agentTrajectory = ref<{ months: string[]; agents: AgentTraj[] } | null>(null);
+const trajSort = ref<"latest" | "improved" | "declined">("latest");
+const trajShowAll = ref(false);
+
+// Sparkline needs a clean numeric series; drop the null (no-work) months so the
+// line reflects only the agent's scored months in order.
+function trajPoints(a: AgentTraj): number[] {
+  return a.points.filter((p): p is number => p != null);
+}
+const sortedTrajectory = computed<AgentTraj[]>(() => {
+  const list = [...(agentTrajectory.value?.agents ?? [])];
+  if (trajSort.value === "improved") {
+    list.sort((a, b) => (b.delta ?? -Infinity) - (a.delta ?? -Infinity));
+  } else if (trajSort.value === "declined") {
+    list.sort((a, b) => (a.delta ?? Infinity) - (b.delta ?? Infinity));
+  } else {
+    list.sort((a, b) => (b.latest ?? -1) - (a.latest ?? -1));
+  }
+  return list;
+});
+const visibleTrajectory = computed<AgentTraj[]>(() =>
+  trajShowAll.value ? sortedTrajectory.value : sortedTrajectory.value.slice(0, 12),
+);
+function deltaClass(d: number | null) {
+  if (d == null || d === 0) return "traj-flat";
+  return d > 0 ? "traj-up" : "traj-down";
+}
+function deltaLabel(d: number | null) {
+  if (d == null) return "—";
+  const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "▶";
+  return `${d > 0 ? "+" : ""}${d} ${arrow}`;
+}
+
 // ── Data state ───────────────────────────────────────────────────────────────
 const loading = ref(false);
 const error = ref("");
@@ -526,7 +570,7 @@ async function loadAll() {
   detailId.value = null;
 
   try {
-    const [opsRes, dimRes, oppRes, chatRtRes, vulnRes, trendRes] = await Promise.all([
+    const [opsRes, dimRes, oppRes, chatRtRes, vulnRes, trendRes, trajRes] = await Promise.all([
       axios.get(ApiPath.InsightsSummaryOperations, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsDimensions, { params: opsMetricsParams.value }),
       axios.get(ApiPath.OpsOpportunity, { params: sharedParams.value }).catch(() => ({ data: null })),
@@ -535,6 +579,7 @@ async function loadAll() {
         : Promise.resolve({ data: null }),
       axios.get(ApiPath.OpsVulnerability, { params: sharedParams.value }).catch(() => ({ data: null })),
       axios.get(ApiPath.InsightsSummaryOperationsTrends, { params: sharedParams.value }).catch(() => ({ data: null })),
+      axios.get(ApiPath.InsightsSummaryAgentTrajectory, { params: sharedParams.value }).catch(() => ({ data: null })),
     ]);
     opsData.value = opsRes.data;
     dimData.value = dimRes.data;
@@ -542,6 +587,8 @@ async function loadAll() {
     chatResponseData.value = chatRtRes.data;
     vulnData.value = vulnRes.data;
     opsTrends.value = trendRes.data;
+    agentTrajectory.value = trajRes.data;
+    trajShowAll.value = false;
     vulnList.value = [];
     vulnAnswer.value = null;
     await fetchObjectionAssessments();
@@ -982,6 +1029,47 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Agent Trajectory — per-agent QC score trend over a rolling 12 months -->
+      <div v-if="agentTrajectory?.agents?.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <div class="tile-icon">&#128200;</div>
+          <div class="tile-text">
+            <div class="tile-title">Agent Trajectory</div>
+            <div class="tile-desc">Rolling 12-month average QC score per agent — the trend, not just a snapshot. Click an agent to filter the dashboard.</div>
+          </div>
+          <div class="traj-sort">
+            <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'latest' }" @click="trajSort = 'latest'">Latest score</button>
+            <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'improved' }" @click="trajSort = 'improved'">Most improved</button>
+            <button class="btn btn--sm" :class="{ 'btn--primary': trajSort === 'declined' }" @click="trajSort = 'declined'">Biggest decline</button>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="traj-list">
+            <div
+              v-for="a in visibleTrajectory"
+              :key="a.agent"
+              class="traj-row"
+              @click="selectAgent(a.agent)"
+              title="Filter the dashboard to this agent"
+            >
+              <div class="traj-name">{{ a.agent }}</div>
+              <Sparkline :points="trajPoints(a)" :color="(a.delta ?? 0) >= 0 ? '#059669' : '#dc2626'" :width="140" :height="28" />
+              <span class="traj-latest" :class="scoreChip(a.latest)">{{ fmtScore(a.latest) }}</span>
+              <span class="traj-delta" :class="deltaClass(a.delta)">{{ deltaLabel(a.delta) }}</span>
+              <span class="traj-total">{{ a.total }} · {{ a.scoredMonths }}mo</span>
+            </div>
+          </div>
+          <button
+            v-if="sortedTrajectory.length > 12"
+            class="btn btn--sm"
+            style="margin-top: 10px"
+            @click="trajShowAll = !trajShowAll"
+          >
+            {{ trajShowAll ? "Show top 12" : `Show all ${sortedTrajectory.length}` }}
+          </button>
         </div>
       </div>
 
@@ -2384,6 +2472,33 @@ onMounted(async () => {
 .spark-bad { color: #dc2626; font-size: 11px; }
 .spark-neutral { color: var(--muted); font-size: 11px; }
 .spark-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* ── Agent trajectory ─────────────────────────────────────────────────────── */
+.traj-sort { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.traj-list { display: flex; flex-direction: column; }
+.traj-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) 140px auto auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.traj-row:last-child { border-bottom: none; }
+.traj-row:hover { background: color-mix(in srgb, var(--brand, #6366f1) 7%, transparent); }
+.traj-name { font-size: 13px; font-weight: 600; color: var(--ink); word-break: break-word; }
+.traj-latest { font-size: 11px; justify-self: start; }
+.traj-delta { font-size: 12px; font-weight: 700; justify-self: start; }
+.traj-up { color: #059669; }
+.traj-down { color: #dc2626; }
+.traj-flat { color: var(--muted); }
+.traj-total { font-size: 11px; color: var(--muted); justify-self: end; }
+@media (max-width: 640px) {
+  .traj-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .traj-row .spark { grid-column: 1 / -1; }
+}
 
 /* ── Stats strip ───────────────────────────────────────────────────────────── */
 .stats-strip {

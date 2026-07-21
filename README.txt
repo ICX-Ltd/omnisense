@@ -312,3 +312,8 @@ Updates
   Low-score alert rate, Volume) via a new getOperationsMonthlyTrends aggregation + summary/operations-
   trends endpoint. Own rolling window (independent of the day-level date filter) but honours the same
   campaign/agent/outcome filters; arrows coloured by direction. No migration. APP_VERSION -> 1.56.0.
+- Agent Trajectory: new getAgentTrajectory aggregation + summary/agent-trajectory endpoint gives each
+  agent's rolling 12-month avg QC-score trend (not just a leaderboard snapshot). Operations (QC)
+  dashboard shows an Agent Trajectory tile — one sparkline per agent, latest score + first->latest
+  delta, sortable by latest / most-improved / biggest-decline, click an agent to filter. Only agents
+  scored in >=2 months are shown. No migration. APP_VERSION -> 1.57.0.

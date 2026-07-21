@@ -28,10 +28,7 @@ Status key: **[next]** · **[planned]** · **[parked]**
     `app.insight_corrections` — a ready source of labelled fixtures for this.
 
 ## Analytics depth
-- **Agent trajectory over time** **[next]** — per-agent QC scores as a trend,
-  not just a leaderboard snapshot. (The rolling monthly Operations trend endpoint
-  `getOperationsMonthlyTrends` is a starting point — extend it to group by agent.)
-- **Saved (named) views** **[planned]** — build on the deep-linkable URL state so
+- **Saved (named) views** **[next]** — build on the deep-linkable URL state so
   a tester can save and re-open named filter sets, not just paste a link.
 
 ## Proactive & pipeline (pull → push)
