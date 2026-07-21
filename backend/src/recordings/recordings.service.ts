@@ -320,6 +320,8 @@ export class RecordingsService {
     let audioSeconds: number | null = null;
     let confidence: number | null = null;
     let lowConfidenceJson: string | null = null;
+    let wordCount: number | null = null;
+    let uncertainWordCount: number | null = null;
     let txOutcome: 'success' | 'error' = 'error';
 
     try {
@@ -339,10 +341,13 @@ export class RecordingsService {
           text = dg.text ?? '';
         }
 
-        model = 'deepgram:nova-2-phonecall';
+        model = `deepgram:${process.env.DEEPGRAM_MODEL || 'nova-3'}`;
         audioSeconds =
           typeof dg.durationSeconds === 'number' ? dg.durationSeconds : null;
         confidence = typeof dg.confidence === 'number' ? dg.confidence : null;
+        wordCount = typeof dg.wordCount === 'number' ? dg.wordCount : null;
+        uncertainWordCount =
+          typeof dg.uncertainWordCount === 'number' ? dg.uncertainWordCount : null;
         lowConfidenceJson =
           dg.lowConfidenceWords && dg.lowConfidenceWords.length
             ? JSON.stringify(dg.lowConfidenceWords)
@@ -369,6 +374,8 @@ export class RecordingsService {
           text,
           model,
           confidence,
+          wordCount,
+          uncertainWordCount,
           lowConfidenceJson,
         },
         ['recordingId'],
@@ -882,6 +889,8 @@ export class RecordingsService {
         id: string;
         confidence: number;
         model: string;
+        wordCount: number | null;
+        uncertainWordCount: number | null;
         lowJson: string | null;
         snippet: string | null;
         campaign: string | null;
@@ -889,15 +898,21 @@ export class RecordingsService {
         date: Date | null;
       }>
     >(
+      // Rank by the % of uncertain words (worst first) — spreads calls out far
+      // better than the compressed overall confidence. Falls back to confidence
+      // for rows transcribed before word stats existed.
       `SELECT TOP (@0)
          t.recordingId AS id, t.confidence AS confidence, t.model AS model,
+         t.wordCount AS wordCount, t.uncertainWordCount AS uncertainWordCount,
          t.lowConfidenceJson AS lowJson, LEFT(t.text, 160) AS snippet,
          r.campaign AS campaign, r.interactionType AS interactionType,
          COALESCE(r.interactionDateTime, r.createdAt) AS date
        FROM app.interaction_transcripts t
        INNER JOIN app.interactions r ON r.id = t.recordingId
        WHERE t.confidence IS NOT NULL
-       ORDER BY t.confidence ASC`,
+       ORDER BY
+         CASE WHEN t.wordCount > 0 THEN CAST(t.uncertainWordCount AS FLOAT) / t.wordCount END DESC,
+         t.confidence ASC`,
       [n],
     );
     return rows.map((r) => {
@@ -908,10 +923,17 @@ export class RecordingsService {
       } catch {
         /* ignore */
       }
+      const uncertainPct =
+        r.wordCount && r.uncertainWordCount != null
+          ? Math.round((r.uncertainWordCount / r.wordCount) * 1000) / 10
+          : null;
       return {
         id: r.id,
         confidence: r.confidence,
         model: r.model,
+        wordCount: r.wordCount,
+        uncertainWordCount: r.uncertainWordCount,
+        uncertainPct,
         campaign: r.campaign,
         interactionType: r.interactionType,
         date: r.date,

@@ -125,6 +125,13 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     ],
   },
   {
+    file: 'add-transcription-word-stats.sql',
+    columns: [
+      ['interaction_transcripts', 'wordCount'],
+      ['interaction_transcripts', 'uncertainWordCount'],
+    ],
+  },
+  {
     file: 'add-transcript-embeddings.sql',
     columns: [
       ['interaction_transcripts', 'embedding'],

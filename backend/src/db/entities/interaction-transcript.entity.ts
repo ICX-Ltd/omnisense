@@ -31,6 +31,13 @@ export class InteractionTranscript {
   @Column({ type: 'float', nullable: true })
   confidence!: number | null;
 
+  // Word-level stats behind the "% uncertain words" clarity metric (Deepgram).
+  @Column({ type: 'int', nullable: true })
+  wordCount!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  uncertainWordCount!: number | null;
+
   // JSON array of the least-confident words: [{ word, confidence, count }].
   // Feeds the drawer spot-check view + the vehicle keyterm-suggestion loop.
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })

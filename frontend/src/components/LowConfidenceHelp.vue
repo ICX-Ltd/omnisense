@@ -4,9 +4,10 @@
       {{ open ? "Hide explanation" : "What's this?" }}
     </button>
     <div v-if="open" class="lch-panel">
-      <p>These are words the transcription AI (Deepgram) scored as <strong>low confidence</strong> — under 60% sure it heard them correctly.</p>
-      <p><strong>Low confidence doesn't mean the word is wrong.</strong> On phone calls — background noise, crosstalk, people talking over each other, fast or mumbled speech, a poor line — even everyday words like &ldquo;the&rdquo;, &ldquo;was&rdquo; or &ldquo;that&rdquo; often score low, and they're usually still correct. It reflects audio clarity, not accuracy.</p>
-      <p><strong>What's worth a look</strong> is any unusual word — especially a vehicle <strong>make/model</strong> or a <strong>name</strong> — because those are the ones most likely mis-heard (e.g. &ldquo;Duke&rdquo; for &ldquo;Juke&rdquo;). Recurring shaky makes/models are the ones worth teaching the transcriber via the vehicle vocabulary list.</p>
+      <p>These scores come from the <strong>speech-to-text engine's own acoustic confidence</strong> (Deepgram) — how sure it was it heard each word. It is <strong>not an AI judgement</strong> of the conversation, and nothing can &ldquo;instruct it to be stricter&rdquo;.</p>
+      <p>The overall confidence sits in a narrow high band (most words score 0.9+), so we show <strong>&ldquo;% uncertain words&rdquo;</strong> instead — the share of words below the confidence threshold. That spreads calls out so you can actually compare a clear call to a rough one.</p>
+      <p><strong>Low confidence doesn't mean the word is wrong.</strong> On phone calls — noise, crosstalk, accents, fast/mumbled speech, a poor line — even everyday words like &ldquo;the&rdquo;, &ldquo;was&rdquo; or &ldquo;that&rdquo; score low but are usually still correct. It reflects audio clarity, not accuracy.</p>
+      <p><strong>What's worth a look</strong> is any unusual word — especially a vehicle <strong>make/model</strong> or a <strong>name</strong> — most likely mis-heard (e.g. &ldquo;Duke&rdquo; for &ldquo;Juke&rdquo;). Recurring shaky makes/models are worth teaching the transcriber via the vehicle vocabulary list.</p>
     </div>
   </div>
 </template>

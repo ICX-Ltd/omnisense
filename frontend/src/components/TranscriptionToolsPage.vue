@@ -175,10 +175,13 @@
           No transcripts have a confidence score yet — captured only for Deepgram transcripts made after the confidence migration, so existing ones read null until re-transcribed.
         </div>
         <table v-if="lowConfList.length" class="tt-table">
-          <thead><tr><th class="num">Confidence</th><th class="num">Shaky terms</th><th>Campaign</th><th>Date</th><th>Snippet</th></tr></thead>
+          <thead><tr><th class="num">% Uncertain</th><th class="num">Shaky terms</th><th>Campaign</th><th>Date</th><th>Snippet</th></tr></thead>
           <tbody>
             <tr v-for="r in lowConfList" :key="r.id" class="tt-row-click" @click="reviewDrawerId = r.id">
-              <td class="num"><span class="chip" :class="confClass(r.confidence)" style="font-size: 11px">{{ Math.round((r.confidence ?? 0) * 100) }}%</span></td>
+              <td class="num">
+                <span v-if="r.uncertainPct != null" class="chip" :class="uncertainClass(r.uncertainPct)" style="font-size: 11px">{{ r.uncertainPct }}%</span>
+                <span v-else class="hint">n/a</span>
+              </td>
               <td class="num">{{ r.lowConfidenceCount }}</td>
               <td>{{ r.campaign || "—" }}</td>
               <td>{{ fmtDate(r.date) }}</td>
@@ -320,11 +323,10 @@ const lowConfList = ref<any[]>([]);
 const loadingLowConf = ref(false);
 const lowConfLoaded = ref(false);
 const reviewDrawerId = ref<string | null>(null);
-function confClass(c: number) {
-  const p = Math.round((c ?? 0) * 100);
-  if (p >= 90) return "chip--success";
-  if (p >= 75) return "chip--warning";
-  return "chip--danger";
+function uncertainClass(pct: number) {
+  if (pct >= 12) return "chip--danger";
+  if (pct >= 5) return "chip--warning";
+  return "chip--success";
 }
 async function loadLowConfidence() {
   loadingLowConf.value = true;

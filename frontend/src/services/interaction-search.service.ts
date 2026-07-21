@@ -30,6 +30,9 @@ export interface InteractionDetail {
     text: string;
     model: string | null;
     confidence?: number | null;
+    word_count?: number | null;
+    uncertain_word_count?: number | null;
+    uncertain_pct?: number | null;
     low_confidence?: Array<{ word: string; confidence: number; count: number }> | null;
   } | null;
   insight: {

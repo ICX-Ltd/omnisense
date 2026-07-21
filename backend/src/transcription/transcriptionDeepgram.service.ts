@@ -49,9 +49,9 @@ export class TranscriptionDeepgramService {
   // Builds the model + query string shared by both the URL and buffer paths.
   // keyterms/replacements come from the editable vocab (DB, with defaults).
   private buildEndpoint(keyterms: string[], replacements: [string, string][]) {
-    // Model is env-tunable so we can A/B nova-3 (keyterm prompting) against the
-    // phone-tuned nova-2-phonecall on real calls without redeploying.
-    const model = process.env.DEEPGRAM_MODEL || 'nova-2-phonecall';
+    // Model is env-tunable. Default nova-3 — newer, better on accents, and its
+    // keyterm prompting is contextual (smarter than nova-2's blunt keyword boost).
+    const model = process.env.DEEPGRAM_MODEL || 'nova-3';
 
     const params = new URLSearchParams({
       model,
@@ -170,13 +170,24 @@ export class TranscriptionDeepgramService {
     // for spot-checking a call and for growing the vehicle keyterm/replace lists.
     const overallConfidence =
       typeof alt.confidence === 'number' ? alt.confidence : null;
+    const words: Array<{ confidence?: number }> = alt.words ?? [];
     const lowConfidenceWords = summariseLowConfidence(alt.words ?? []);
+
+    // Word-level stats power the "% uncertain words" clarity metric — it spreads
+    // calls out far better than Deepgram's overall confidence (which sits in a
+    // compressed 0.9+ band). A word is "uncertain" below UNCERTAIN_THRESHOLD.
+    const wordCount = words.length;
+    const uncertainWordCount = words.filter(
+      (w) => (typeof w.confidence === 'number' ? w.confidence : 1) < UNCERTAIN_THRESHOLD,
+    ).length;
 
     return {
       provider: 'deepgram',
       text: fullText,
       turns,
       confidence: overallConfidence,
+      wordCount,
+      uncertainWordCount,
       lowConfidenceWords,
       // Audio length (seconds) for per-minute cost tracking. Deepgram returns it
       // in metadata.duration.
@@ -194,6 +205,10 @@ export class TranscriptionDeepgramService {
 // confidence and how many times it appeared low. Capped so the blob stays small.
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 const LOW_CONFIDENCE_MAX = 25;
+// Words below this count toward the "% uncertain" clarity metric. Higher than the
+// low-confidence-terms threshold (0.6) so the metric captures more borderline
+// words and gives a wider, more comparable spread across calls. Env-tunable.
+const UNCERTAIN_THRESHOLD = parseFloat(process.env.DEEPGRAM_UNCERTAIN_THRESHOLD || '0.8') || 0.8;
 
 function summariseLowConfidence(
   words: Array<{ word?: string; punctuated_word?: string; confidence?: number }>,

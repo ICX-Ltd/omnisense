@@ -621,12 +621,12 @@
                     {{ isChat ? 'Chat Conversation' : 'Transcript' }}
                     <span v-if="!isChat && detailData.transcript.model" class="hint" style="font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px">{{ detailData.transcript.model }}</span>
                     <span
-                      v-if="!isChat && transcriptConfidence !== null"
+                      v-if="!isChat && uncertainPct !== null"
                       class="chip"
-                      :class="confidenceClass(transcriptConfidence)"
+                      :class="uncertainClass(uncertainPct)"
                       style="font-size: 10px; margin-left: 6px"
-                      title="Overall transcription confidence (Deepgram)"
-                    >{{ confidencePct(transcriptConfidence) }}% confidence</span>
+                      title="Share of words the speech-to-text engine was unsure of (its acoustic confidence — not an AI judgement). Higher = rougher transcript."
+                    >{{ uncertainPct }}% uncertain</span>
                     <div v-if="(isChat && chatMessages.length) || (!isChat && callTurns.length)" class="chat-view-toggle">
                       <button
                         type="button"
@@ -1114,22 +1114,21 @@ const callTurns = computed<CallTurn[]>(() => {
   return turns;
 });
 
-// ─── transcription confidence (Deepgram) ────────────────────────────────────
-const transcriptConfidence = computed<number | null>(() => {
-  const c = detailData.value?.transcript?.confidence;
-  return typeof c === "number" ? c : null;
+// ─── transcription clarity (Deepgram acoustic confidence) ───────────────────
+// "% uncertain words" spreads calls out far better than the overall confidence
+// (which sits in a compressed 0.9+ band). Higher = rougher transcript.
+const uncertainPct = computed<number | null>(() => {
+  const p = detailData.value?.transcript?.uncertain_pct;
+  return typeof p === "number" ? p : null;
 });
 const lowConfidenceTerms = computed<Array<{ word: string; confidence: number; count: number }>>(
   () => detailData.value?.transcript?.low_confidence ?? [],
 );
-function confidencePct(c: number) {
-  return Math.round(c * 100);
-}
-function confidenceClass(c: number | null) {
-  if (c == null) return "chip--secondary";
-  if (c >= 0.9) return "chip--success";
-  if (c >= 0.75) return "chip--warning";
-  return "chip--danger";
+function uncertainClass(pct: number | null) {
+  if (pct == null) return "chip--secondary";
+  if (pct >= 12) return "chip--danger";
+  if (pct >= 5) return "chip--warning";
+  return "chip--success";
 }
 
 // ─── survey record (NMGB Survey etc.) ────────────────────────────────────────

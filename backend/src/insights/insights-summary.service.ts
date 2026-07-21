@@ -3352,6 +3352,14 @@ ${prompt}
             text: transcript.text,
             model: transcript.model,
             confidence: transcript.confidence ?? null,
+            word_count: transcript.wordCount ?? null,
+            uncertain_word_count: transcript.uncertainWordCount ?? null,
+            // % of words the ASR engine was unsure of — a wider, more comparable
+            // signal than the compressed overall confidence.
+            uncertain_pct:
+              transcript.wordCount && transcript.uncertainWordCount != null
+                ? Math.round((transcript.uncertainWordCount / transcript.wordCount) * 1000) / 10
+                : null,
             low_confidence: transcript.lowConfidenceJson
               ? safeParseJson(transcript.lowConfidenceJson)
               : null,
