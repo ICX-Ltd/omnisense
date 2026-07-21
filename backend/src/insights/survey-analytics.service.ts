@@ -516,6 +516,7 @@ export class SurveyAnalyticsService {
       notPurchaseReason?: string; interestFactor?: string; model?: string;
       defectedOnly?: boolean; wonOnly?: boolean;
       flowStatus?: string; stillConsidering?: boolean; ratingScore?: number; dealerVisit?: string;
+      ratedOnly?: boolean;
     },
     limit = 200,
     offset = 0,
@@ -532,6 +533,9 @@ export class SurveyAnalyticsService {
     if (criteria.flowStatus) conds.push(`${CA('$.meta.flow_status')} = ${pushParam(criteria.flowStatus)}`);
     if (criteria.stillConsidering) conds.push(`${CA('$.purchase_status.still_considering')} IN ${TRUTHY}`);
     if (criteria.ratingScore != null) conds.push(`TRY_CAST(${CA('$.dealership_rating.score')} AS INT) = ${pushParam(criteria.ratingScore)}`);
+    // Match the by-dealer tile, which counts only records that actually have a
+    // dealership rating (so the drill total lines up with the chip).
+    if (criteria.ratedOnly) conds.push(`${isSet('$.dealership_rating.score')}`);
     if (criteria.dealerVisit) conds.push(`${CA('$.dealer_visit.visited')} = ${pushParam(criteria.dealerVisit)}`);
     if (criteria.notPurchaseReason) {
       const path = SurveyAnalyticsService.REASON_PATHS[criteria.notPurchaseReason];

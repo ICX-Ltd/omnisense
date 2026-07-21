@@ -869,7 +869,7 @@ onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll
                   :key="d.dealer"
                   class="metric-row metric-row--clickable"
                   style="margin-bottom: 4px"
-                  @click="openDrill(`dealer:${d.dealer}`, `${d.dealer} — rated records`, { dealer: d.dealer })"
+                  @click="openDrill(`dealer:${d.dealer}`, `${d.dealer} — rated records`, { dealer: d.dealer, ratedOnly: 'true' })"
                 >
                   <div class="metric-left" style="flex: 1; font-size: 12px">{{ d.dealer }}</div>
                   <div class="metric-right">
