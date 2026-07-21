@@ -8,7 +8,7 @@ import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import LowConfidenceHelp from "./LowConfidenceHelp.vue";
 import { downloadCsv } from "@/utils/csv";
 
-type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms" | "lowconf";
+type SectionKey = "summary" | "actions" | "lastRun" | "history" | "keyterms" | "lowconf" | "failed";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
 type BatchJobStatus = "running" | "completed" | "failed";
 
@@ -53,6 +53,7 @@ const open = ref<Record<SectionKey, boolean>>({
   history: false,
   keyterms: false,
   lowconf: false,
+  failed: false,
 });
 
 const toggle = (key: SectionKey) => { open.value[key] = !open.value[key]; };
@@ -750,7 +751,7 @@ onUnmounted(stopPolling);
         </div>
 
         <!-- Failed records (dead-letter) + reprocessing -->
-        <div class="tile tile--accent">
+        <div class="tile tile--accent" @click="toggle('failed')">
           <div class="tile-head">
             <div class="tile-icon">⚠</div>
             <div class="tile-text">
@@ -759,10 +760,11 @@ onUnmounted(stopPolling);
             </div>
             <div class="spacer" />
             <span class="chip" :class="failedRecords.length ? 'chip--danger' : 'chip--success'" style="margin-right: 8px">{{ failedRecords.length }} error{{ failedRecords.length === 1 ? '' : 's' }}</span>
-            <button v-if="failedRecords.length" class="btn btn--ghost btn--sm" style="margin-right: 6px" @click.stop="exportFailedCsv">Export CSV</button>
-            <button class="btn btn--ghost btn--sm" :disabled="loadingFailed" @click.stop="loadFailed">{{ loadingFailed ? "Refreshing…" : "Refresh" }}</button>
+            <button v-if="isOpen('failed') && failedRecords.length" class="btn btn--ghost btn--sm" style="margin-right: 6px" @click.stop="exportFailedCsv">Export CSV</button>
+            <button v-if="isOpen('failed')" class="btn btn--ghost btn--sm" style="margin-right: 8px" :disabled="loadingFailed" @click.stop="loadFailed">{{ loadingFailed ? "Refreshing…" : "Refresh" }}</button>
+            <div class="chev" :class="{ open: isOpen('failed') }"></div>
           </div>
-          <div class="tile-body">
+          <div v-show="isOpen('failed')" class="tile-body" @click.stop>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
               <button class="btn btn--primary" :disabled="requeuing || !failedRecords.length" @click="requeueAllErrors">
                 {{ requeuing ? "Requeuing…" : "Requeue all errors" }}

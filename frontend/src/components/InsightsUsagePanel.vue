@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 
 type ModelRow = {
@@ -79,9 +79,17 @@ const from = ref(isoDaysAgo(30));
 const to = ref(today());
 const filterKey = ref<"calls" | "chats" | "all">("all");
 
+const open = ref(false);
 const loading = ref(false);
 const error = ref("");
 const data = ref<UsageData | null>(null);
+
+// Collapsed by default (it's at the top but not always needed); lazy-load on
+// first expand so it doesn't fetch when unused.
+function toggleOpen() {
+  open.value = !open.value;
+  if (open.value && !data.value) load();
+}
 
 const currency = computed(() => data.value?.currency ?? "USD");
 
@@ -109,19 +117,20 @@ async function load() {
   }
 }
 
-onMounted(load);
 </script>
 
 <template>
   <div class="tile">
-    <div class="tile-head">
+    <div class="tile-head" style="cursor: pointer" @click="toggleOpen">
       <div class="tile-icon">&#163;</div>
       <div class="tile-text">
         <div class="tile-title">Insights Usage &amp; Cost</div>
         <div class="tile-desc">Token spend and retry overhead from your own data — no provider console needed.</div>
       </div>
+      <div style="flex: 1"></div>
+      <span style="font-size: 13px; color: var(--muted); padding: 0 4px">{{ open ? "▾" : "▸" }}</span>
     </div>
-    <div class="tile-body">
+    <div v-show="open" class="tile-body">
       <!-- Controls -->
       <div class="usage-controls">
         <label class="usage-field">
