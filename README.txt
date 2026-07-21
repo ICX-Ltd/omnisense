@@ -293,3 +293,22 @@ Updates
   Narrative-generation prompts are now editable on the Prompts page as narrative.* fragments (restart
   backend to seed the new rows); keep the {{metrics}} / {{free_text_samples}} placeholders when editing.
   Added a text filter box to the Prompts list. APP_VERSION -> 1.32.0.
+
+
+2026-07-21
+- In-drawer QA correction loop: reviewers can now correct AI insight fields from the shared
+  interaction drawer via a pencil (Summary, QA overall/section scores, each QA answer, and Campaign
+  Q&A answers). Corrections are logged separately in app.insight_corrections (AI original preserved as
+  a golden-set / audit trail), shown as a "corrected" badge + a Reviewer Corrections list. New
+  CorrectionsModule (uiapi/corrections). Run sql/add-insight-corrections.sql on prod. APP_VERSION -> 1.54.0.
+- Model registry: sql/add-model-options.sql now also seeds the previous hardcoded model lists
+  (insights + transcription) so the registry is populated immediately, matching the on-boot seeder.
+- Prompt-version stamping: each insight now records which prompt fragments (and the version of each)
+  produced it. composeCallPrompt/composeChatPrompt return a {key: version} map that flows through
+  extractInsights into a new prompt_versions_json column on interaction_insights; the drawer gains a
+  Provenance section (model, provider, extractor, generated-at, per-fragment version chips). Existing
+  rows stay null and backfill on re-run. Run sql/add-insight-prompt-versions.sql on prod. -> 1.55.0.
+- Operations (QC) dashboard: rolling 12-month headline sparklines (Avg QC score, Avg QA score,
+  Low-score alert rate, Volume) via a new getOperationsMonthlyTrends aggregation + summary/operations-
+  trends endpoint. Own rolling window (independent of the day-level date filter) but honours the same
+  campaign/agent/outcome filters; arrows coloured by direction. No migration. APP_VERSION -> 1.56.0.
