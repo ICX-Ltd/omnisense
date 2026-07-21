@@ -147,6 +147,10 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     tables: ['model_options'],
   },
   {
+    file: 'add-insight-corrections.sql',
+    tables: ['insight_corrections'],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],

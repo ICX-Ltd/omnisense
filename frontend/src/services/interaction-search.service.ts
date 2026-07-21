@@ -96,6 +96,38 @@ export async function semanticSearchTranscripts(
   return data;
 }
 
+export interface InsightCorrection {
+  id: string;
+  recordingId: string;
+  fieldKey: string;
+  fieldLabel: string;
+  aiValue: string | null;
+  correctedValue: string | null;
+  note: string | null;
+  correctedBy: string | null;
+  createdAt: string;
+}
+
+export async function getCorrections(recordingId: string) {
+  const { data } = await api.get<InsightCorrection[]>(`/uiapi/corrections/${recordingId}`);
+  return data;
+}
+
+export async function addCorrection(
+  recordingId: string,
+  payload: {
+    fieldKey: string;
+    fieldLabel: string;
+    aiValue?: string | null;
+    correctedValue?: string | null;
+    note?: string | null;
+    correctedBy?: string | null;
+  },
+) {
+  const { data } = await api.post<InsightCorrection>(`/uiapi/corrections/${recordingId}`, payload);
+  return data;
+}
+
 export async function getInteractionDetail(id: string) {
   const { data } = await api.get<InteractionDetail>(
     `/uiapi/insights/ops/interaction-detail/${id}`,

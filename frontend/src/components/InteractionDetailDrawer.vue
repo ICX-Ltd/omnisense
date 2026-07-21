@@ -170,6 +170,8 @@
                       class="dim-chip"
                       :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
                     >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
+                    <button class="corr-pencil" title="Correct the overall QA score" @click.stop="openCorrection('qa.overall_score', 'QA — Overall Score', detailData.insight.qa_scores.overall_score)">&#9998;</button>
+                    <span v-if="correctionsByField['qa.overall_score']" class="corr-badge">corrected</span>
                   </div>
                   <template v-for="(section, sectionKey) in detailData.insight.qa_scores.scores" :key="sectionKey">
                     <div v-if="typeof section === 'object' && section !== null && 'section_score' in section" class="qa-section">
@@ -179,6 +181,8 @@
                           class="dim-chip"
                           :style="{ background: scoreColorSolid(section.section_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
                         >{{ fmtQaScore(section.section_score) }}</span>
+                        <button class="corr-pencil" title="Correct this section score" @click.stop="openCorrection('qa.section.' + String(sectionKey), 'QA Section Score — ' + String(sectionKey).replace(/_/g, ' '), section.section_score)">&#9998;</button>
+                        <span v-if="correctionsByField['qa.section.' + String(sectionKey)]" class="corr-badge">corrected</span>
                       </div>
                       <div v-for="(q, qKey) in section" :key="qKey" class="qa-row">
                         <template v-if="typeof q === 'object' && q !== null && 'answer' in q">
@@ -188,11 +192,29 @@
                             :class="q.answer === 'yes' ? 'chip--success' : q.answer === 'no' ? 'chip--danger' : 'chip--secondary'"
                             style="font-size: 11px"
                           >{{ q.answer }}</span>
+                          <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('qa.answer.' + String(sectionKey) + '.' + String(qKey), 'QA — ' + (qaQuestionLabels[String(qKey)] || String(qKey).replace(/_/g, ' ')), q.answer)">&#9998;</button>
+                          <span v-if="correctionsByField['qa.answer.' + String(sectionKey) + '.' + String(qKey)]" class="corr-badge">corrected</span>
                           <div class="qa-rationale">{{ q.rationale }}</div>
                         </template>
                       </div>
                     </div>
                   </template>
+                </div>
+
+                <!-- Reviewer Corrections (human overrides, logged separately from the AI insight) -->
+                <div v-if="corrections.length" class="drawer-section">
+                  <div class="drawer-section-title">Reviewer Corrections <span class="chip chip--secondary" style="font-size: 10px; margin-left: 6px">{{ corrections.length }}</span></div>
+                  <div v-for="c in corrections" :key="c.id" class="corr-item">
+                    <div class="corr-item-head">
+                      <span class="corr-item-label">{{ c.fieldLabel || c.fieldKey }}</span>
+                      <span class="corr-item-meta">{{ c.correctedBy || 'reviewer' }} · {{ fmtCorrectionDate(c.createdAt) }}</span>
+                    </div>
+                    <div class="corr-item-values">
+                      <span class="corr-was">was: {{ c.aiValue || '(empty)' }}</span>
+                      <span v-if="c.correctedValue" class="corr-now">→ {{ c.correctedValue }}</span>
+                    </div>
+                    <div v-if="c.note" class="corr-item-note">{{ c.note }}</div>
+                  </div>
                 </div>
               </div>
 
@@ -200,7 +222,11 @@
               <div class="drawer-col">
                 <!-- Summary -->
                 <div v-if="detailData.insight" class="drawer-section">
-                  <div class="drawer-section-title">Summary</div>
+                  <div class="drawer-section-title">
+                    Summary
+                    <button class="corr-pencil" title="Correct the summary" @click.stop="openCorrection('summary_short', 'Summary', detailData.insight.summary_short)">&#9998;</button>
+                    <span v-if="correctionsByField['summary_short']" class="corr-badge" title="A reviewer correction has been logged for this field">corrected</span>
+                  </div>
                   <p style="margin: 0 0 8px; font-weight: 600">{{ detailData.insight.summary_short }}</p>
                   <p v-if="detailData.insight.summary_detailed" style="margin: 0; line-height: 1.6; color: var(--ink)">{{ detailData.insight.summary_detailed }}</p>
                 </div>
@@ -473,7 +499,10 @@
 
                   <!-- Headline answers: consent + decision -->
                   <div class="parity-row parity-row--headline">
-                    <div class="parity-row-label">Consent to pass to dealer</div>
+                    <div class="parity-row-label">Consent to pass to dealer
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.consent_to_dealer', 'Campaign Q&A — Consent to pass to dealer', campaignAnswers.consent_to_dealer?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.consent_to_dealer']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.consent_to_dealer?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.consent_to_dealer?.answer) }}
                     </span>
@@ -481,7 +510,10 @@
                   </div>
 
                   <div class="parity-row">
-                    <div class="parity-row-label">Already decided</div>
+                    <div class="parity-row-label">Already decided
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.decision_made', 'Campaign Q&A — Already decided', campaignAnswers.decision_made?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.decision_made']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.decision_made?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.decision_made?.answer) }}
                     </span>
@@ -492,7 +524,10 @@
                   <!-- Views on current setup -->
                   <div class="parity-subheader">Views on current setup</div>
                   <div v-for="viewKey in viewKeys" :key="viewKey" class="parity-row">
-                    <div class="parity-row-label">{{ viewLabels[viewKey] }}</div>
+                    <div class="parity-row-label">{{ viewLabels[viewKey] }}
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.' + viewKey, 'Campaign Q&A — ' + viewLabels[viewKey], campaignAnswers[viewKey]?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.' + viewKey]" class="corr-badge">corrected</span>
+                    </div>
                     <span
                       class="chip"
                       :class="viewChip(campaignAnswers[viewKey])"
@@ -505,7 +540,10 @@
                   <!-- Constraints -->
                   <div class="parity-subheader">Constraints &amp; circumstances</div>
                   <div class="parity-row">
-                    <div class="parity-row-label">Affordability issues</div>
+                    <div class="parity-row-label">Affordability issues
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.affordability_issues', 'Campaign Q&A — Affordability issues', campaignAnswers.affordability_issues?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.affordability_issues']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.affordability_issues?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.affordability_issues?.answer) }}
                     </span>
@@ -513,7 +551,10 @@
                     <div v-if="campaignAnswers.affordability_issues?.quote" class="parity-quote">"{{ campaignAnswers.affordability_issues.quote }}"</div>
                   </div>
                   <div class="parity-row">
-                    <div class="parity-row-label">Lifestyle change</div>
+                    <div class="parity-row-label">Lifestyle change
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.lifestyle_change_vehicle', 'Campaign Q&A — Lifestyle change', campaignAnswers.lifestyle_change_vehicle?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.lifestyle_change_vehicle']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.lifestyle_change_vehicle?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.lifestyle_change_vehicle?.answer) }}
                     </span>
@@ -527,7 +568,10 @@
                   <div class="drawer-section-title">Campaign Q&A — Competitor &amp; Dealer Activity</div>
 
                   <div class="parity-row">
-                    <div class="parity-row-label">Dealer already in touch</div>
+                    <div class="parity-row-label">Dealer already in touch
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.dealer_already_in_touch', 'Campaign Q&A — Dealer already in touch', campaignAnswers.dealer_already_in_touch?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.dealer_already_in_touch']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.dealer_already_in_touch?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.dealer_already_in_touch?.answer) }}
                     </span>
@@ -535,7 +579,10 @@
                   </div>
 
                   <div class="parity-row parity-row--headline">
-                    <div class="parity-row-label">Looking at a competitor</div>
+                    <div class="parity-row-label">Looking at a competitor
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.competitor_vehicle', 'Campaign Q&A — Looking at a competitor', campaignAnswers.competitor_vehicle?.answer)">&#9998;</button>
+                      <span v-if="correctionsByField['campaign.competitor_vehicle']" class="corr-badge">corrected</span>
+                    </div>
                     <span class="chip" :class="answerChip(campaignAnswers.competitor_vehicle?.answer)" style="font-size: 11px">
                       {{ formatAnswer(campaignAnswers.competitor_vehicle?.answer) }}
                     </span>
@@ -731,15 +778,47 @@
         </button>
       </div>
     </div>
+
+    <!-- Correction modal (opened from a field's ✎) -->
+    <div v-if="correctionOpen" class="corr-backdrop" @click="closeCorrection" />
+    <div v-if="correctionOpen" class="corr-modal">
+      <div class="corr-head">
+        <div class="corr-title">&#9998; Correct field</div>
+        <button class="drawer-close" @click="closeCorrection">&times;</button>
+      </div>
+      <div class="corr-body">
+        <div class="corr-field-label">{{ correctionField.label }}</div>
+        <div class="corr-ai">
+          <span class="drawer-label">AI value</span>
+          <div class="corr-ai-val">{{ correctionField.aiValue || "(empty)" }}</div>
+        </div>
+        <label class="drawer-label" style="margin-top: 10px; display: block">Corrected value</label>
+        <input v-model="correctionValue" class="corr-input" @keydown.enter="saveCorrection" />
+        <label class="drawer-label" style="margin-top: 10px; display: block">Note (optional — why it's wrong)</label>
+        <textarea v-model="correctionNote" class="corr-textarea" rows="2" />
+        <div class="hint" style="margin-top: 8px">The AI's original value is kept — this is logged as a reviewer correction.</div>
+        <div v-if="correctionError" class="ask-error">{{ correctionError }}</div>
+      </div>
+      <div class="corr-foot">
+        <button class="btn btn--ghost btn--sm" @click="closeCorrection">Cancel</button>
+        <button class="ask-send" :disabled="savingCorrection" @click="saveCorrection">{{ savingCorrection ? "…" : "Save correction" }}</button>
+      </div>
+    </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import axios from "axios";
-import { getInteractionDetail } from "@/services/interaction-search.service";
+import {
+  getInteractionDetail,
+  getCorrections,
+  addCorrection,
+  type InsightCorrection,
+} from "@/services/interaction-search.service";
 import { ApiPath } from "@/enums/api";
 import LowConfidenceHelp from "@/components/LowConfidenceHelp.vue";
+import { useAuth } from "@/composables/useAuth";
 
 const props = defineProps<{ recordingId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -789,6 +868,8 @@ watch(
     }
     loadingDetail.value = true;
     detailData.value = null;
+    corrections.value = [];
+    closeCorrection();
     try {
       detailData.value = await getInteractionDetail(id);
     } catch {
@@ -796,12 +877,73 @@ watch(
     } finally {
       loadingDetail.value = false;
     }
+    loadCorrections(id);
   },
   { immediate: true },
 );
 
 function onClose() {
   emit("close");
+}
+
+// ─── QA / insight corrections (human overrides, logged separately) ──────────
+const { user } = useAuth();
+const corrections = ref<InsightCorrection[]>([]);
+// Latest correction per field, for showing a "corrected" badge inline.
+const correctionsByField = computed<Record<string, InsightCorrection>>(() => {
+  const m: Record<string, InsightCorrection> = {};
+  for (const c of corrections.value) if (!m[c.fieldKey]) m[c.fieldKey] = c; // list is newest-first
+  return m;
+});
+async function loadCorrections(id: string) {
+  try {
+    corrections.value = await getCorrections(id);
+  } catch {
+    corrections.value = [];
+  }
+}
+
+const correctionOpen = ref(false);
+const correctionField = ref<{ key: string; label: string; aiValue: string }>({ key: "", label: "", aiValue: "" });
+const correctionValue = ref("");
+const correctionNote = ref("");
+const savingCorrection = ref(false);
+const correctionError = ref("");
+
+function openCorrection(key: string, label: string, aiValue: unknown) {
+  correctionField.value = { key, label, aiValue: aiValue == null ? "" : String(aiValue) };
+  correctionValue.value = correctionField.value.aiValue;
+  correctionNote.value = "";
+  correctionError.value = "";
+  correctionOpen.value = true;
+}
+function closeCorrection() {
+  correctionOpen.value = false;
+}
+async function saveCorrection() {
+  if (!props.recordingId) return;
+  savingCorrection.value = true;
+  correctionError.value = "";
+  try {
+    await addCorrection(props.recordingId, {
+      fieldKey: correctionField.value.key,
+      fieldLabel: correctionField.value.label,
+      aiValue: correctionField.value.aiValue,
+      correctedValue: correctionValue.value,
+      note: correctionNote.value || null,
+      correctedBy: user.value?.email || user.value?.name || null,
+    });
+    await loadCorrections(props.recordingId);
+    correctionOpen.value = false;
+  } catch (e: any) {
+    correctionError.value = e?.response?.data?.message || e?.message || "Failed to save correction";
+  } finally {
+    savingCorrection.value = false;
+  }
+}
+function fmtCorrectionDate(iso: string) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -1954,4 +2096,129 @@ const answerGroups = computed(() => {
 .answer-value { color: var(--ink); font-weight: 600; text-align: right; word-break: break-word; }
 .answer-yn { font-size: 10px; font-weight: 800; padding: 0 8px; }
 .answer-n { color: var(--muted); font-weight: 700; }
+
+/* ── Reviewer corrections (in-drawer QA correction loop) ─────────────── */
+.corr-pencil {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.corr-pencil:hover {
+  opacity: 1;
+  color: var(--brand, #6366f1);
+  background: color-mix(in srgb, var(--brand, #6366f1) 12%, transparent);
+}
+.corr-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+  padding: 1px 5px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.corr-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.corr-item:last-child { border-bottom: none; }
+.corr-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.corr-item-label { font-size: 12px; font-weight: 700; color: var(--ink); }
+.corr-item-meta { font-size: 10px; color: var(--muted); }
+.corr-item-values { font-size: 12px; margin-top: 2px; line-height: 1.45; }
+.corr-was { color: var(--muted); text-decoration: line-through; }
+.corr-now { color: var(--ink); font-weight: 600; margin-left: 4px; }
+.corr-item-note { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 2px; }
+
+/* Correction modal — sits above the drawer, teleported to body */
+.corr-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1200;
+}
+.corr-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  z-index: 1201;
+  display: flex;
+  flex-direction: column;
+}
+.corr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.corr-title { font-size: 14px; font-weight: 800; color: var(--ink); }
+.corr-body { padding: 16px; }
+.corr-field-label { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+.corr-ai { margin-bottom: 4px; }
+.corr-ai-val {
+  font-size: 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.corr-input,
+.corr-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  font-family: inherit;
+}
+.corr-textarea { resize: vertical; }
+.corr-input:focus,
+.corr-textarea:focus {
+  outline: none;
+  border-color: var(--brand, #6366f1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand, #6366f1) 20%, transparent);
+}
+.corr-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
 </style>

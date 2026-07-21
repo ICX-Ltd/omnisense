@@ -25,6 +25,8 @@ import { TranscriptionUsageLog } from './db/entities/transcription-usage-log.ent
 import { TranscriptionVocab } from './db/entities/transcription-vocab.entity';
 import { ModelOption } from './db/entities/model-option.entity';
 import { ModelsModule } from './models/models.module';
+import { InsightCorrection } from './db/entities/insight-correction.entity';
+import { CorrectionsModule } from './corrections/corrections.module';
 
 @Module({
   imports: [
@@ -54,6 +56,7 @@ import { ModelsModule } from './models/models.module';
             TranscriptionUsageLog,
             TranscriptionVocab,
             ModelOption,
+            InsightCorrection,
           ],
           synchronize: false,
           logging: false,
@@ -74,6 +77,7 @@ import { ModelsModule } from './models/models.module';
     PromptsModule,
     HealthModule,
     ModelsModule,
+    CorrectionsModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,
