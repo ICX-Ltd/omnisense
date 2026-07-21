@@ -1307,11 +1307,11 @@ onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll
           <div class="tile-icon">&#127942;</div>
           <div class="tile-text">
             <div class="tile-title">Why Competitors Win (from transcript)</div>
-            <div class="tile-desc">Reasons the customer preferred a competitor &mdash; aligned to the survey's influence factors</div>
+            <div class="tile-desc">Reasons the customer preferred a competitor &mdash; split by whether they considered a Chinese OEM</div>
           </div>
         </div>
         <div class="tile-body">
-          <div class="grid grid-2">
+          <div class="grid grid-3">
             <div>
               <div class="mini-head">All competitors</div>
               <div
@@ -1327,18 +1327,32 @@ onMounted(async () => { readUrlState(); await loadFilterOptions(); await loadAll
               <div v-if="!transcriptInsights.reasons.length" class="hint">No data.</div>
             </div>
             <div>
-              <div class="mini-head">Chinese-OEM specific</div>
+              <div class="mini-head">Non-Chinese competitors</div>
+              <div
+                v-for="r in transcriptInsights.non_chinese_reasons"
+                :key="r.key"
+                class="bar-row bar-row--click"
+                @click="openTranscriptDrill(`ti:noncnreason:${r.key}`, `Non-Chinese competitor reason — ${r.label}`, { competitorReason: r.key, transcriptNonChineseOnly: 'true' })"
+              >
+                <div class="bar-label">{{ r.label }}</div>
+                <div class="bar-track"><div class="bar-fill bar-fill--blue" :style="{ width: barPct(r.count, maxCount(transcriptInsights.non_chinese_reasons)) + '%' }" /></div>
+                <div class="bar-value">{{ r.count }}</div>
+              </div>
+              <div v-if="!transcriptInsights.non_chinese_reasons || !transcriptInsights.non_chinese_reasons.length" class="hint">No data.</div>
+            </div>
+            <div>
+              <div class="mini-head">Chinese OEM competitors</div>
               <div
                 v-for="r in transcriptInsights.chinese_reasons"
                 :key="r.key"
                 class="bar-row bar-row--click"
-                @click="openTranscriptDrill(`ti:cnreason:${r.key}`, `Chinese-OEM reason — ${r.label}`, { chineseReason: r.key })"
+                @click="openTranscriptDrill(`ti:cnreason:${r.key}`, `Chinese-OEM competitor reason — ${r.label}`, { competitorReason: r.key, transcriptChineseOnly: 'true' })"
               >
                 <div class="bar-label">{{ r.label }}</div>
                 <div class="bar-track"><div class="bar-fill bar-fill--red" :style="{ width: barPct(r.count, maxCount(transcriptInsights.chinese_reasons)) + '%' }" /></div>
                 <div class="bar-value">{{ r.count }}</div>
               </div>
-              <div v-if="!transcriptInsights.chinese_reasons.length" class="hint">No Chinese-OEM-specific reasons captured.</div>
+              <div v-if="!transcriptInsights.chinese_reasons.length" class="hint">No reasons for Chinese-OEM defections captured.</div>
             </div>
           </div>
         </div>

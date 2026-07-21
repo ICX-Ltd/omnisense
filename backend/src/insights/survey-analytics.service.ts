@@ -1073,20 +1073,41 @@ export class SurveyAnalyticsService {
     const consideredTotal = competitorBrands.reduce((a, b) => a + b.count, 0);
     const chineseConsidered = competitorBrands.filter((b) => b.chinese).reduce((a, b) => a + b.count, 0);
 
-    // ── Competitor reasons (aligned to survey influenced_by labels) ──
-    const reasonAgg = async (path: string) =>
-      (await q<{ reason: string; cnt: string }>(
-        `SELECT r.value AS reason, COUNT(1) AS cnt
-         ${FROM_SURVEY} CROSS APPLY OPENJSON(ii.campaign_transcript_json, '${path}') r
-         ${tClause} AND r.value IS NOT NULL AND r.value <> ''
-         GROUP BY r.value ORDER BY COUNT(1) DESC`,
-      )).map((r) => ({
-        key: r.reason,
-        label: INFLUENCE_LABELS[r.reason] ?? r.reason,
-        count: parseInt(r.cnt, 10),
-      }));
-    const reasons = await reasonAgg('$.competitor_reasons.reasons');
-    const chineseReasons = await reasonAgg('$.competitor_reasons.chinese_specific_reasons');
+    // ── Competitor reasons, split by whether the record considered a Chinese OEM ──
+    // The model's separate `chinese_specific_reasons` field is unreliable/empty,
+    // so instead we classify each record by its considered brands (isChineseOem)
+    // and bucket its `competitor_reasons.reasons` into Chinese vs non-Chinese.
+    const reasonRecordRows = await q<{ reasons: string | null; brands: string | null }>(
+      `SELECT JSON_QUERY(ii.campaign_transcript_json, '$.competitor_reasons.reasons') AS reasons,
+              JSON_QUERY(ii.campaign_transcript_json, '$.competitor_considered.brands') AS brands
+       ${FROM_SURVEY} ${tClause}
+         AND JSON_QUERY(ii.campaign_transcript_json, '$.competitor_reasons.reasons') IS NOT NULL`,
+    );
+    const allMap = new Map<string, number>();
+    const chineseMap = new Map<string, number>();
+    const nonChineseMap = new Map<string, number>();
+    for (const row of reasonRecordRows) {
+      let reasonList: any[] = [];
+      let brandList: Array<{ brand?: string }> = [];
+      try { reasonList = JSON.parse(row.reasons || '[]'); } catch { /* skip */ }
+      try { brandList = JSON.parse(row.brands || '[]'); } catch { /* skip */ }
+      if (!Array.isArray(reasonList) || !reasonList.length) continue;
+      const isChinese = Array.isArray(brandList) && brandList.some((b) => b?.brand && isChineseOem(b.brand));
+      const bucket = isChinese ? chineseMap : nonChineseMap;
+      for (const raw of reasonList) {
+        const key = String(raw ?? '').trim();
+        if (!key) continue;
+        allMap.set(key, (allMap.get(key) ?? 0) + 1);
+        bucket.set(key, (bucket.get(key) ?? 0) + 1);
+      }
+    }
+    const toReasonList = (m: Map<string, number>) =>
+      [...m.entries()]
+        .map(([key, count]) => ({ key, label: INFLUENCE_LABELS[key] ?? key, count }))
+        .sort((a, b) => b.count - a.count);
+    const reasons = toReasonList(allMap);
+    const chineseReasons = toReasonList(chineseMap);
+    const nonChineseReasons = toReasonList(nonChineseMap);
 
     // ── Frustrations (theme / severity / owner / resolvability + samples) ──
     const frustrationRows = await q<{
@@ -1177,6 +1198,7 @@ export class SurveyAnalyticsService {
       },
       reasons,
       chinese_reasons: chineseReasons,
+      non_chinese_reasons: nonChineseReasons,
       frustrations,
       measures,
       quotes,
@@ -1193,7 +1215,7 @@ export class SurveyAnalyticsService {
     f: SurveyFilter,
     criteria: {
       sentimentTopic?: string; sentimentValue?: string;
-      transcriptBrand?: string; transcriptChineseOnly?: boolean;
+      transcriptBrand?: string; transcriptChineseOnly?: boolean; transcriptNonChineseOnly?: boolean;
       competitorReason?: string; chineseReason?: string;
       frustrationTheme?: string; frustrationSeverity?: string; frustrationResolvable?: string;
       priceGap?: boolean; dealerFollowUp?: string; evStance?: string; loyaltyAnswer?: string;
@@ -1270,6 +1292,31 @@ export class SurveyAnalyticsService {
         );
       } else {
         conds.push('1 = 0');
+      }
+    }
+
+    // Records that considered a competitor but NONE that are Chinese OEMs.
+    if (criteria.transcriptNonChineseOnly) {
+      const brandRows = await this.repo.manager.query<Array<{ brand: string }>>(
+        `SELECT DISTINCT b.brand AS brand
+         ${FROM_SURVEY}
+         CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands')
+           WITH (brand nvarchar(200) '$.brand') b
+         ${clause} AND ii.campaign_transcript_json IS NOT NULL AND b.brand IS NOT NULL AND b.brand <> ''`,
+        params,
+      );
+      const chineseMakes = brandRows.map((r) => r.brand).filter((m) => isChineseOem(m));
+      // Must have at least one considered brand, and no considered brand Chinese.
+      conds.push(
+        `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands') ` +
+          `WITH (brand nvarchar(200) '$.brand') b WHERE b.brand IS NOT NULL AND b.brand <> '')`,
+      );
+      if (chineseMakes.length) {
+        const ph = chineseMakes.map((m) => pushParam(m));
+        conds.push(
+          `NOT EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_considered.brands') ` +
+            `WITH (brand nvarchar(200) '$.brand') b WHERE b.brand IN (${ph.join(', ')}))`,
+        );
       }
     }
 

@@ -185,8 +185,10 @@ You have THREE data sources:
    - competitors: brands the customer CONSIDERED or test-drove (not only bought), each
      tagged chinese; considered_total and chinese_share are your best signal of RISING
      Chinese-OEM CONSIDERATION (a leading indicator, ahead of completed defections).
-   - reasons / chinese_reasons: why competitors appealed, in the customer's words
-     (aligned to the survey influence factors); chinese_reasons is Chinese-OEM specific.
+   - reasons / non_chinese_reasons / chinese_reasons: why competitors appealed, in the
+     customer's words (aligned to the survey influence factors). chinese_reasons = reasons
+     from customers who CONSIDERED a Chinese OEM; non_chinese_reasons = the rest. Do NOT
+     say "no Chinese reasons" when there are defections to / consideration of Chinese OEMs.
    - frustrations: themes with severity, root_cause_owner, whether NMGB can resolve it,
      and a recommended_action + verbatim quote — your primary input for key_risks and
      recommendations.
@@ -236,8 +238,8 @@ Rules:
   warning. If fewer than 2 quarters have data, use "insufficient_data" and say so — do not
   imply a trend that isn't evidenced.
 - why_customers_choose_competitors: blend the survey purchase_influence_factors with the
-  transcript reasons/chinese_reasons. In "comparison", contrast Chinese-OEM-specific reasons
-  (transcript.chinese_reasons) with the overall set.
+  transcript reasons / non_chinese_reasons / chinese_reasons. In "comparison", contrast
+  transcript.chinese_reasons with transcript.non_chinese_reasons.
 - key_risks and recommendations: draw heavily on transcript.frustrations — prioritise
   high-severity, resolvable themes and turn their recommended_action into recommendations.
   Fold in transcript.measures (e.g. low loyalty, poor dealer_follow_up, price_expectation_gap)
