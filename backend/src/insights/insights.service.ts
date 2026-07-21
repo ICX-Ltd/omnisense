@@ -223,9 +223,10 @@ export class InsightsService {
     rawJsonText: string;
     parsed: ExtractedInsights;
     usage: ExtractUsage;
+    promptVersions: Record<string, number>;
   }> {
     const isChat = interactionType === 'chat';
-    const prompt = isChat
+    const { prompt, promptVersions } = isChat
       ? await this.promptsService.composeChatPrompt(transcript, campaign)
       : await this.promptsService.composeCallPrompt(transcript, campaign);
 
@@ -309,6 +310,7 @@ export class InsightsService {
             failedInputTokens,
             failedOutputTokens,
           },
+          promptVersions,
         };
       }
 

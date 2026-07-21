@@ -216,6 +216,28 @@
                     <div v-if="c.note" class="corr-item-note">{{ c.note }}</div>
                   </div>
                 </div>
+
+                <!-- Provenance — model + prompt fragment versions that produced this insight -->
+                <div v-if="provenance" class="drawer-section">
+                  <div class="drawer-section-title">Provenance</div>
+                  <div class="prov-grid">
+                    <template v-if="provenance.model"><span class="prov-key">Model</span><span class="prov-val">{{ provenance.model }}</span></template>
+                    <template v-if="provenance.provider_used"><span class="prov-key">Provider</span><span class="prov-val">{{ provenance.provider_used }}</span></template>
+                    <template v-if="provenance.extractor_version"><span class="prov-key">Extractor</span><span class="prov-val">{{ provenance.extractor_version }}</span></template>
+                    <template v-if="provenance.generated_at"><span class="prov-key">Generated</span><span class="prov-val">{{ fmtCorrectionDate(provenance.generated_at) }}</span></template>
+                  </div>
+                  <div v-if="promptVersionList.length" class="prov-prompts">
+                    <div class="prov-key" style="margin-bottom: 4px">Prompt fragment versions</div>
+                    <div class="prov-chip-list">
+                      <span v-for="p in promptVersionList" :key="p.key" class="prov-chip" :title="p.key">
+                        {{ p.key }} <strong>v{{ p.version }}</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <div v-else class="hint" style="margin-top: 6px">
+                    No prompt versions stamped (insight predates prompt-version stamping — re-run to backfill).
+                  </div>
+                </div>
               </div>
 
               <!-- MIDDLE COLUMN -->
@@ -1053,6 +1075,16 @@ const isChat = computed(
 const campaignAnswers = computed<any>(
   () => detailData.value?.insight?.campaign_answers ?? null,
 );
+
+// ─── provenance (model + prompt fragment versions) ──────────────────────────
+const provenance = computed(() => detailData.value?.insight?.provenance ?? null);
+const promptVersionList = computed<Array<{ key: string; version: number }>>(() => {
+  const pv = provenance.value?.prompt_versions;
+  if (!pv) return [];
+  return Object.entries(pv)
+    .map(([key, version]) => ({ key, version: Number(version) }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+});
 
 // ─── quote grounding (QA trust signal) ──────────────────────────────────────
 const quoteGrounding = computed<any>(
@@ -2148,6 +2180,29 @@ const answerGroups = computed(() => {
 .corr-was { color: var(--muted); text-decoration: line-through; }
 .corr-now { color: var(--ink); font-weight: 600; margin-left: 4px; }
 .corr-item-note { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 2px; }
+
+/* Provenance — model + prompt fragment versions */
+.prov-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 3px;
+  align-items: baseline;
+}
+.prov-key { font-size: 11px; color: var(--muted); }
+.prov-val { font-size: 12px; color: var(--ink); font-weight: 600; word-break: break-word; }
+.prov-prompts { margin-top: 8px; }
+.prov-chip-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.prov-chip {
+  font-size: 10px;
+  font-family: ui-monospace, "Courier New", monospace;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.prov-chip strong { color: var(--brand, #6366f1); }
 
 /* Correction modal — sits above the drawer, teleported to body */
 .corr-backdrop {

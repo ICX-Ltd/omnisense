@@ -49,6 +49,14 @@ export interface InteractionDetail {
     // Campaign-specific Q&A blob (e.g. Parity). Shape varies per campaign,
     // owned by the matching call.campaign.<NAME>.qa_schema prompt fragment.
     campaign_answers?: Record<string, any> | null;
+    // Provenance: which model + prompt fragment versions produced this insight.
+    provenance?: {
+      provider_used: string | null;
+      model: string | null;
+      extractor_version: string | null;
+      generated_at: string | null;
+      prompt_versions: Record<string, number> | null;
+    } | null;
   } | null;
   // Present only for survey interactions (conversation_type='survey'): the full
   // projected survey answer set + mined transcript insights. Drives the survey

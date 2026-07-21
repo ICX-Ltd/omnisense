@@ -21,6 +21,10 @@ import { SEED_FRAGMENTS } from './seed-fragments';
 
 export type PromptPlaceholders = Record<string, string>;
 
+// Map of fragment key → version, capturing exactly which prompt fragments (and
+// which version of each) produced a given prompt. Stamped onto the insight.
+export type PromptVersions = Record<string, number>;
+
 const RAC_CAMPAIGN_REGEX = /rac/i;
 
 function substitute(template: string, values: PromptPlaceholders): string {
@@ -250,14 +254,25 @@ export class PromptsService implements OnModuleInit {
   }
 
   async composeCallPrompt(transcript: string, campaign?: string | null) {
-    const base = await this.getActiveByKey('call.base');
+    // Records every fragment that actually goes into the prompt as {key: version}
+    // so the produced insight can be stamped with the exact prompt provenance.
+    const versions: PromptVersions = {};
+    const record = (t: PromptTemplate | null) => {
+      if (t) versions[t.key] = t.version;
+      return t;
+    };
+
+    const base = record(await this.getActiveByKey('call.base'));
     if (!base) {
       throw new Error(
         'Missing active "call.base" prompt template — cannot compose call prompt',
       );
     }
 
-    const campaignSection = await this.resolveCallCampaignSection(campaign);
+    const campaignSection = await this.resolveCallCampaignSection(
+      campaign,
+      versions,
+    );
 
     // Optional campaign-specific Q&A pair (e.g. Parity). Both must be present
     // to inject; one without the other would produce invalid output.
@@ -269,23 +284,23 @@ export class PromptsService implements OnModuleInit {
     let campaignTranscriptSection = '';
     let campaignTranscriptSchema = '';
     if (campaign && campaign !== 'unknown') {
-      const qa = await this.getActiveByKey(`call.campaign.${campaign}.qa`);
-      const qaSchema = await this.getActiveByKey(
-        `call.campaign.${campaign}.qa_schema`,
+      const qa = record(await this.getActiveByKey(`call.campaign.${campaign}.qa`));
+      const qaSchema = record(
+        await this.getActiveByKey(`call.campaign.${campaign}.qa_schema`),
       );
       if (qa && qaSchema) {
         campaignQaSection = substitute(qa.body, { campaign });
         campaignQaSchema = `,\n\n  ${substitute(qaSchema.body, { campaign })}`;
       }
 
-      const transcript = await this.getActiveByKey(
-        `call.campaign.${campaign}.transcript`,
+      const transcriptFrag = record(
+        await this.getActiveByKey(`call.campaign.${campaign}.transcript`),
       );
-      const transcriptSchema = await this.getActiveByKey(
-        `call.campaign.${campaign}.transcript_schema`,
+      const transcriptSchema = record(
+        await this.getActiveByKey(`call.campaign.${campaign}.transcript_schema`),
       );
-      if (transcript && transcriptSchema) {
-        campaignTranscriptSection = substitute(transcript.body, { campaign });
+      if (transcriptFrag && transcriptSchema) {
+        campaignTranscriptSection = substitute(transcriptFrag.body, { campaign });
         campaignTranscriptSchema = `,\n\n  ${substitute(transcriptSchema.body, { campaign })}`;
       }
     }
@@ -298,26 +313,38 @@ export class PromptsService implements OnModuleInit {
       campaign_transcript_schema: campaignTranscriptSchema,
     });
 
-    return substitute(withSections, {
+    const prompt = substitute(withSections, {
       transcript,
       campaign: campaign ?? '',
     });
+
+    return { prompt, promptVersions: versions };
   }
 
   private async resolveCallCampaignSection(
-    campaign?: string | null,
+    campaign: string | null | undefined,
+    versions: PromptVersions,
   ): Promise<string> {
+    const record = (t: PromptTemplate | null) => {
+      if (t) versions[t.key] = t.version;
+      return t;
+    };
+
     if (!campaign || campaign === 'unknown') {
-      const unknown = await this.getActiveByKey('call.campaign.unknown');
+      const unknown = record(await this.getActiveByKey('call.campaign.unknown'));
       return unknown?.body ?? '';
     }
 
-    const specific = await this.getActiveByKey(`call.campaign.${campaign}`);
+    const specific = record(
+      await this.getActiveByKey(`call.campaign.${campaign}`),
+    );
     if (specific) {
       return substitute(specific.body, { campaign });
     }
 
-    const fallback = await this.getActiveByKey('call.campaign.default');
+    const fallback = record(
+      await this.getActiveByKey('call.campaign.default'),
+    );
     if (fallback) {
       return substitute(fallback.body, { campaign });
     }
@@ -326,7 +353,13 @@ export class PromptsService implements OnModuleInit {
   }
 
   async composeChatPrompt(transcript: string, campaign?: string | null) {
-    const base = await this.getActiveByKey('chat.base');
+    const versions: PromptVersions = {};
+    const record = (t: PromptTemplate | null) => {
+      if (t) versions[t.key] = t.version;
+      return t;
+    };
+
+    const base = record(await this.getActiveByKey('chat.base'));
     if (!base) {
       throw new Error(
         'Missing active "chat.base" prompt template — cannot compose chat prompt',
@@ -338,29 +371,29 @@ export class PromptsService implements OnModuleInit {
 
     const isRac = !!campaign && RAC_CAMPAIGN_REGEX.test(campaign);
 
-    const opsSection = await this.getActiveByKey('chat.operations.default');
-    const opsSchema = await this.getActiveByKey(
-      'chat.operations_schema.default',
+    const opsSection = record(await this.getActiveByKey('chat.operations.default'));
+    const opsSchema = record(
+      await this.getActiveByKey('chat.operations_schema.default'),
     );
 
     // Chat response-time metrics are computed in code from the transcript
     // (backend/src/insights/chat-response-time.ts) — no LLM prompt section.
 
     const racIdleRule = isRac
-      ? await this.getActiveByKey('chat.rac.idle_rule')
+      ? record(await this.getActiveByKey('chat.rac.idle_rule'))
       : null;
     const racOpportunity = isRac
-      ? await this.getActiveByKey('chat.rac.opportunity')
+      ? record(await this.getActiveByKey('chat.rac.opportunity'))
       : null;
-    const racQa = isRac ? await this.getActiveByKey('chat.rac.qa') : null;
+    const racQa = isRac ? record(await this.getActiveByKey('chat.rac.qa')) : null;
     const racQaSchema = isRac
-      ? await this.getActiveByKey('chat.rac.qa_schema')
+      ? record(await this.getActiveByKey('chat.rac.qa_schema'))
       : null;
     const racObjection = isRac
-      ? await this.getActiveByKey('chat.rac.objection')
+      ? record(await this.getActiveByKey('chat.rac.objection'))
       : null;
     const racObjectionSchema = isRac
-      ? await this.getActiveByKey('chat.rac.objection_schema')
+      ? record(await this.getActiveByKey('chat.rac.objection_schema'))
       : null;
 
     const withSections = substitute(base.body, {
@@ -377,10 +410,12 @@ export class PromptsService implements OnModuleInit {
         : '',
     });
 
-    return substitute(withSections, {
+    const prompt = substitute(withSections, {
       transcript,
       campaign: campaign ?? '',
     });
+
+    return { prompt, promptVersions: versions };
   }
 
   async preview(
@@ -390,8 +425,10 @@ export class PromptsService implements OnModuleInit {
   ) {
     const sampleTranscript =
       transcript ?? '[transcript preview — actual transcript inserted at runtime]';
-    return interactionType === 'chat'
-      ? this.composeChatPrompt(sampleTranscript, campaign ?? null)
-      : this.composeCallPrompt(sampleTranscript, campaign ?? null);
+    const { prompt } =
+      interactionType === 'chat'
+        ? await this.composeChatPrompt(sampleTranscript, campaign ?? null)
+        : await this.composeCallPrompt(sampleTranscript, campaign ?? null);
+    return prompt;
   }
 }

@@ -3406,6 +3406,17 @@ ${prompt}
             detail: insight.opportunity_json ? safeParseJson(insight.opportunity_json) : null,
           },
           campaign_answers: campaignAnswers,
+          // Provenance: which model + prompt fragment versions produced this
+          // insight, for reproducibility / audit.
+          provenance: {
+            provider_used: insight.providerUsed,
+            model: insight.model,
+            extractor_version: insight.extractorVersion,
+            generated_at: insight.createdAt,
+            prompt_versions: insight.prompt_versions_json
+              ? safeParseJson(insight.prompt_versions_json)
+              : null,
+          },
           // QA trust signal: are the model's verbatim quotes actually in the transcript?
           quote_grounding: verifyCampaignQuotes(transcript?.text ?? null, campaignAnswers),
           chat_response:

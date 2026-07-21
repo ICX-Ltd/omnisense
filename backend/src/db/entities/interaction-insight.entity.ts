@@ -34,6 +34,12 @@ export class InteractionInsight {
   @Column({ type: 'varchar', length: 50, default: 'v3' })
   extractorVersion!: string;
 
+  // Provenance: which prompt fragments (and version of each) produced this
+  // insight, as a JSON map { "call.base": 4, "call.campaign.MFS": 2, ... }.
+  // Null for insights written before stamping was introduced.
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  prompt_versions_json!: string | null;
+
   // Token usage for cost tracking. Successful-attempt tokens, attempt count, and
   // tokens burned on failed attempts (retry waste). Populated by generateInsights.
   @Column({ type: 'int', nullable: true })

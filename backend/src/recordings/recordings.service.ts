@@ -452,7 +452,8 @@ export class RecordingsService {
         modelOverride,
       );
 
-      const { rawJsonText, parsed, providerUsed, model, usage } = result;
+      const { rawJsonText, parsed, providerUsed, model, usage, promptVersions } =
+        result;
       const cs = parsed.client_services;
       // Chat response-time metrics are computed deterministically from the
       // transcript text — the LLM is not asked for them. For calls we leave
@@ -471,6 +472,13 @@ export class RecordingsService {
         model,
         json: cleanJsonText(rawJsonText),
         extractorVersion: 'v3',
+
+        // Which prompt fragments (and version of each) produced this insight —
+        // provenance for reproducibility / audit and A/B against the golden set.
+        prompt_versions_json:
+          promptVersions && Object.keys(promptVersions).length
+            ? JSON.stringify(promptVersions)
+            : null,
 
         // Token usage / cost tracking
         insight_input_tokens: usage.inputTokens,

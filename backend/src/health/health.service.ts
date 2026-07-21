@@ -118,6 +118,10 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     columns: [['interaction_insights', 'campaign_transcript_json']],
   },
   {
+    file: 'add-insight-prompt-versions.sql',
+    columns: [['interaction_insights', 'prompt_versions_json']],
+  },
+  {
     file: 'add-transcription-confidence.sql',
     columns: [
       ['interaction_transcripts', 'confidence'],
