@@ -17,7 +17,23 @@
         <button class="btn btn--ghost btn--sm" :disabled="loadingVocab" @click="loadVocab">{{ loadingVocab ? "…" : "Refresh" }}</button>
       </div>
       <div class="tile-body">
-        <div v-if="vocabMsg" class="chip chip--primary" style="margin-bottom: 10px">{{ vocabMsg }}</div>
+        <div class="tt-toggles">
+          <div class="tt-toggle" :class="settings.keyterms ? 'tt-toggle--on' : 'tt-toggle--off'">
+            <label class="tt-switch">
+              <input type="checkbox" :checked="settings.keyterms" @change="setSetting('keyterms', ($event.target as HTMLInputElement).checked)" />
+              <strong>Apply keyterms (recognition biasing)</strong>
+            </label>
+            <span class="hint">Nudges the model toward vehicle words for <em>uncertain</em> audio. Powerful but can rewrite vague words as models — recommended <strong>OFF</strong> until tuned.</span>
+          </div>
+          <div class="tt-toggle" :class="settings.replacements ? 'tt-toggle--on' : 'tt-toggle--off'">
+            <label class="tt-switch">
+              <input type="checkbox" :checked="settings.replacements" @change="setSetting('replacements', ($event.target as HTMLInputElement).checked)" />
+              <strong>Apply replacements (exact swaps)</strong>
+            </label>
+            <span class="hint">Exact whole-word fixes like <code>Duke → Juke</code> — only ever rewrites that literal word, nothing else. Safe to leave <strong>ON</strong>.</span>
+          </div>
+        </div>
+        <div v-if="vocabMsg" class="chip chip--primary" style="margin: 10px 0">{{ vocabMsg }}</div>
         <div class="tt-vocab-cols">
           <!-- Keyterms -->
           <div class="tt-vocab-col">
@@ -203,6 +219,22 @@ const newReplTo = ref("");
 const keyterms = computed(() => vocab.value.filter((r) => r.kind === "keyterm"));
 const replacements = computed(() => vocab.value.filter((r) => r.kind === "replacement"));
 
+// Master switches: keyterms (biasing) default off, replacements (exact swaps) on.
+const settings = ref<{ keyterms: boolean; replacements: boolean }>({ keyterms: false, replacements: true });
+async function loadVocabSettings() {
+  try {
+    settings.value = (await axios.get(`${VOCAB_PATH}/settings`)).data ?? settings.value;
+  } catch { /* non-fatal */ }
+}
+async function setSetting(which: "keyterms" | "replacements", enabled: boolean) {
+  try {
+    settings.value = (await axios.patch(`${VOCAB_PATH}/settings`, { [which]: enabled })).data ?? settings.value;
+    vocabMsg.value = `${which === "keyterms" ? "Keyterm biasing" : "Replacements"} ${enabled ? "ON" : "OFF"} — applies to new transcriptions within a minute.`;
+  } catch (e: any) {
+    vocabMsg.value = e?.response?.data?.message || "Failed to update setting";
+  }
+}
+
 async function loadVocab() {
   loadingVocab.value = true;
   try {
@@ -304,6 +336,7 @@ async function loadLowConfidence() {
 
 onMounted(() => {
   loadVocab();
+  loadVocabSettings();
   loadEmbedStatus();
 });
 </script>
@@ -313,6 +346,14 @@ onMounted(() => {
 .tt-hero { margin-bottom: 14px; }
 .tt-title { font-size: 20px; font-weight: 800; color: var(--ink); margin: 0; }
 .tt-sub { font-size: 13px; color: var(--muted); margin: 4px 0 0; max-width: 720px; }
+
+.tt-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 800px) { .tt-toggles { grid-template-columns: 1fr; } }
+.tt-toggle { padding: 10px 12px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; }
+.tt-toggle--on { border-left-color: #059669; }
+.tt-toggle--off { border-left-color: #94a3b8; }
+.tt-switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); cursor: pointer; margin-bottom: 4px; }
+.tt-switch input { width: 15px; height: 15px; cursor: pointer; }
 
 .tt-vocab-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 800px) { .tt-vocab-cols { grid-template-columns: 1fr; } }

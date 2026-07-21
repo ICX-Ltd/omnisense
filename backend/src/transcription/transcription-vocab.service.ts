@@ -49,32 +49,73 @@ export class TranscriptionVocabService {
     this.cache = null;
   }
 
-  // The active vocabulary the Deepgram service should apply. Falls back to the
-  // hardcoded defaults if the table is empty or the query fails, so transcription
-  // never loses its vehicle biasing.
-  async getActive(): Promise<{ keyterms: string[]; replacements: [string, string][] }> {
-    if (this.cache && Date.now() - this.cache.at < this.TTL_MS) return this.cache;
+  // Two independent switches, stored as config rows' `active` flags:
+  //   apply_keyterms     — recognition biasing (default OFF; over-eager, can
+  //                        rewrite uncertain audio as vehicle models)
+  //   apply_replacements — exact whole-word swaps like Duke→Juke (default ON;
+  //                        surgical, only rewrites that literal word)
+  // Env DEEPGRAM_APPLY_VOCAB=false is a hard kill-switch for both.
+  private async flag(term: string, def: boolean): Promise<boolean> {
+    if (process.env.DEEPGRAM_APPLY_VOCAB === 'false') return false;
     try {
-      const all = await this.repo.find({ where: { active: true } });
-      const keyterms = all
-        .filter((r) => r.kind === 'keyterm' && r.term?.trim())
-        .map((r) => r.term.trim());
-      const replacements = all
-        .filter((r) => r.kind === 'replacement' && r.term?.trim() && r.replaceWith?.trim())
-        .map((r) => [r.term.trim(), r.replaceWith!.trim()] as [string, string]);
-      if (!keyterms.length && !replacements.length) {
-        return { keyterms: VEHICLE_KEYTERMS, replacements: VEHICLE_REPLACEMENTS };
-      }
-      this.cache = { keyterms, replacements, at: Date.now() };
-      return this.cache;
-    } catch (e: any) {
-      this.logger.warn(`Vocab load failed, using defaults: ${e?.message ?? e}`);
-      return { keyterms: VEHICLE_KEYTERMS, replacements: VEHICLE_REPLACEMENTS };
+      const row = await this.repo.findOne({ where: { kind: 'config' as any, term } });
+      return row ? row.active : def;
+    } catch {
+      return false;
     }
   }
 
-  list() {
-    return this.repo.find({ order: { kind: 'ASC', term: 'ASC' } });
+  async getSettings(): Promise<{ keyterms: boolean; replacements: boolean }> {
+    return {
+      keyterms: await this.flag('apply_keyterms', false),
+      replacements: await this.flag('apply_replacements', true),
+    };
+  }
+
+  private async setFlag(term: string, active: boolean) {
+    const existing = await this.repo.findOne({ where: { kind: 'config' as any, term } });
+    if (existing) {
+      existing.active = active;
+      await this.repo.save(existing);
+    } else {
+      await this.repo.save(this.repo.create({ kind: 'config' as any, term, replaceWith: null, active }));
+    }
+  }
+
+  async setSettings(s: { keyterms?: boolean; replacements?: boolean }) {
+    if (typeof s.keyterms === 'boolean') await this.setFlag('apply_keyterms', s.keyterms);
+    if (typeof s.replacements === 'boolean') await this.setFlag('apply_replacements', s.replacements);
+    this.invalidate();
+    return this.getSettings();
+  }
+
+  // The active vocabulary the Deepgram service should apply, each half gated by
+  // its own switch (empty half = not applied).
+  async getActive(): Promise<{ keyterms: string[]; replacements: [string, string][] }> {
+    if (this.cache && Date.now() - this.cache.at < this.TTL_MS) return this.cache;
+    const { keyterms: ktOn, replacements: rpOn } = await this.getSettings();
+    try {
+      const all = ktOn || rpOn ? await this.repo.find({ where: { active: true } }) : [];
+      const keyterms = ktOn
+        ? all.filter((r) => r.kind === 'keyterm' && r.term?.trim()).map((r) => r.term.trim())
+        : [];
+      const replacements = rpOn
+        ? all
+            .filter((r) => r.kind === 'replacement' && r.term?.trim() && r.replaceWith?.trim())
+            .map((r) => [r.term.trim(), r.replaceWith!.trim()] as [string, string])
+        : [];
+      this.cache = { keyterms, replacements, at: Date.now() };
+      return this.cache;
+    } catch (e: any) {
+      this.logger.warn(`Vocab load failed, applying none: ${e?.message ?? e}`);
+      return { keyterms: [], replacements: [] };
+    }
+  }
+
+  // Only the editable vocabulary rows (excludes the config/settings row).
+  async list() {
+    const rows = await this.repo.find({ order: { kind: 'ASC', term: 'ASC' } });
+    return rows.filter((r) => r.kind === 'keyterm' || r.kind === 'replacement');
   }
 
   async add(kind: 'keyterm' | 'replacement', term: string, replaceWith?: string) {

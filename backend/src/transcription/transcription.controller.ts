@@ -35,6 +35,17 @@ export class TranscriptionController {
     return this.vocab.add(kind, body?.term ?? '', body?.replaceWith);
   }
 
+  // Master on/off switch (declared before vocab/:id so 'settings' isn't an id).
+  @Get('vocab/settings')
+  getVocabSettings() {
+    return this.vocab.getSettings();
+  }
+
+  @Patch('vocab/settings')
+  setVocabSettings(@Body() body: { keyterms?: boolean; replacements?: boolean }) {
+    return this.vocab.setSettings({ keyterms: body?.keyterms, replacements: body?.replacements });
+  }
+
   @Patch('vocab/:id')
   setVocabActive(@Param('id') id: string, @Body() body: { active?: boolean }) {
     return this.vocab.setActive(id, body?.active !== false);

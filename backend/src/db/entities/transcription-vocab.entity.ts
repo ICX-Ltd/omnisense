@@ -15,8 +15,10 @@ export class TranscriptionVocab {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  // 'keyterm' | 'replacement' rows are the vocabulary; a single 'config' row
+  // (term='apply_vocab') stores the master on/off switch in its `active` flag.
   @Column({ type: 'varchar', length: 20 })
-  kind!: 'keyterm' | 'replacement';
+  kind!: 'keyterm' | 'replacement' | 'config';
 
   @Column({ type: 'nvarchar', length: 200 })
   term!: string;
