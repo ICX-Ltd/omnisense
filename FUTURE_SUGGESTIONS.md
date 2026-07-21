@@ -54,6 +54,12 @@ Status key: **[next]** · **[planned]** · **[parked]**
   stamp which prompt version produced each insight, for reproducibility / audit.
 
 ## AI / model
+- **Model registry (editable model lists)** **[planned]** — the insights/narrative
+  model dropdowns are hardcoded in the frontend; the transcription model is an env
+  var. Move both to a DB table (provider, kind: insights|transcription, model id,
+  label, active, default) with an admin editor (like the transcription vocab), so
+  new models can be added/enabled without a deploy. Dashboards + the Deepgram/
+  provider services read from it. Pairs well with model routing below.
 - **Model routing / cost optimisation** **[planned]** — cheap model first,
   escalate on low confidence; caching; tie prompt A/B to the golden set.
 - **Full json_schema structured output for Anthropic** **[parked]** — hard schema
