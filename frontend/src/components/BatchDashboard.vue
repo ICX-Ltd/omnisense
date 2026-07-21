@@ -6,7 +6,7 @@ import { RecordingPath } from "@/enums/recording-paths";
 import InsightsUsagePanel from "./InsightsUsagePanel.vue";
 import { downloadCsv } from "@/utils/csv";
 
-type SectionKey = "summary" | "actions" | "lastRun" | "history" | "failed";
+type SectionKey = "summary" | "actions" | "lastRun" | "history" | "failed" | "reprocess";
 type BatchJobType = "transcribe" | "insights_calls" | "insights_chats";
 type BatchJobStatus = "running" | "completed" | "failed";
 
@@ -50,6 +50,7 @@ const open = ref<Record<SectionKey, boolean>>({
   lastRun: false,
   history: false,
   failed: false,
+  reprocess: false,
 });
 
 const toggle = (key: SectionKey) => { open.value[key] = !open.value[key]; };
@@ -172,9 +173,20 @@ async function loadSummary() {
 const failedRecords = ref<any[]>([]);
 const loadingFailed = ref(false);
 const requeuing = ref(false);
+const requeuingRow = ref<string | null>(null);
 const reprocessing = ref(false);
 const reprocessCampaign = ref("");
+const reprocessCampaigns = ref<string[]>([]);
+const reprocessMsg = ref("");
 const maintMsg = ref("");
+
+async function loadReprocessCampaigns() {
+  try {
+    reprocessCampaigns.value = (await axios.get(ApiPath.InsightsSummaryFilters)).data?.campaigns ?? [];
+  } catch {
+    /* non-fatal */
+  }
+}
 
 async function loadFailed() {
   loadingFailed.value = true;
@@ -213,32 +225,42 @@ function exportFailedCsv() {
 }
 
 async function requeueRecord(id: string) {
+  if (requeuingRow.value) return; // one at a time; avoids a stuck in-flight state
+  requeuingRow.value = id;
   maintMsg.value = "";
   try {
-    await axios.post(RecordingPath.requeue(id));
+    const res = await axios.post(RecordingPath.requeue(id));
+    maintMsg.value = `Requeued ${(id || "").slice(0, 8)}… as ${res.data?.status ?? "queued"}.`;
     await Promise.all([loadFailed(), loadSummary()]);
   } catch (e: any) {
     maintMsg.value = e?.response?.data?.message || e?.message || "Requeue failed";
+  } finally {
+    requeuingRow.value = null;
   }
 }
 
+// Reprocess insights for a completed campaign (delete insight rows + re-queue as
+// 'transcribed'). Campaign is REQUIRED — no "reprocess everything" path.
 async function reprocessInsights() {
   const camp = reprocessCampaign.value.trim();
-  const scope = camp ? `campaign "${camp}"` : "ALL completed (insights_done) records";
+  if (!camp) {
+    reprocessMsg.value = "Choose a campaign first.";
+    return;
+  }
   if (
     !window.confirm(
-      `Reprocess insights for ${scope}?\n\nThis DELETES their existing insight rows and re-queues them as 'transcribed' for a fresh insights run. Survey campaigns then need the survey backfill re-run.`
+      `Reprocess insights for the "${camp}" campaign?\n\nThis DELETES the existing AI insights for every COMPLETED record in that campaign and re-queues them as 'transcribed'. You then have to run "Call insights" again (real token cost), and survey campaigns also need the survey backfill re-run. It does NOT touch transcripts or failed records.`
     )
   )
     return;
   reprocessing.value = true;
-  maintMsg.value = "";
+  reprocessMsg.value = "";
   try {
-    const res = await axios.post(RecordingPath.batchReprocessInsights, { campaign: camp || undefined });
-    maintMsg.value = `${res.data?.reprocessed ?? 0} record(s) reset to 'transcribed' — run "Call insights" to reprocess.`;
+    const res = await axios.post(RecordingPath.batchReprocessInsights, { campaign: camp });
+    reprocessMsg.value = `${res.data?.reprocessed ?? 0} record(s) in "${camp}" reset to 'transcribed' — run "Call insights" to regenerate.`;
     await loadSummary();
   } catch (e: any) {
-    maintMsg.value = e?.response?.data?.message || e?.message || "Reprocess failed";
+    reprocessMsg.value = e?.response?.data?.message || e?.message || "Reprocess failed";
   } finally {
     reprocessing.value = false;
   }
@@ -469,6 +491,7 @@ onMounted(() => {
   loadSummary();
   loadHistory();
   loadFailed();
+  loadReprocessCampaigns();
   if (loadStoredIds().length) startPolling();
 });
 
@@ -668,8 +691,8 @@ onUnmounted(stopPolling);
           <div class="tile-head">
             <div class="tile-icon">⚠</div>
             <div class="tile-text">
-              <div class="tile-title">Failed Records &amp; Reprocessing</div>
-              <div class="tile-desc">Records stuck in <code>error</code> with the real cause — requeue them, or reprocess insights after a prompt change.</div>
+              <div class="tile-title">Failed Records</div>
+              <div class="tile-desc">Records stuck in <code>error</code> with the real cause — requeue them to retry. Non-destructive.</div>
             </div>
             <div class="spacer" />
             <span class="chip" :class="failedRecords.length ? 'chip--danger' : 'chip--success'" style="margin-right: 8px">{{ failedRecords.length }} error{{ failedRecords.length === 1 ? '' : 's' }}</span>
@@ -679,18 +702,10 @@ onUnmounted(stopPolling);
           </div>
           <div v-show="isOpen('failed')" class="tile-body" @click.stop>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
-              <button class="btn btn--primary" :disabled="requeuing || !failedRecords.length" @click="requeueAllErrors">
+              <button class="btn btn--primary" :disabled="requeuing || !!requeuingRow || !failedRecords.length" @click.stop="requeueAllErrors">
                 {{ requeuing ? "Requeuing…" : "Requeue all errors" }}
               </button>
-              <span class="hint">Re-queues errored records: re-transcribe those with no transcript, re-run insights for the rest. Non-destructive.</span>
-            </div>
-
-            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px">
-              <input v-model="reprocessCampaign" class="select" placeholder="campaign (optional)" style="max-width: 220px" />
-              <button class="btn btn--secondary" :disabled="reprocessing" @click="reprocessInsights">
-                {{ reprocessing ? "Reprocessing…" : "Reprocess insights" }}
-              </button>
-              <span class="hint">Deletes insight rows for completed records &amp; re-queues them as <code>transcribed</code>. Destructive — confirmed before running.</span>
+              <span class="hint">Re-queues errored records: re-transcribe those with no transcript, re-run insights for the rest.</span>
             </div>
 
             <div v-if="maintMsg" class="chip chip--primary" style="margin-bottom: 10px">{{ maintMsg }}</div>
@@ -702,12 +717,43 @@ onUnmounted(stopPolling);
                   <span v-if="r.campaign" class="chip">{{ r.campaign }}</span>
                   <span class="mono" style="opacity: 0.6">{{ (r.id || '').slice(0, 8) }}…</span>
                   <span class="muted" style="margin-left: auto">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</span>
-                  <button class="btn btn--ghost btn--sm" @click="requeueRecord(r.id)">Requeue</button>
+                  <button class="btn btn--ghost btn--sm" :disabled="requeuingRow === r.id" @click.stop="requeueRecord(r.id)">{{ requeuingRow === r.id ? "…" : "Requeue" }}</button>
                 </div>
                 <div v-if="r.lastError" style="color: var(--danger, #e55); margin-top: 4px; word-break: break-word">{{ r.lastError }}</div>
               </div>
             </div>
             <div v-else class="hint">No failed records. 🎉</div>
+          </div>
+        </div>
+
+        <!-- Reprocess insights (re-run after a prompt change) — its own tile -->
+        <div class="tile tile--accent" @click="toggle('reprocess')">
+          <div class="tile-head">
+            <div class="tile-icon">♻</div>
+            <div class="tile-text">
+              <div class="tile-title">Reprocess Insights</div>
+              <div class="tile-desc">Regenerate AI insights for a whole campaign after a prompt change. Deletes existing insights and re-queues completed records — not for failures.</div>
+            </div>
+            <div class="spacer" />
+            <div class="chev" :class="{ open: isOpen('reprocess') }"></div>
+          </div>
+          <div v-show="isOpen('reprocess')" class="tile-body" @click.stop>
+            <div class="hint" style="margin-bottom: 10px; line-height: 1.5">
+              Pick a campaign, then Reprocess. This <strong>deletes the existing AI insights</strong> for every
+              <strong>completed</strong> record in that campaign and sets them back to <code>transcribed</code>, so the next
+              <strong>Call insights</strong> run regenerates them (real token cost). It does <strong>not</strong> touch transcripts or failed records.
+              Survey campaigns need <code>nmgb_survey_backfill.sql</code> re-run afterwards.
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+              <select v-model="reprocessCampaign" class="select" style="max-width: 260px">
+                <option value="">Select a campaign…</option>
+                <option v-for="c in reprocessCampaigns" :key="c" :value="c">{{ c }}</option>
+              </select>
+              <button class="btn" style="background: #dc2626; border: 1px solid #dc2626; color: #fff" :disabled="reprocessing || !reprocessCampaign" @click.stop="reprocessInsights">
+                {{ reprocessing ? "Reprocessing…" : "Reprocess insights" }}
+              </button>
+            </div>
+            <div v-if="reprocessMsg" class="chip chip--primary" style="margin-top: 10px">{{ reprocessMsg }}</div>
           </div>
         </div>
 
