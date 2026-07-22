@@ -7,6 +7,12 @@ export const ApiPath = {
   InsightsSummaryOperations: "/uiapi/insights/summary/operations",
   InsightsSummaryOperationsTrends: "/uiapi/insights/summary/operations-trends",
   InsightsSummaryAgentTrajectory: "/uiapi/insights/summary/agent-trajectory",
+
+  CsatBoard: "/uiapi/csat/board",
+  CsatList: "/uiapi/csat/list",
+  CsatRunBatch: "/uiapi/csat/run-batch",
+  CsatRematch: "/uiapi/csat/rematch",
+  CsatItem: "/uiapi/csat/item", // + /:id, /:id/assess, /:id/requeue
   InsightsSummaryClientServices: "/uiapi/insights/summary/client-services",
   InsightsSummaryObjections: "/uiapi/insights/summary/objections",
   InsightsSummaryObjectionAssessments: "/uiapi/insights/summary/objection-assessments",

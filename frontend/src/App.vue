@@ -63,6 +63,7 @@
           <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations (QC)</button>
           <button class="tab" :class="{ 'tab--active': tab === 'clientservices' }" @click="tab = 'clientservices'">Campaign Insights</button>
           <button class="tab" :class="{ 'tab--active': tab === 'survey' }" @click="tab = 'survey'">Survey Analytics</button>
+          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'csat' }" @click="tab = 'csat'">CSAT Contest</button>
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
           <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'prompts' }" @click="tab = 'prompts'">Prompts</button>
           <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'health' }" @click="tab = 'health'">System Health</button>
@@ -80,6 +81,7 @@
           <OperationsDashboard v-else-if="tab === 'ops'" />
           <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
           <SurveyDashboard v-else-if="tab === 'survey'" />
+          <CsatDashboard v-else-if="tab === 'csat'" />
           <NarrativesPage v-else-if="tab === 'narratives'" />
           <PromptsAdmin v-else-if="tab === 'prompts'" />
           <SystemHealthPanel v-else-if="tab === 'health'" />
@@ -101,6 +103,7 @@ import SummaryDashboard from "./components/SummaryDashboard.vue";
 import OperationsDashboard from "./components/OperationsDashboard.vue";
 import ClientServicesDashboard from "./components/ClientServicesDashboard.vue";
 import SurveyDashboard from "./components/SurveyDashboard.vue";
+import CsatDashboard from "./components/CsatDashboard.vue";
 import NarrativesPage from "./components/NarrativesPage.vue";
 import PromptsAdmin from "./components/PromptsAdmin.vue";
 import SystemHealthPanel from "./components/SystemHealthPanel.vue";
@@ -116,7 +119,7 @@ import logoUrl from "./assets/ai-icon.png";
 const { canSeeAdminTools, canSeeDevTools } = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
 
-const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "narratives" | "prompts" | "health" | "models" | "settings">("ops");
+const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "csat" | "narratives" | "prompts" | "health" | "models" | "settings">("ops");
 const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
 const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcription"].includes(tab.value));
