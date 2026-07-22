@@ -454,6 +454,38 @@ function openTranscriptDrill(key: string, title: string, params: Record<string, 
 }
 function closeDrill() { drillKey.value = null; drillRecords.value = []; }
 
+// "Bought elsewhere by make" — a 100% breakdown of what the customers in the
+// current drill actually purchased, so a defection reason (e.g. "Juke too
+// expensive") shows where those buyers went (e.g. 10 → BYD). Null when the drill
+// has no real purchase data (nothing to break down).
+const drillBought = computed(() => {
+  const recs = drillRecords.value;
+  if (!recs.length) return null;
+  const counts = new Map<string, number>();
+  for (const r of recs) {
+    const make = String(r.purchased_make ?? r.purchased_other_make ?? "").trim();
+    const key = make && make.toLowerCase() !== "unknown" ? make : "Unknown / not stated";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const total = recs.length;
+  const items = [...counts.entries()]
+    .map(([label, count]) => ({ label, count, pct: Math.round((count / total) * 100) }))
+    .sort((a, b) => {
+      // Keep "Unknown" last, otherwise by count desc.
+      const au = a.label.startsWith("Unknown") ? 1 : 0;
+      const bu = b.label.startsWith("Unknown") ? 1 : 0;
+      return au - bu || b.count - a.count;
+    });
+  // Only worth showing if at least one real make was purchased.
+  if (!items.some((i) => !i.label.startsWith("Unknown"))) return null;
+  let ci = 0;
+  const withColor = items.map((i) => ({
+    ...i,
+    color: i.label.startsWith("Unknown") ? "#94a3b8" : LINE_COLORS[ci++ % LINE_COLORS.length],
+  }));
+  return { items: withColor, total };
+});
+
 // Date range (ISO) for a "YYYY Q#" label, so a quarterly-trend row can drill
 // into that quarter's records by overriding the shared from/to.
 function quarterRange(quarter: string): { from: string; to: string } | null {
@@ -1541,7 +1573,27 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="drill-modal-body">
           <div v-if="loadingDrill" class="hint">Loading…</div>
           <div v-else-if="!drillRecords.length" class="hint">No matching records.</div>
-          <div v-else v-for="r in drillRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
+          <template v-else>
+            <!-- Bought-elsewhere breakdown: where these customers actually went -->
+            <div v-if="drillBought" class="bought-breakdown">
+              <div class="bought-title">Bought elsewhere — by make</div>
+              <div class="bought-bar">
+                <div
+                  v-for="seg in drillBought.items"
+                  :key="seg.label"
+                  class="bought-seg"
+                  :style="{ width: seg.pct + '%', background: seg.color }"
+                  :title="`${seg.label}: ${seg.count} (${seg.pct}%)`"
+                />
+              </div>
+              <div class="bought-legend">
+                <span v-for="seg in drillBought.items" :key="seg.label" class="bought-leg">
+                  <span class="bought-swatch" :style="{ background: seg.color }" />
+                  {{ seg.label }} <strong>{{ seg.count }}</strong> <span class="muted">({{ seg.pct }}%)</span>
+                </span>
+              </div>
+            </div>
+          <div v-for="r in drillRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
             <div class="drill-row-top">
               <span class="chip chip--secondary" style="font-size: 11px">Enquired: {{ r.model || 'n/a' }}</span>
               <span v-if="r.dealer" class="chip chip--secondary" style="font-size: 11px">{{ r.dealer }}</span>
@@ -1551,6 +1603,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
             <div v-if="r.evidence" class="drill-row-summary" style="font-style: italic">&ldquo;{{ r.evidence }}&rdquo;</div>
             <div v-else class="drill-row-summary">{{ r.purchase_reason || r.agent_notes || "(no notes)" }}</div>
           </div>
+          </template>
         </div>
       </div>
     </Teleport>
@@ -1848,6 +1901,25 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ── Drill "bought elsewhere" breakdown ──────────────────────────────────── */
+.bought-breakdown {
+  padding: 10px 12px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.bought-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); margin-bottom: 8px;
+}
+.bought-bar {
+  display: flex; width: 100%; height: 16px; border-radius: 4px; overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.bought-seg { height: 100%; min-width: 2px; transition: opacity 0.12s; }
+.bought-seg:hover { opacity: 0.82; }
+.bought-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.bought-leg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink); }
+.bought-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 
 /* ── Panel size toggle ───────────────────────────────────────────────────── */
 .panel-toggle {
