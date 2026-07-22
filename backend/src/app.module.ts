@@ -27,6 +27,8 @@ import { ModelOption } from './db/entities/model-option.entity';
 import { ModelsModule } from './models/models.module';
 import { InsightCorrection } from './db/entities/insight-correction.entity';
 import { CorrectionsModule } from './corrections/corrections.module';
+import { InteractionCsat } from './db/entities/interaction-csat.entity';
+import { CsatModule } from './csat/csat.module';
 
 @Module({
   imports: [
@@ -57,6 +59,7 @@ import { CorrectionsModule } from './corrections/corrections.module';
             TranscriptionVocab,
             ModelOption,
             InsightCorrection,
+            InteractionCsat,
           ],
           synchronize: false,
           logging: false,
@@ -78,6 +81,7 @@ import { CorrectionsModule } from './corrections/corrections.module';
     HealthModule,
     ModelsModule,
     CorrectionsModule,
+    CsatModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,

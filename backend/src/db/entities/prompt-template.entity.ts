@@ -21,6 +21,9 @@ export type PromptKind =
   | 'transcript_schema'
   | 'objection_section'
   | 'objection_schema'
+  | 'csat_base'
+  | 'csat_framework'
+  | 'csat_schema'
   | 'other';
 
 @Entity({ name: 'prompt_templates', schema: 'app' })

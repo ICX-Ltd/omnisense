@@ -155,6 +155,17 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     tables: ['insight_corrections'],
   },
   {
+    file: 'add-interaction-csat.sql',
+    tables: ['interaction_csat'],
+    columns: [['interactions', 'hasCsat']],
+    indexes: [
+      'IX_interaction_csat_tpsid',
+      'IX_interaction_csat_recording',
+      'IX_interaction_csat_status',
+      'IX_interaction_csat_decision',
+    ],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],

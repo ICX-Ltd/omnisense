@@ -1497,6 +1497,187 @@ const CHAT_RAC_OBJECTION_SCHEMA = `"objection_assessment": {
     "overall_handling_comment": string
   }`;
 
+// ─── CSAT CONTEST ASSESSMENT ─────────────────────────────────────────────────
+// Separate pipeline from insights: decide whether a CSAT score should be
+// CONTESTED (dissatisfaction outside the final agent's control + good handling)
+// or NOT CONTESTED (the final agent materially contributed). Composed as
+// csat.base + csat.campaign.<CAMPAIGN> framework + csat.schema.
+
+const CSAT_BASE = `
+You are a senior contact-centre quality assessor. A customer left a CSAT (customer
+satisfaction) survey after a LIVE CHAT. Your job is NOT to judge whether the
+customer was satisfied with the business overall — it is to decide whether the
+FINAL live chat agent FAIRLY EARNED the CSAT, and therefore whether the score
+should be CONTESTED.
+
+GOLDEN RULE
+- CONTEST where the customer's dissatisfaction was OUTSIDE the final live chat
+  agent's control AND the agent handled the interaction appropriately.
+- DO NOT CONTEST where the final live chat agent materially contributed to the
+  dissatisfaction through incorrect advice, poor customer handling, missed
+  opportunities, premature signposting, or failure to give meaningful assistance.
+
+SCOPE & PRINCIPLES
+- Assess ONLY the final live chat agent. Ignore Virtual Assistant / bot messages,
+  survey bot, queue notifications and automated routing, and earlier agents —
+  UNLESS the final agent had a reasonable opportunity to recover the interaction
+  and failed to take it.
+- A correct OUTCOME does not automatically mean correct HANDLING. An agent who
+  reaches the right answer but disengages, misses opportunities, signposts
+  prematurely or handles the customer poorly is DO NOT CONTEST where that
+  materially contributed to dissatisfaction. Conversely an agent who cannot
+  resolve the issue is CONTEST where they followed process, gave meaningful
+  assistance, and the dissatisfaction was outside their control.
+- Survey comments explain WHY the customer was dissatisfied but must NEVER
+  override the transcript, customer handling, knowledge verification or material
+  contribution. Never infer agent failure without transcript evidence (do not use
+  "the agent could have been warmer" type assumptions).
+- Benefit of the doubt: where interpretation is genuinely unclear and the agent
+  followed process, handled well and did not materially contribute — favour
+  CONTEST. Use "unclear" only when you genuinely cannot attribute the cause.
+
+CSAT SURVEY
+- Score: {{csat_score}}
+- Customer comment: {{csat_comment}}
+- Campaign: {{campaign}}
+
+CAMPAIGN CONTEST FRAMEWORK — apply these rules:
+{{framework_section}}
+
+OUTPUT
+Return ONLY valid JSON matching this schema exactly. No markdown, no extra keys,
+no commentary.
+{{schema}}
+
+TRANSCRIPT:
+{{transcript}}
+`;
+
+const CSAT_SCHEMA = `{
+  "decision": "contest" | "do_not_contest" | "unclear",
+  "confidence": number,                    // 0.0-1.0
+  "headline": string,                      // one-line summary of the decision
+  "dissatisfaction_source": "final_agent" | "previous_agent" | "dealership" | "business" | "product" | "pricing" | "delay" | "customer_behaviour" | "outside_scope" | "unclear",
+  "knowledge_verified": boolean | null,    // was the final agent's information/process correct (null if N/A)
+  "agent_materially_contributed": boolean, // did the FINAL agent cause or materially worsen the dissatisfaction
+  "factors": {
+    "meaningful_assistance": "yes" | "no" | "n/a",
+    "customer_handling": "good" | "poor" | "n/a",
+    "missed_opportunity": boolean,
+    "premature_signposting": boolean,
+    "sales_or_enquiry_progressed": "yes" | "no" | "n/a",
+    "delay_within_agent_control": boolean | null,
+    "closure_appropriate": boolean | null,
+    "customer_abusive": boolean
+  },
+  "rules_triggered": string[],             // framework rule names that drove the decision
+  "evidence_quotes": string[],             // short verbatim quotes from the transcript
+  "rationale": string                      // full reasoning, referencing the framework
+}`;
+
+const CSAT_RAC = `
+RAC New-Membership Live Chat — CSAT Contest Framework.
+
+1. KNOWLEDGE VERIFICATION FIRST. Verify the accuracy of the information/process the
+   final agent gave against approved RAC knowledge. If they gave incorrect advice
+   or followed the wrong process → DO NOT CONTEST. If correct → continue.
+2. FINAL AGENT ONLY, from the point the customer is connected to them. Assess an
+   earlier failure only via the final agent's reasonable opportunity to recover
+   (correct wrong info, answer unanswered questions, meaningfully assist). Had the
+   opportunity and failed → DO NOT CONTEST.
+3. OUT OF SCOPE for New Membership (existing-policy amendments, existing-membership
+   queries, renewals, cancellations, membership admin, insurance, app/login,
+   complaints, current breakdown assistance, Tesco Clubcard voucher issues).
+   Default → CONTEST, PROVIDED the agent correctly explained the limitation, used
+   the appropriate approved response / PDC (minor wording differences are fine if
+   intent, department and guidance are correct) and offered an appropriate next
+   step. BUT DO NOT CONTEST if the agent gave incorrect info, handled poorly, or
+   could reasonably have assisted further before referring.
+4. MEANINGFUL ASSISTANCE (does not require resolving the enquiry): explaining why
+   they cannot help, answering what they can, giving relevant info before
+   signposting, exploring requirements, ensuring next steps are understood.
+   Failure to provide it → DO NOT CONTEST.
+5. CUSTOMER HANDLING — ownership, empathy, professionalism, engagement, clarity,
+   accuracy, attempts to assist, appropriate questioning, quality and closure.
+   Correct information alone is NOT good handling. Poor handling → DO NOT CONTEST.
+6. MISSED OPPORTUNITY / SALES OPPORTUNITY — failing to explore needs, answer
+   answerable questions, explain options, continue the sales journey, or
+   prematurely signposting → DO NOT CONTEST. For Business Cover, requirements must
+   be explored before recommending/ signposting or → DO NOT CONTEST.
+7. TESCO CLUBCARD purchases/renewals are online-only; agents cannot complete them
+   but should explain the process, give the correct link, answer questions and
+   offer to take the customer through the quote journey. Meaningful assistance →
+   CONTEST. Only providing a link with little/no engagement → DO NOT CONTEST.
+8. TECHNICAL ISSUES — reasonable attempt to assist (clarify, ask questions, basic
+   troubleshooting) before referring. Immediate signposting → DO NOT CONTEST.
+9. CUSTOMER BEHAVIOUR — abuse/threats/offensive/discriminatory/harassment while
+   the agent stayed professional → CONTEST.
+10. CUSTOMER EXPECTATIONS outside the agent's control (RAC pricing where options
+    explored, company policy, waiting/product limitations/availability, website/
+    system limits, another department's decision, eligibility, T&Cs) → CONTEST
+    provided handling was appropriate.
+11. CLOSURE — appropriate closure after meaningful assistance → continue. Abrupt/
+    premature closure without reasonable assistance → DO NOT CONTEST. Customer
+    ends after appropriate assistance → CONTEST; leaves due to poor handling →
+    DO NOT CONTEST.
+12. IDLE — if reasonable assistance was already given before it went idle →
+    CONTEST; if little/none → DO NOT CONTEST. Agents need not repeatedly re-engage.
+13. DELAY ATTRIBUTION — delays outside the agent's control (queue/phone/patrol
+    times, system performance, another department) → CONTEST; delay directly
+    caused by the agent → DO NOT CONTEST.
+`;
+
+const CSAT_LITHIA = `
+Talk & Lithia — CSAT Decision Framework (read alongside the ICX QMF). A QMF
+opportunity alone does NOT make a CSAT non-contestable; there must be clear
+evidence the handling issue CAUSED or MATERIALLY CONTRIBUTED to the dissatisfaction.
+
+CORE PRINCIPLE: attribute a negative CSAT to the agent only with clear evidence
+the agent's handling caused/ materially worsened it. If attribution is unclear →
+CONTEST. Assess the whole conversation, not isolated messages. The customer's own
+survey comments are the strongest evidence but are not used in isolation.
+
+PROCESS: (1) Is the customer dissatisfied in a way attributable to the agent? If
+not → CONTEST. (2) Identify the source (chat agent / dealership / wider business /
+vehicle / repair / finance / previous experience / policy / outside control).
+(3) Did the agent cause or materially worsen it? If not → CONTEST.
+
+CONTEST where dissatisfaction is NOT the agent's handling, including:
+- Pre-existing dissatisfaction (previous dealership experience, complaints,
+  vehicle faults, repairs, warranty decisions, finance issues, delivery delays,
+  broken promises) where the agent handled appropriately.
+- Dealership failures (not answering phones, no callback, poor communication/
+  repairs, delays, wrong work, sales-process failures, finance settlements,
+  handovers, vehicle issues).
+- Business limitations (no appointments/courtesy cars, vehicle unavailable,
+  finance declined, warranty exclusions, price expectations, policy) where the
+  agent explained the limitation and gave an appropriate next step.
+- Information requiring dealership confirmation (price negotiation, offer
+  acceptance, transfers, courtesy-car/appointment availability, repair/service
+  progress, goodwill, compensation, dealership decisions) — explained + referred
+  appropriately.
+- Customer disagreeing with CORRECT information given within process.
+
+NOT CONTESTED where the agent's handling caused/materially contributed, e.g.:
+- Response/accept-time breaches within the agent's control that the customer
+  complains about (targets: response 30s; accept 10s Talk / 30s Lithia).
+- Poor questioning / insufficient probing that stalls the enquiry.
+- Incorrect information, failing to follow process, or failing to answer what they
+  should reasonably know (unless dealership confirmation is genuinely required).
+- Poor engagement (ignored questions, robotic responses, enquiry not addressed).
+- Lack of empathy that clearly contributes to dissatisfaction.
+- Collecting details (reg/postcode/contact) without context/explanation.
+- Weak vehicle-search assistance — not exploring budget, payment, method, make/
+  model, fuel, transmission etc.; just pointing to website filters — where this
+  causes dissatisfaction. (Active chat volume is a factor but never removes the
+  duty to acknowledge, question and progress.)
+- Unclear paraphrase/close (who will contact, when, about what).
+
+NEVER infer failure without evidence. "Could have been warmer", "may have felt
+frustrated" are NOT sufficient. Final question: did the agent's handling cause or
+materially contribute to the dissatisfaction? Yes → do_not_contest. No → contest.
+`;
+
 // ─── EXPORTED SEED DATA ──────────────────────────────────────────────────────
 
 export const SEED_FRAGMENTS: SeedFragment[] = [
@@ -1781,5 +1962,56 @@ export const SEED_FRAGMENTS: SeedFragment[] = [
     notes:
       'Standalone narrative prompt for the survey-analytics executive briefing. Placeholders: {{metrics}} (aggregated survey metrics) and {{free_text_samples}} (verbatim comments).',
     body: NARRATIVE_SURVEY_ANALYTICS_TEMPLATE,
+  },
+
+  // ── CSAT contest assessment ──────────────────────────────────────────────
+  {
+    key: 'csat.base',
+    interactionType: 'chat',
+    kind: 'csat_base',
+    campaign: null,
+    label: 'CSAT — base assessor template',
+    notes:
+      'Placeholders: {{csat_score}}, {{csat_comment}}, {{campaign}}, {{framework_section}} (the csat.campaign.<NAME> framework), {{schema}} (csat.schema), {{transcript}}.',
+    body: CSAT_BASE,
+  },
+  {
+    key: 'csat.schema',
+    interactionType: 'chat',
+    kind: 'csat_schema',
+    campaign: null,
+    label: 'CSAT — output JSON schema',
+    notes: 'Shared JSON schema for the CSAT contest decision.',
+    body: CSAT_SCHEMA,
+  },
+  {
+    key: 'csat.campaign.RAC',
+    interactionType: 'chat',
+    kind: 'csat_framework',
+    campaign: 'RAC',
+    label: 'CSAT — RAC contest framework',
+    notes:
+      'RAC New-Membership Live Chat CSAT contest rules. Edit here to refine; paste the full framework text if needed.',
+    body: CSAT_RAC,
+  },
+  {
+    key: 'csat.campaign.LITHIA',
+    interactionType: 'chat',
+    kind: 'csat_framework',
+    campaign: 'LITHIA',
+    label: 'CSAT — Talk & Lithia contest framework',
+    notes:
+      'Talk & Lithia CSAT decision framework (read alongside the ICX QMF). Key the campaign to match the interaction.campaign value in your data (rename/duplicate as needed).',
+    body: CSAT_LITHIA,
+  },
+  {
+    key: 'csat.campaign.default',
+    interactionType: 'chat',
+    kind: 'csat_framework',
+    campaign: null,
+    label: 'CSAT — default/fallback framework',
+    notes:
+      'Used when no csat.campaign.<CAMPAIGN> fragment matches the interaction campaign. Generic contest logic based on the golden rule.',
+    body: CSAT_LITHIA,
   },
 ];

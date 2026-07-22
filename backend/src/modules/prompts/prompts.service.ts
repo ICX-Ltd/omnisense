@@ -418,6 +418,52 @@ export class PromptsService implements OnModuleInit {
     return { prompt, promptVersions: versions };
   }
 
+  // CSAT contest assessment prompt: csat.base + the campaign framework
+  // (csat.campaign.<CAMPAIGN>, falling back to csat.campaign.default) + the
+  // shared csat.schema. Returns the prompt plus the fragment versions used.
+  async composeCsatPrompt(
+    transcript: string,
+    campaign: string | null,
+    score: number | null,
+    comment: string | null,
+  ) {
+    const versions: PromptVersions = {};
+    const record = (t: PromptTemplate | null) => {
+      if (t) versions[t.key] = t.version;
+      return t;
+    };
+
+    const base = record(await this.getActiveByKey('csat.base'));
+    if (!base) {
+      throw new Error(
+        'Missing active "csat.base" prompt template — cannot compose CSAT prompt',
+      );
+    }
+    const schema = record(await this.getActiveByKey('csat.schema'));
+
+    let framework: PromptTemplate | null = null;
+    if (campaign) {
+      framework = record(await this.getActiveByKey(`csat.campaign.${campaign}`));
+    }
+    if (!framework) {
+      framework = record(await this.getActiveByKey('csat.campaign.default'));
+    }
+
+    const withSections = substitute(base.body, {
+      framework_section: framework?.body ?? '',
+      schema: schema?.body ?? '',
+    });
+
+    const prompt = substitute(withSections, {
+      transcript,
+      campaign: campaign ?? '',
+      csat_score: score == null ? 'not provided' : String(score),
+      csat_comment: comment?.trim() ? comment.trim() : 'none provided',
+    });
+
+    return { prompt, promptVersions: versions };
+  }
+
   async preview(
     interactionType: 'call' | 'chat',
     campaign?: string | null,

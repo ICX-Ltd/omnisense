@@ -95,6 +95,12 @@ export class Interaction {
   @Column({ type: 'int', nullable: true })
   daysToMaturityAtInteraction!: number | null;
 
+  // Set when a CSAT survey score has been imported for this interaction (see
+  // interaction_csat). A lightweight flag so lists/drawers can badge CSAT'd
+  // interactions without joining; the assessment itself lives in interaction_csat.
+  @Column({ type: 'bit', nullable: true })
+  hasCsat!: boolean | null;
+
   @BeforeInsert()
   @BeforeUpdate()
   private computeDaysToMaturity() {
