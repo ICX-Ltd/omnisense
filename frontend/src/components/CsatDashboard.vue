@@ -152,8 +152,55 @@ function fmtPct(v: number | null | undefined) {
 }
 // Older/looser assessments sometimes return a bare rule number instead of a name.
 function ruleLabel(ru: unknown) {
-  const s = String(ru).trim();
+  const s = String(ru).trim().replace(/_/g, " ");
   return /^\d+$/.test(s) ? `Rule ${s}` : s;
+}
+
+function prettySource(s: string) {
+  return String(s).replace(/_/g, " ");
+}
+
+const FACTOR_LABELS: Record<string, string> = {
+  meaningful_assistance: "Meaningful assistance",
+  customer_handling: "Customer handling",
+  missed_opportunity: "Missed opportunity",
+  premature_signposting: "Premature signposting",
+  sales_or_enquiry_progressed: "Enquiry progressed",
+  delay_within_agent_control: "Delay in agent's control",
+  closure_appropriate: "Closure appropriate",
+  customer_abusive: "Customer abusive",
+};
+function factorLabel(k: string) {
+  return FACTOR_LABELS[k] || String(k).replace(/_/g, " ");
+}
+function factorValueText(v: unknown) {
+  if (v === true) return "Yes";
+  if (v === false) return "No";
+  if (v == null || v === "") return "—";
+  const s = String(v);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+// Tone from the agent's perspective: "good" = supports Contest (agent did well),
+// "bad" = supports Do Not Contest (agent at fault), "neutral" = n/a or unknown.
+function factorTone(k: string, v: unknown): "good" | "bad" | "neutral" {
+  const s = String(v).toLowerCase();
+  switch (k) {
+    case "meaningful_assistance":
+    case "sales_or_enquiry_progressed":
+      return s === "yes" ? "good" : s === "no" ? "bad" : "neutral";
+    case "customer_handling":
+      return s === "good" ? "good" : s === "poor" ? "bad" : "neutral";
+    case "missed_opportunity":
+    case "premature_signposting":
+    case "delay_within_agent_control":
+      return s === "true" ? "bad" : s === "false" ? "good" : "neutral";
+    case "closure_appropriate":
+      return s === "true" ? "good" : s === "false" ? "bad" : "neutral";
+    case "customer_abusive":
+      return s === "true" ? "good" : "neutral"; // abuse favours contesting
+    default:
+      return "neutral";
+  }
 }
 
 const contestCount = computed(
@@ -288,34 +335,55 @@ onMounted(loadAll);
             <tr v-if="expandedId === r.id" class="detail-row">
               <td colspan="10">
                 <div v-if="loadingDetail" class="muted">Loading…</div>
-                <div v-else-if="detail" class="detail">
-                  <div class="detail-head">
-                    <span :class="decisionChip(detail.decision)">{{ decisionLabel(detail.decision) }}</span>
-                    <span class="muted">confidence {{ fmtPct(detail.confidence) }}</span>
-                    <span v-if="detail.dissatisfaction_source" class="chip chip--secondary" style="font-size: 10px">source: {{ detail.dissatisfaction_source }}</span>
-                    <span v-if="detail.parsed?.knowledge_verified === true" class="chip chip--success" style="font-size: 10px">knowledge verified</span>
-                    <span v-else-if="detail.parsed?.knowledge_verified === false" class="chip chip--danger" style="font-size: 10px">knowledge incorrect</span>
-                    <span v-if="detail.agent_materially_contributed === true" class="chip chip--danger" style="font-size: 10px">agent contributed</span>
-                    <span v-else-if="detail.agent_materially_contributed === false" class="chip chip--success" style="font-size: 10px">agent not at fault</span>
-                    <span v-if="detail.recordingId" style="margin-left: auto">
-                      <button class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
-                    </span>
+                <div v-else-if="detail" class="csat-detail">
+                  <!-- Verdict banner -->
+                  <div class="verdict" :class="'verdict--' + (detail.decision || 'unknown')">
+                    <div class="verdict-main">
+                      <div class="verdict-label">{{ decisionLabel(detail.decision) }}</div>
+                      <div v-if="detail.confidence != null" class="verdict-conf">
+                        <div class="conf-bar"><div class="conf-fill" :style="{ width: fmtPct(detail.confidence) }" /></div>
+                        <span>{{ fmtPct(detail.confidence) }} confidence</span>
+                      </div>
+                    </div>
+                    <div class="verdict-badges">
+                      <span v-if="detail.dissatisfaction_source" class="vbadge vbadge--neutral">source: {{ prettySource(detail.dissatisfaction_source) }}</span>
+                      <span v-if="detail.parsed?.knowledge_verified === true" class="vbadge vbadge--good">knowledge verified</span>
+                      <span v-else-if="detail.parsed?.knowledge_verified === false" class="vbadge vbadge--bad">knowledge incorrect</span>
+                      <span v-if="detail.agent_materially_contributed === true" class="vbadge vbadge--bad">agent contributed</span>
+                      <span v-else-if="detail.agent_materially_contributed === false" class="vbadge vbadge--good">agent not at fault</span>
+                      <button v-if="detail.recordingId" class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
+                    </div>
                   </div>
-                  <p v-if="detail.parsed?.headline" class="detail-headline">{{ detail.parsed.headline }}</p>
-                  <p v-if="detail.rationale" class="detail-rationale">{{ detail.rationale }}</p>
-                  <div v-if="detail.parsed?.factors" class="detail-factors">
-                    <span v-for="(v, k) in detail.parsed.factors" :key="k" class="factor">
-                      <strong>{{ String(k).replace(/_/g, " ") }}:</strong> {{ v }}
-                    </span>
+
+                  <p v-if="detail.parsed?.headline" class="csat-headline">{{ detail.parsed.headline }}</p>
+                  <p v-if="detail.rationale" class="csat-rationale">{{ detail.rationale }}</p>
+
+                  <!-- Factor grid (colour = agent's favour: green supports contest, red supports do-not) -->
+                  <div v-if="detail.parsed?.factors" class="factor-grid">
+                    <div v-for="(v, k) in detail.parsed.factors" :key="k" class="factor-cell" :class="'factor-cell--' + factorTone(String(k), v)">
+                      <div class="factor-label">{{ factorLabel(String(k)) }}</div>
+                      <div class="factor-value">{{ factorValueText(v) }}</div>
+                    </div>
                   </div>
-                  <div v-if="detail.parsed?.rules_triggered?.length" class="detail-rules">
-                    <span class="muted">Rules:</span>
-                    <span v-for="(ru, i) in detail.parsed.rules_triggered" :key="i" class="chip chip--info" style="font-size: 10px">{{ ruleLabel(ru) }}</span>
+
+                  <div v-if="detail.parsed?.rules_triggered?.length" class="csat-block">
+                    <div class="csat-block-title">Rules applied</div>
+                    <div class="chip-row">
+                      <span v-for="(ru, i) in detail.parsed.rules_triggered" :key="i" class="chip chip--info" style="font-size: 10px">{{ ruleLabel(ru) }}</span>
+                    </div>
                   </div>
-                  <div v-if="detail.parsed?.evidence_quotes?.length" class="detail-quotes">
-                    <div v-for="(q, i) in detail.parsed.evidence_quotes" :key="i" class="quote">"{{ q }}"</div>
+
+                  <div v-if="detail.parsed?.evidence_quotes?.length" class="csat-block">
+                    <div class="csat-block-title">Evidence from transcript</div>
+                    <blockquote v-for="(q, i) in detail.parsed.evidence_quotes" :key="i" class="evidence">{{ q }}</blockquote>
                   </div>
-                  <p v-if="detail.comment" class="detail-comment"><span class="muted">Customer comment:</span> {{ detail.comment }}</p>
+
+                  <div v-if="detail.comment" class="csat-comment">
+                    <span class="csat-comment-label">Customer said</span>
+                    <span class="csat-comment-text">"{{ detail.comment }}"</span>
+                    <span v-if="detail.score != null" class="csat-comment-score">{{ detail.score }}<span v-if="detail.scoreMax">/{{ detail.scoreMax }}</span></span>
+                  </div>
+
                   <p v-if="detail.lastError" class="detail-error">{{ detail.lastError }}</p>
                 </div>
                 <div v-else class="muted">No detail.</div>
@@ -370,16 +438,74 @@ onMounted(loadAll);
 .good { color: #059669; font-weight: 600; }
 .bad { color: #dc2626; font-weight: 600; }
 
-.detail-row td { background: color-mix(in srgb, var(--ink) 3%, transparent); }
-.detail { padding: 8px 4px; }
-.detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.detail-headline { font-weight: 700; color: var(--ink); margin: 0 0 6px; }
-.detail-rationale { font-size: 12px; line-height: 1.55; color: var(--ink); margin: 0 0 8px; }
-.detail-factors { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-.detail-factors strong { color: var(--ink); font-weight: 600; }
-.detail-rules { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 8px; }
-.detail-quotes { margin-bottom: 8px; }
-.quote { font-size: 11px; font-style: italic; color: var(--muted); line-height: 1.5; }
-.detail-comment { font-size: 12px; color: var(--ink); margin: 6px 0 0; }
+.detail-row td { background: color-mix(in srgb, var(--ink) 3%, transparent); padding: 0; }
+.csat-detail { padding: 14px 16px; }
+
+/* Verdict banner */
+.verdict {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border);
+  border-left-width: 5px; margin-bottom: 12px;
+}
+.verdict--contest { border-left-color: #059669; background: color-mix(in srgb, #059669 8%, transparent); }
+.verdict--do_not_contest { border-left-color: #dc2626; background: color-mix(in srgb, #dc2626 8%, transparent); }
+.verdict--unclear { border-left-color: #d97706; background: color-mix(in srgb, #d97706 8%, transparent); }
+.verdict--unknown { border-left-color: var(--border); }
+.verdict-main { display: flex; align-items: center; gap: 16px; }
+.verdict-label { font-size: 18px; font-weight: 800; color: var(--ink); }
+.verdict--contest .verdict-label { color: #059669; }
+.verdict--do_not_contest .verdict-label { color: #dc2626; }
+.verdict--unclear .verdict-label { color: #b45309; }
+.verdict-conf { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.conf-bar { width: 80px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 12%, transparent); overflow: hidden; }
+.conf-fill { height: 100%; background: var(--brand, #6366f1); border-radius: 3px; }
+.verdict-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vbadge {
+  font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.vbadge--good { color: #047857; background: color-mix(in srgb, #059669 16%, transparent); }
+.vbadge--bad { color: #b91c1c; background: color-mix(in srgb, #dc2626 16%, transparent); }
+.vbadge--neutral { color: var(--muted); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+
+.csat-headline { font-weight: 700; font-size: 13px; color: var(--ink); margin: 0 0 6px; }
+.csat-rationale {
+  font-size: 12px; line-height: 1.6; color: var(--ink); margin: 0 0 14px;
+  padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+
+/* Factor grid */
+.factor-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px; margin-bottom: 14px;
+}
+.factor-cell {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.factor-cell--good { border-color: color-mix(in srgb, #059669 45%, transparent); background: color-mix(in srgb, #059669 7%, transparent); }
+.factor-cell--bad { border-color: color-mix(in srgb, #dc2626 45%, transparent); background: color-mix(in srgb, #dc2626 7%, transparent); }
+.factor-cell--neutral { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.factor-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.factor-value { font-size: 13px; font-weight: 700; color: var(--ink); }
+.factor-cell--good .factor-value { color: #047857; }
+.factor-cell--bad .factor-value { color: #b91c1c; }
+
+.csat-block { margin-bottom: 14px; }
+.csat-block-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.evidence {
+  margin: 0 0 6px; padding: 6px 12px; font-size: 12px; font-style: italic; color: var(--ink);
+  border-left: 3px solid color-mix(in srgb, var(--brand, #6366f1) 50%, transparent);
+  background: color-mix(in srgb, var(--brand, #6366f1) 5%, transparent); border-radius: 0 6px 6px 0; line-height: 1.5;
+}
+.csat-comment {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, #d97706 8%, transparent);
+  border: 1px solid color-mix(in srgb, #d97706 30%, transparent);
+}
+.csat-comment-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #b45309; font-weight: 700; }
+.csat-comment-text { font-size: 12px; color: var(--ink); font-style: italic; flex: 1; }
+.csat-comment-score { font-size: 13px; font-weight: 800; color: #b45309; }
 .detail-error { font-size: 11px; color: #dc2626; margin-top: 6px; }
 </style>
