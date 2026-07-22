@@ -221,7 +221,8 @@ onMounted(loadAll);
           <h1 class="hero-title">CSAT Contest Assessment</h1>
           <div class="hero-subtitle">
             Reviews CSAT survey scores against the campaign contest framework — separate from the
-            standard transcribe/insights pipeline. Assesses whether the final agent fairly earned each score.
+            standard transcribe/insights pipeline. Only scores of 3 or less (out of 5) are assessed;
+            4-5 are excluded. Assesses whether the final agent fairly earned each score.
           </div>
         </div>
         <button class="btn btn--ghost" :disabled="loading" @click="loadAll">Refresh</button>
@@ -238,6 +239,7 @@ onMounted(loadAll);
       <div class="metric metric--good"><div class="metric-label">Contest</div><div class="metric-value">{{ contestCount }}</div></div>
       <div class="metric metric--bad"><div class="metric-label">Do Not Contest</div><div class="metric-value">{{ doNotContestCount }}</div></div>
       <div class="metric" :class="{ 'metric--warn': board.unmatched > 0 }"><div class="metric-label">Unmatched</div><div class="metric-value">{{ board.unmatched }}</div></div>
+      <div class="metric"><div class="metric-label" title="Scores of 4-5 are not assessed">Excluded (4-5)</div><div class="metric-value">{{ board.excluded ?? 0 }}</div></div>
       <div class="metric" :class="{ 'metric--bad': board.errors > 0 }"><div class="metric-label">Errors</div><div class="metric-value">{{ board.errors }}</div></div>
     </div>
 
@@ -285,6 +287,7 @@ onMounted(loadAll);
           <option value="assessed">Assessed</option>
           <option value="error">Error</option>
           <option value="unmatched">Unmatched</option>
+          <option value="excluded">Excluded (4-5)</option>
         </select>
       </div>
       <div class="control-group">

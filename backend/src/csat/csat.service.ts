@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Not, Repository } from 'typeorm';
+import { In, IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 
 import { InteractionCsat } from '../db/entities/interaction-csat.entity';
 import { Interaction } from '../db/entities/interaction.entity';
@@ -9,6 +9,10 @@ import { PromptsService } from '../modules/prompts/prompts.service';
 import { createProvider } from '../insights/providers/provider.factory';
 import { cleanJsonText } from '../insights/insights.service';
 import { InsightsProviderName } from '../insights/types/insights-provider.type';
+
+// Only CSATs at/below this score (out of 5) are assessed — 4 and 5 are excluded
+// (the framework is about contesting negative scores). Env-overridable.
+const CSAT_MAX_SCORE = Number(process.env.CSAT_ASSESS_MAX_SCORE) || 3;
 
 // One CSAT survey result arriving from the third-party feed.
 export interface CsatFeedItem {
@@ -58,15 +62,19 @@ export class CsatService {
 
       const respondedAt = item.respondedAt ? new Date(item.respondedAt) : null;
       const campaign = item.campaign ?? interaction?.campaign ?? existing?.campaign ?? null;
+      const effScore = item.score ?? existing?.score ?? null;
 
-      // Preserve an existing assessment; only (re)set status to a processable
-      // state when there is no result yet.
+      // Preserve an existing assessment; otherwise: exclude 4-5 scores from
+      // assessment (only <= CSAT_MAX_SCORE are contest-assessed), mark unmatched
+      // when no interaction, else queue as pending.
       const alreadyAssessed = existing?.status === 'assessed';
-      const status = interaction
-        ? alreadyAssessed
+      const status = !interaction
+        ? 'unmatched'
+        : alreadyAssessed
           ? 'assessed'
-          : 'pending'
-        : 'unmatched';
+          : effScore != null && effScore > CSAT_MAX_SCORE
+            ? 'excluded'
+            : 'pending';
 
       const row = this.csatRepo.create({
         ...(existing ?? {}),
@@ -161,6 +169,7 @@ export class CsatService {
       assessed: num(statusCounts['assessed']),
       errors: num(statusCounts['error']),
       unmatched: num(statusCounts['unmatched']),
+      excluded: num(statusCounts['excluded']),
       decisions: byDecision.map((r) => ({ decision: r.decision, count: num(r.count) })),
       byCampaign: byCampaign.map((r) => ({
         campaign: r.campaign,
@@ -219,8 +228,23 @@ export class CsatService {
   // Process up to `limit` pending CSAT rows that have a matched interaction with
   // a transcript. Sequential — CSAT volumes are low relative to insights.
   async runBatch(limit: number, provider?: InsightsProviderName, model?: string) {
+    // Reclassify any queued 4-5 scores that predate the exclusion rule.
+    await this.csatRepo
+      .createQueryBuilder()
+      .update(InteractionCsat)
+      .set({ status: 'excluded' })
+      .where('status IN (:...s) AND score IS NOT NULL AND score > :max', {
+        s: ['pending', 'awaiting_transcript'],
+        max: CSAT_MAX_SCORE,
+      })
+      .execute();
+
     const candidates = await this.csatRepo.find({
-      where: { status: In(['pending', 'awaiting_transcript']), recordingId: Not(IsNull()) },
+      where: {
+        status: In(['pending', 'awaiting_transcript']),
+        recordingId: Not(IsNull()),
+        score: LessThanOrEqual(CSAT_MAX_SCORE),
+      },
       order: { createdAt: 'ASC' },
       take: Math.min(Math.max(limit, 1), 500),
     });
@@ -251,6 +275,10 @@ export class CsatService {
   ): Promise<'assessed' | 'awaiting_transcript' | 'error'> {
     const row = await this.csatRepo.findOne({ where: { id } });
     if (!row) return 'error';
+    if (row.score != null && row.score > CSAT_MAX_SCORE) {
+      await this.csatRepo.update(id, { status: 'excluded' });
+      return 'error';
+    }
     if (!row.recordingId) {
       await this.csatRepo.update(id, { status: 'unmatched' });
       return 'error';
@@ -321,10 +349,13 @@ export class CsatService {
   async requeue(id: string) {
     const row = await this.csatRepo.findOne({ where: { id } });
     if (!row) return { ok: false };
-    await this.csatRepo.update(id, {
-      status: row.recordingId ? 'pending' : 'unmatched',
-      lastError: null,
-    });
+    const status =
+      row.score != null && row.score > CSAT_MAX_SCORE
+        ? 'excluded'
+        : row.recordingId
+          ? 'pending'
+          : 'unmatched';
+    await this.csatRepo.update(id, { status, lastError: null });
     return { ok: true };
   }
 }
