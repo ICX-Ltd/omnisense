@@ -1,4 +1,4 @@
 // Bump every session that ships user-facing or backend changes.
 // SemVer: MAJOR breaking, MINOR feature, PATCH fix.
 // Rendered on the login page (LoginPanel.vue).
-export const APP_VERSION = "1.58.0";
+export const APP_VERSION = "1.58.1";

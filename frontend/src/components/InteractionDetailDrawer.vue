@@ -879,36 +879,9 @@ const loadingDetail = ref(false);
 // Default to the styled bubble view; user can opt into raw transcript per open.
 const chatView = ref<"bubbles" | "raw">("bubbles");
 
-watch(
-  () => props.recordingId,
-  async (id) => {
-    chatView.value = "bubbles";
-    closeAsk();
-    if (!id) {
-      detailData.value = null;
-      return;
-    }
-    loadingDetail.value = true;
-    detailData.value = null;
-    corrections.value = [];
-    closeCorrection();
-    try {
-      detailData.value = await getInteractionDetail(id);
-    } catch {
-      detailData.value = null;
-    } finally {
-      loadingDetail.value = false;
-    }
-    loadCorrections(id);
-  },
-  { immediate: true },
-);
-
-function onClose() {
-  emit("close");
-}
-
 // ─── QA / insight corrections (human overrides, logged separately) ──────────
+// Declared BEFORE the recordingId watch below: that watch is { immediate: true }
+// and references these during setup, so they must already be initialised.
 const { user } = useAuth();
 const corrections = ref<InsightCorrection[]>([]);
 // Latest correction per field, for showing a "corrected" badge inline.
@@ -966,6 +939,35 @@ async function saveCorrection() {
 function fmtCorrectionDate(iso: string) {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+watch(
+  () => props.recordingId,
+  async (id) => {
+    chatView.value = "bubbles";
+    closeAsk();
+    if (!id) {
+      detailData.value = null;
+      return;
+    }
+    loadingDetail.value = true;
+    detailData.value = null;
+    corrections.value = [];
+    closeCorrection();
+    try {
+      detailData.value = await getInteractionDetail(id);
+    } catch {
+      detailData.value = null;
+    } finally {
+      loadingDetail.value = false;
+    }
+    loadCorrections(id);
+  },
+  { immediate: true },
+);
+
+function onClose() {
+  emit("close");
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

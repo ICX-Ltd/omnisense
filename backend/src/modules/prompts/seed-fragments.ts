@@ -1546,7 +1546,8 @@ CAMPAIGN CONTEST FRAMEWORK — apply these rules:
 
 OUTPUT
 Return ONLY valid JSON matching this schema exactly. No markdown, no extra keys,
-no commentary.
+no commentary. In "rules_triggered" cite each framework rule by its NAME (the
+capitalised label, e.g. "Delay Attribution") — NEVER by a number.
 {{schema}}
 
 TRANSCRIPT:
@@ -1570,61 +1571,63 @@ const CSAT_SCHEMA = `{
     "closure_appropriate": boolean | null,
     "customer_abusive": boolean
   },
-  "rules_triggered": string[],             // framework rule names that drove the decision
+  "rules_triggered": string[],             // SHORT DESCRIPTIVE NAMES of the rules that drove the decision (e.g. "Knowledge Verification", "Meaningful Assistance", "Delay Attribution", "Customer Behaviour"). NEVER return rule numbers.
   "evidence_quotes": string[],             // short verbatim quotes from the transcript
   "rationale": string                      // full reasoning, referencing the framework
 }`;
 
 const CSAT_RAC = `
-RAC New-Membership Live Chat — CSAT Contest Framework.
+RAC New-Membership Live Chat — CSAT Contest Framework. Each rule below has a NAME
+(the capitalised label). When you populate "rules_triggered", cite these NAMES —
+never a number.
 
-1. KNOWLEDGE VERIFICATION FIRST. Verify the accuracy of the information/process the
-   final agent gave against approved RAC knowledge. If they gave incorrect advice
-   or followed the wrong process → DO NOT CONTEST. If correct → continue.
-2. FINAL AGENT ONLY, from the point the customer is connected to them. Assess an
-   earlier failure only via the final agent's reasonable opportunity to recover
-   (correct wrong info, answer unanswered questions, meaningfully assist). Had the
-   opportunity and failed → DO NOT CONTEST.
-3. OUT OF SCOPE for New Membership (existing-policy amendments, existing-membership
-   queries, renewals, cancellations, membership admin, insurance, app/login,
-   complaints, current breakdown assistance, Tesco Clubcard voucher issues).
-   Default → CONTEST, PROVIDED the agent correctly explained the limitation, used
-   the appropriate approved response / PDC (minor wording differences are fine if
-   intent, department and guidance are correct) and offered an appropriate next
-   step. BUT DO NOT CONTEST if the agent gave incorrect info, handled poorly, or
-   could reasonably have assisted further before referring.
-4. MEANINGFUL ASSISTANCE (does not require resolving the enquiry): explaining why
-   they cannot help, answering what they can, giving relevant info before
-   signposting, exploring requirements, ensuring next steps are understood.
-   Failure to provide it → DO NOT CONTEST.
-5. CUSTOMER HANDLING — ownership, empathy, professionalism, engagement, clarity,
-   accuracy, attempts to assist, appropriate questioning, quality and closure.
-   Correct information alone is NOT good handling. Poor handling → DO NOT CONTEST.
-6. MISSED OPPORTUNITY / SALES OPPORTUNITY — failing to explore needs, answer
-   answerable questions, explain options, continue the sales journey, or
-   prematurely signposting → DO NOT CONTEST. For Business Cover, requirements must
-   be explored before recommending/ signposting or → DO NOT CONTEST.
-7. TESCO CLUBCARD purchases/renewals are online-only; agents cannot complete them
-   but should explain the process, give the correct link, answer questions and
-   offer to take the customer through the quote journey. Meaningful assistance →
-   CONTEST. Only providing a link with little/no engagement → DO NOT CONTEST.
-8. TECHNICAL ISSUES — reasonable attempt to assist (clarify, ask questions, basic
-   troubleshooting) before referring. Immediate signposting → DO NOT CONTEST.
-9. CUSTOMER BEHAVIOUR — abuse/threats/offensive/discriminatory/harassment while
-   the agent stayed professional → CONTEST.
-10. CUSTOMER EXPECTATIONS outside the agent's control (RAC pricing where options
-    explored, company policy, waiting/product limitations/availability, website/
-    system limits, another department's decision, eligibility, T&Cs) → CONTEST
-    provided handling was appropriate.
-11. CLOSURE — appropriate closure after meaningful assistance → continue. Abrupt/
-    premature closure without reasonable assistance → DO NOT CONTEST. Customer
-    ends after appropriate assistance → CONTEST; leaves due to poor handling →
-    DO NOT CONTEST.
-12. IDLE — if reasonable assistance was already given before it went idle →
-    CONTEST; if little/none → DO NOT CONTEST. Agents need not repeatedly re-engage.
-13. DELAY ATTRIBUTION — delays outside the agent's control (queue/phone/patrol
-    times, system performance, another department) → CONTEST; delay directly
-    caused by the agent → DO NOT CONTEST.
+KNOWLEDGE VERIFICATION — Verify the accuracy of the information/process the final
+  agent gave against approved RAC knowledge. Incorrect advice or wrong process →
+  DO NOT CONTEST. Correct → continue.
+FINAL AGENT ONLY — Assess only from the point the customer is connected to the
+  final agent. Judge an earlier failure only via the final agent's reasonable
+  opportunity to recover (correct wrong info, answer unanswered questions,
+  meaningfully assist). Had the opportunity and failed → DO NOT CONTEST.
+OUT OF SCOPE — Enquiries outside New Membership (existing-policy amendments,
+  existing-membership queries, renewals, cancellations, membership admin,
+  insurance, app/login, complaints, current breakdown assistance, Tesco Clubcard
+  voucher issues). Default → CONTEST, PROVIDED the agent correctly explained the
+  limitation, used the appropriate approved response / PDC (minor wording
+  differences are fine if intent, department and guidance are correct) and offered
+  an appropriate next step. BUT DO NOT CONTEST if the agent gave incorrect info,
+  handled poorly, or could reasonably have assisted further before referring.
+MEANINGFUL ASSISTANCE — (does not require resolving the enquiry) explaining why
+  they cannot help, answering what they can, giving relevant info before
+  signposting, exploring requirements, ensuring next steps are understood. Failure
+  to provide it → DO NOT CONTEST.
+CUSTOMER HANDLING — ownership, empathy, professionalism, engagement, clarity,
+  accuracy, attempts to assist, appropriate questioning, quality and closure.
+  Correct information alone is NOT good handling. Poor handling → DO NOT CONTEST.
+MISSED OPPORTUNITY — failing to explore needs, answer answerable questions,
+  explain options, continue the sales journey, or prematurely signposting →
+  DO NOT CONTEST. For Business Cover, requirements must be explored before
+  recommending/ signposting or → DO NOT CONTEST.
+TESCO CLUBCARD — purchases/renewals are online-only; agents cannot complete them
+  but should explain the process, give the correct link, answer questions and
+  offer to take the customer through the quote journey. Meaningful assistance →
+  CONTEST. Only a link with little/no engagement → DO NOT CONTEST.
+TECHNICAL ISSUES — reasonable attempt to assist (clarify, ask questions, basic
+  troubleshooting) before referring. Immediate signposting → DO NOT CONTEST.
+CUSTOMER BEHAVIOUR — abuse/threats/offensive/discriminatory/harassment while the
+  agent stayed professional → CONTEST.
+CUSTOMER EXPECTATIONS — matters outside the agent's control (RAC pricing where
+  options explored, company policy, waiting/product limitations/availability,
+  website/system limits, another department's decision, eligibility, T&Cs) →
+  CONTEST provided handling was appropriate.
+CLOSURE — appropriate closure after meaningful assistance → continue. Abrupt/
+  premature closure without reasonable assistance → DO NOT CONTEST. Customer ends
+  after appropriate assistance → CONTEST; leaves due to poor handling → DO NOT
+  CONTEST.
+IDLE — reasonable assistance already given before it went idle → CONTEST; little/
+  none → DO NOT CONTEST. Agents need not repeatedly re-engage.
+DELAY ATTRIBUTION — delays outside the agent's control (queue/phone/patrol times,
+  system performance, another department) → CONTEST; delay directly caused by the
+  agent → DO NOT CONTEST.
 `;
 
 const CSAT_LITHIA = `

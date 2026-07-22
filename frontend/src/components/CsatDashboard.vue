@@ -150,6 +150,11 @@ function fmtDate(v: string | null) {
 function fmtPct(v: number | null | undefined) {
   return typeof v === "number" ? `${Math.round(v * 100)}%` : "—";
 }
+// Older/looser assessments sometimes return a bare rule number instead of a name.
+function ruleLabel(ru: unknown) {
+  const s = String(ru).trim();
+  return /^\d+$/.test(s) ? `Rule ${s}` : s;
+}
 
 const contestCount = computed(
   () => (board.value?.decisions ?? []).find((d: any) => d.decision === "contest")?.count ?? 0,
@@ -288,6 +293,10 @@ onMounted(loadAll);
                     <span :class="decisionChip(detail.decision)">{{ decisionLabel(detail.decision) }}</span>
                     <span class="muted">confidence {{ fmtPct(detail.confidence) }}</span>
                     <span v-if="detail.dissatisfaction_source" class="chip chip--secondary" style="font-size: 10px">source: {{ detail.dissatisfaction_source }}</span>
+                    <span v-if="detail.parsed?.knowledge_verified === true" class="chip chip--success" style="font-size: 10px">knowledge verified</span>
+                    <span v-else-if="detail.parsed?.knowledge_verified === false" class="chip chip--danger" style="font-size: 10px">knowledge incorrect</span>
+                    <span v-if="detail.agent_materially_contributed === true" class="chip chip--danger" style="font-size: 10px">agent contributed</span>
+                    <span v-else-if="detail.agent_materially_contributed === false" class="chip chip--success" style="font-size: 10px">agent not at fault</span>
                     <span v-if="detail.recordingId" style="margin-left: auto">
                       <button class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
                     </span>
@@ -301,7 +310,7 @@ onMounted(loadAll);
                   </div>
                   <div v-if="detail.parsed?.rules_triggered?.length" class="detail-rules">
                     <span class="muted">Rules:</span>
-                    <span v-for="(ru, i) in detail.parsed.rules_triggered" :key="i" class="chip chip--info" style="font-size: 10px">{{ ru }}</span>
+                    <span v-for="(ru, i) in detail.parsed.rules_triggered" :key="i" class="chip chip--info" style="font-size: 10px">{{ ruleLabel(ru) }}</span>
                   </div>
                   <div v-if="detail.parsed?.evidence_quotes?.length" class="detail-quotes">
                     <div v-for="(q, i) in detail.parsed.evidence_quotes" :key="i" class="quote">"{{ q }}"</div>
