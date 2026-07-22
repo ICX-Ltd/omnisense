@@ -440,6 +440,7 @@ async function openDrill(
   drillTitle.value = title;
   loadingDrill.value = true;
   drillRecords.value = [];
+  selectedBoughtMake.value = null;
   try {
     const res = await axios.get(endpoint, {
       params: { ...sharedParams.value, ...params, limit: 200 },
@@ -452,7 +453,7 @@ async function openDrill(
 function openTranscriptDrill(key: string, title: string, params: Record<string, any>) {
   return openDrill(key, title, params, ApiPath.SurveyTranscriptDrillRecords);
 }
-function closeDrill() { drillKey.value = null; drillRecords.value = []; }
+function closeDrill() { drillKey.value = null; drillRecords.value = []; selectedBoughtMake.value = null; }
 
 // "Bought elsewhere by make" — a 100% breakdown of what the customers in the
 // current drill actually purchased, so a defection reason (e.g. "Juke too
@@ -484,6 +485,42 @@ const drillBought = computed(() => {
     color: i.label.startsWith("Unknown") ? "#94a3b8" : LINE_COLORS[ci++ % LINE_COLORS.length],
   }));
   return { items: withColor, total };
+});
+
+// Click a make in the breakdown to see which models those buyers took.
+const selectedBoughtMake = ref<string | null>(null);
+function selectBoughtMake(label: string) {
+  if (label.startsWith("Unknown")) return; // no model split for unknowns
+  selectedBoughtMake.value = selectedBoughtMake.value === label ? null : label;
+}
+const drillBoughtModels = computed(() => {
+  const make = selectedBoughtMake.value;
+  if (!make) return null;
+  const recs = drillRecords.value.filter((r) => {
+    const m = String(r.purchased_make ?? r.purchased_other_make ?? "").trim();
+    return !!m && m.toLowerCase() !== "unknown" && m === make;
+  });
+  if (!recs.length) return null;
+  const counts = new Map<string, number>();
+  for (const r of recs) {
+    const model = String(r.purchased_model ?? r.purchased_other_model ?? "").trim();
+    const key = model && model.toLowerCase() !== "unknown" ? model : "Model not stated";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const total = recs.length;
+  let ci = 0;
+  const items = [...counts.entries()]
+    .map(([label, count]) => ({ label, count, pct: Math.round((count / total) * 100) }))
+    .sort((a, b) => {
+      const au = a.label.startsWith("Model not") ? 1 : 0;
+      const bu = b.label.startsWith("Model not") ? 1 : 0;
+      return au - bu || b.count - a.count;
+    })
+    .map((i) => ({
+      ...i,
+      color: i.label.startsWith("Model not") ? "#94a3b8" : LINE_COLORS[ci++ % LINE_COLORS.length],
+    }));
+  return { make, items, total };
 });
 
 // Date range (ISO) for a "YYYY Q#" label, so a quarterly-trend row can drill
@@ -1576,21 +1613,49 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <template v-else>
             <!-- Bought-elsewhere breakdown: where these customers actually went -->
             <div v-if="drillBought" class="bought-breakdown">
-              <div class="bought-title">Bought elsewhere — by make</div>
+              <div class="bought-title">Bought elsewhere — by make <span class="bought-hint">(click a make for its model split)</span></div>
               <div class="bought-bar">
                 <div
                   v-for="seg in drillBought.items"
                   :key="seg.label"
                   class="bought-seg"
+                  :class="{ 'bought-seg--clickable': !seg.label.startsWith('Unknown'), 'bought-seg--active': selectedBoughtMake === seg.label }"
                   :style="{ width: seg.pct + '%', background: seg.color }"
                   :title="`${seg.label}: ${seg.count} (${seg.pct}%)`"
+                  @click="selectBoughtMake(seg.label)"
                 />
               </div>
               <div class="bought-legend">
-                <span v-for="seg in drillBought.items" :key="seg.label" class="bought-leg">
+                <span
+                  v-for="seg in drillBought.items"
+                  :key="seg.label"
+                  class="bought-leg"
+                  :class="{ 'bought-leg--clickable': !seg.label.startsWith('Unknown'), 'bought-leg--active': selectedBoughtMake === seg.label }"
+                  @click="selectBoughtMake(seg.label)"
+                >
                   <span class="bought-swatch" :style="{ background: seg.color }" />
                   {{ seg.label }} <strong>{{ seg.count }}</strong> <span class="muted">({{ seg.pct }}%)</span>
                 </span>
+              </div>
+
+              <!-- Model split within the selected make -->
+              <div v-if="drillBoughtModels" class="bought-models">
+                <div class="bought-title">{{ drillBoughtModels.make }} — model split ({{ drillBoughtModels.total }})</div>
+                <div class="bought-bar">
+                  <div
+                    v-for="seg in drillBoughtModels.items"
+                    :key="seg.label"
+                    class="bought-seg"
+                    :style="{ width: seg.pct + '%', background: seg.color }"
+                    :title="`${seg.label}: ${seg.count} (${seg.pct}%)`"
+                  />
+                </div>
+                <div class="bought-legend">
+                  <span v-for="seg in drillBoughtModels.items" :key="seg.label" class="bought-leg">
+                    <span class="bought-swatch" :style="{ background: seg.color }" />
+                    {{ seg.label }} <strong>{{ seg.count }}</strong> <span class="muted">({{ seg.pct }}%)</span>
+                  </span>
+                </div>
               </div>
             </div>
           <div v-for="r in drillRecords" :key="r.interaction_id ?? r.id_opportunity" class="drill-row" @click="openDetail(r.interaction_id ?? r.id_opportunity)">
@@ -1917,9 +1982,16 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 }
 .bought-seg { height: 100%; min-width: 2px; transition: opacity 0.12s; }
 .bought-seg:hover { opacity: 0.82; }
+.bought-seg--clickable { cursor: pointer; }
+.bought-seg--active { box-shadow: inset 0 0 0 2px var(--ink); }
 .bought-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
 .bought-leg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink); }
+.bought-leg--clickable { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
+.bought-leg--clickable:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.bought-leg--active { background: color-mix(in srgb, var(--brand, #6366f1) 14%, transparent); }
 .bought-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.bought-hint { font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+.bought-models { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
 
 /* ── Panel size toggle ───────────────────────────────────────────────────── */
 .panel-toggle {
