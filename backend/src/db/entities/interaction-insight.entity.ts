@@ -9,6 +9,32 @@ import {
 } from 'typeorm';
 import { Interaction } from './interaction.entity';
 
+/**
+ * interaction_insights — one row per scored interaction.
+ *
+ * ─── COLUMN GOVERNANCE RULE (read before adding a column) ───────────────────
+ * This table denormalises the LLM output on purpose. Keep it disciplined:
+ *
+ *   1. `json` is the source of truth — the FULL raw LLM output, never stripped.
+ *      Every other column below is a derived copy of something already in `json`
+ *      (or, for a few, a value computed in code). If a field is only ever *read*,
+ *      it does NOT need its own column — it already lives in `json` and can be
+ *      surfaced by parsing it (see getInteractionDetail) or via JSON_VALUE.
+ *
+ *   2. Promote a field to a dedicated SCALAR column ONLY when SQL needs to
+ *      FILTER, GROUP BY, ORDER BY, AGGREGATE, or INDEX on it (e.g. overall_score,
+ *      is_opportunity, campaign_detected, the *_low_score_alert bits). Index it
+ *      if it's filtered/grouped hot.
+ *
+ *   3. Structured sub-objects that are shown in the drawer live in a `*_json`
+ *      blob (e.g. operations_scores_json, qa_scores_json). Add a NEW blob only
+ *      for a genuinely new area; otherwise nest inside an existing one. A blob is
+ *      also acceptable when SQL path-queries it via JSON_VALUE / OPENJSON.
+ *
+ *   Default answer for a new field: put it in `json` + (if displayed) an existing
+ *   blob. A new column is the exception that must justify a query need.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
 @Entity({ name: 'interaction_insights', schema: 'app' })
 export class InteractionInsight {
   @PrimaryGeneratedColumn('uuid')
@@ -228,11 +254,9 @@ export class InteractionInsight {
   action_items_json!: string | null;
 
   @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
-  key_entities_json!: string | null;
-
-  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
   risk_flags_json!: string | null;
 
-  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
-  data_quality_json!: string | null;
+  // NOTE: key_entities and data_quality are deliberately NOT columns — they were
+  // written but never read, and remain in the raw `json` blob. Per the header
+  // rule, a field with no query/display need does not get a dedicated column.
 }

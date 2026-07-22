@@ -43,7 +43,7 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
       'interactions',
       'interaction_insights',
       'interaction_transcripts',
-      'insight_summary',
+      'insight_summaries',
       'prompt_templates',
       'prompt_template_history',
     ],

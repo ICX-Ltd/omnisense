@@ -317,3 +317,12 @@ Updates
   dashboard shows an Agent Trajectory tile — one sparkline per agent, latest score + first->latest
   delta, sortable by latest / most-improved / biggest-decline, click an agent to filter. Only agents
   scored in >=2 months are shown. No migration. APP_VERSION -> 1.57.0.
+- Fix (1.57.1): summary/operations-trends + summary/agent-trajectory returned 400 (parseDateRange
+  required from+to); both endpoints now parse `to` only. Agent Trajectory tile always renders with an
+  explicit empty state instead of hiding silently.
+- interaction_insights tidy-up (1.57.2): documented a column-governance rule in the entity header
+  (json = source of truth; a dedicated column only when SQL filters/groups/aggregates/indexes it; else
+  json + a display blob). Dropped two dead columns (key_entities_json, data_quality_json — written but
+  never read; still in raw json). Run sql/drop-insight-dead-columns.sql on prod.
+- Fix (1.57.2): System Health false positive — migration manifest listed table 'insight_summary' but
+  the real table is 'insight_summaries' (plural), so drift always reported it missing. Corrected.

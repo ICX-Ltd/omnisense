@@ -582,11 +582,11 @@ export class RecordingsService {
           ? JSON.stringify(parsed.opportunity)
           : null,
 
-        // Shared JSON
+        // Shared JSON. key_entities and data_quality intentionally NOT persisted
+        // to dedicated columns — they are display-unused and remain available in
+        // the raw `json` blob if ever needed. See the entity header rule.
         action_items_json: JSON.stringify(parsed.action_items ?? []),
-        key_entities_json: JSON.stringify(parsed.key_entities ?? []),
         risk_flags_json: JSON.stringify(parsed.risk_flags ?? []),
-        data_quality_json: JSON.stringify(parsed.data_quality ?? {}),
       };
 
       try {
