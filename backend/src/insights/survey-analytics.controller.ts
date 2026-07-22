@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Post,
   Query,
   BadRequestException,
   NotFoundException,
@@ -326,6 +328,26 @@ export class SurveyAnalyticsController {
     @Query('surveyTakenOnly') surveyTakenOnly?: string,
   ) {
     return this.svc.getTranscriptInsights(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+  }
+
+  // Grounded "Ask AI" over the filtered survey dataset. Filters come in the body
+  // alongside the question so we don't overflow the query string.
+  @Post('ask')
+  async ask(
+    @Body()
+    body: {
+      question?: string;
+      provider?: string;
+      from?: string; to?: string; campaign?: string;
+      manufacture?: string; model?: string; dealer?: string; surveyTakenOnly?: string;
+    },
+  ) {
+    if (!body?.question?.trim()) throw new BadRequestException('question is required');
+    const f = this.parseFilter(
+      body.from, body.to, body.campaign, body.manufacture, body.model, body.dealer,
+      body.surveyTakenOnly,
+    );
+    return this.svc.askSurvey(f, body.question, body.provider);
   }
 
   @Get('record/:id')

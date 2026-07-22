@@ -53,6 +53,35 @@ const sharedParams = computed(() => ({
   ...(surveyTakenOnly.value && { surveyTakenOnly: 'true' }),
 }));
 
+// ── Ask AI over the filtered dataset ──────────────────────────────────────────
+const askOpen = ref(false);
+const askQuestion = ref("");
+const askLoading = ref(false);
+const askError = ref("");
+const askResult = ref<{ answer: string; considered: number; total: number; truncated: boolean } | null>(null);
+const askSuggestions = [
+  "Of the customers who felt the car was too small, how many bought a competitor — and which makes?",
+  "What are the top 3 reasons customers didn't purchase, with a count for each?",
+  "Which competitor makes are we losing the most customers to, and why?",
+  "Summarise the main themes in the negative dealership comments.",
+];
+async function submitAsk(q?: string) {
+  const question = (q ?? askQuestion.value).trim();
+  if (!question) return;
+  askQuestion.value = question;
+  askLoading.value = true;
+  askError.value = "";
+  askResult.value = null;
+  try {
+    const res = await axios.post(ApiPath.SurveyAsk, { question, ...sharedParams.value });
+    askResult.value = res.data;
+  } catch (e: any) {
+    askError.value = e?.response?.data?.message || e?.message || "Ask failed";
+  } finally {
+    askLoading.value = false;
+  }
+}
+
 // ── Data ─────────────────────────────────────────────────────────────────────
 const loading = ref(false);
 const error = ref("");
@@ -609,6 +638,9 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <h1 class="hero-title">Survey Analytics</h1>
           <div class="hero-subtitle">Structured survey data: purchase intent, competitor switching, dealership experience and interest drivers.</div>
         </div>
+        <button class="btn btn--primary ask-ai-btn" @click="askOpen = true">
+          <span style="font-size: 15px">&#10024;</span> Ask AI
+        </button>
       </div>
     </div>
 
@@ -827,7 +859,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
             <div class="tile-icon">&#128683;</div>
             <div class="tile-text">
               <div class="tile-title">Not-Purchase Reasons</div>
-              <div class="tile-desc">Why customers did not buy ({{ notPurchaseReasons?.surveyed ?? 0 }} surveyed)</div>
+              <div class="tile-desc">Why customers did not buy ({{ notPurchaseReasons?.surveyed ?? 0 }} non-purchasers)</div>
             </div>
           </div>
           <div class="tile-body">
@@ -1588,6 +1620,46 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
     </template>
 
+    <!-- Ask AI modal (grounded over the filtered dataset) -->
+    <Teleport to="body">
+      <div v-if="askOpen" class="drill-modal-backdrop" @click="askOpen = false" />
+      <div v-if="askOpen" class="ask-modal">
+        <div class="drill-modal-header">
+          <div>
+            <div class="drill-modal-title">✨ Ask AI — filtered survey dataset</div>
+            <div class="drill-modal-sub">Answers are grounded in the records matching your current filters.</div>
+          </div>
+          <button class="drawer-close" @click="askOpen = false">&times;</button>
+        </div>
+        <div class="ask-modal-body">
+          <div class="ask-suggestions">
+            <button v-for="(s, i) in askSuggestions" :key="i" class="ask-chip" @click="submitAsk(s)">{{ s }}</button>
+          </div>
+          <div class="ask-input-row">
+            <textarea
+              v-model="askQuestion"
+              class="ask-textarea"
+              rows="2"
+              placeholder="e.g. Of the customers who felt the car was too small, how many bought a competitor?"
+              @keydown.enter.exact.prevent="submitAsk()"
+            />
+            <button class="btn btn--primary" :disabled="askLoading || !askQuestion.trim()" @click="submitAsk()">
+              {{ askLoading ? "…" : "Ask" }}
+            </button>
+          </div>
+          <div v-if="askError" class="ask-error">{{ askError }}</div>
+          <div v-if="askLoading" class="hint" style="margin-top: 12px">Reading the matching records…</div>
+          <div v-else-if="askResult" class="ask-answer">
+            <div class="ask-answer-text">{{ askResult.answer }}</div>
+            <div class="ask-answer-meta">
+              Based on {{ askResult.considered }} of {{ askResult.total }} matching record(s).
+              <span v-if="askResult.truncated" class="ask-trunc">⚠ dataset truncated to fit — counts are a lower bound; narrow your filters for an exact figure.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Drill results modal (from any competitive panel click) -->
     <Teleport to="body">
       <div v-if="drillKey" class="drill-modal-backdrop" @click="closeDrill" />
@@ -1966,6 +2038,38 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ── Ask AI modal ────────────────────────────────────────────────────────── */
+.ask-ai-btn { margin-left: auto; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+.ask-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto;
+  background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); z-index: 950;
+}
+.ask-modal-body { padding: 14px 16px; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ask-chip {
+  font-size: 11px; text-align: left; color: var(--ink); background: color-mix(in srgb, var(--brand, #6366f1) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand, #6366f1) 25%, transparent); border-radius: 999px;
+  padding: 5px 11px; cursor: pointer; line-height: 1.3;
+}
+.ask-chip:hover { background: color-mix(in srgb, var(--brand, #6366f1) 16%, transparent); }
+.ask-input-row { display: flex; gap: 8px; align-items: stretch; }
+.ask-textarea {
+  flex: 1; font-size: 13px; font-family: inherit; color: var(--ink); background: var(--surface, #fff);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; resize: vertical;
+}
+.ask-textarea:focus { outline: none; border-color: var(--brand, #6366f1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand, #6366f1) 20%, transparent); }
+.ask-error { color: #dc2626; font-size: 12px; margin-top: 8px; }
+.ask-answer { margin-top: 14px; }
+.ask-answer-text {
+  font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap;
+  padding: 12px 14px; background: color-mix(in srgb, var(--ink) 3%, transparent);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.ask-answer-meta { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.ask-trunc { color: #b45309; display: block; margin-top: 3px; }
 
 /* ── Drill "bought elsewhere" breakdown ──────────────────────────────────── */
 .bought-breakdown {

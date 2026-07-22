@@ -48,6 +48,7 @@ export const ApiPath = {
 
   SurveyFilters: "/uiapi/survey/filters",
   SurveyOverview: "/uiapi/survey/overview",
+  SurveyAsk: "/uiapi/survey/ask",
   SurveyCategories: "/uiapi/survey/categories",
   SurveyInterestFactors: "/uiapi/survey/interest-factors",
   SurveyNotPurchaseReasons: "/uiapi/survey/not-purchase-reasons",

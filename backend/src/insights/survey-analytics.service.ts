@@ -3,6 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { isChineseOem } from './nmgb-competitors';
+import { createProvider } from './providers/provider.factory';
+import { InsightsProviderName } from './types/insights-provider.type';
+import { buildSurveyQaPrompt } from './prompt/build-survey-qa-prompt';
 
 export type SurveyFilter = {
   from?: Date;
@@ -43,6 +46,11 @@ const isSet = (p: string) => `${CA(p)} IS NOT NULL AND ${CA(p)} <> ''`;
 const OWN_BRAND_MATCH = `UPPER(LTRIM(RTRIM(${CA('$.competitor_purchase.make')}))) = UPPER(LTRIM(RTRIM(COALESCE(ia.vehicleMake, ''))))`;
 const DEFECTED = `(${isSet('$.competitor_purchase.make')} AND NOT (${OWN_BRAND_MATCH}))`;
 const WON = `(${isSet('$.competitor_purchase.make')} AND ${OWN_BRAND_MATCH})`;
+// A respondent "did not purchase" (from us) when they did NOT buy the make
+// they enquired about — i.e. defectors, still-considering and no-purchase-yet,
+// but excluding retained/won sales. Correct denominator for not-purchase-reason
+// share: someone who bought the enquired make has no reason to give.
+const NOT_PURCHASED = `NOT ${WON}`;
 
 function truthy(v: unknown): boolean {
   if (v === true) return true;
@@ -190,6 +198,81 @@ export class SurveyAnalyticsService {
     return { clause: 'WHERE ' + parts.join(' AND '), params };
   }
 
+  // ── Ask AI over the filtered survey dataset ─────────────────────────────────
+  // Grounded Q&A: pulls the actual rows matching the current filters and lets the
+  // LLM answer/count from them (accurate, not embedding-approximate). Includes the
+  // transcript per row, bounded by an overall character budget so context stays
+  // safe; reports how many rows were considered vs the true total.
+  async askSurvey(f: SurveyFilter, question: string, provider?: string) {
+    const q = (question ?? '').trim().slice(0, 1000);
+    if (!q) return { answer: 'Please enter a question.', considered: 0, total: 0, truncated: false, model: null, provider: null };
+
+    const { clause, params } = this.buildWhere(f);
+
+    const totalRow = await this.repo.manager.query<Array<{ n: number }>>(
+      `SELECT COUNT(1) AS n ${FROM_SURVEY} ${clause}`,
+      params,
+    );
+    const total = Number(totalRow[0]?.n ?? 0);
+    if (!total) {
+      return { answer: 'No survey records match the current filters.', considered: 0, total: 0, truncated: false, model: null, provider: null };
+    }
+
+    // Hard row cap; transcript truncation + overall budget keep the prompt safe.
+    const ROW_CAP = 400;
+    const TRANSCRIPT_CAP = 1200; // chars per row
+    const CHAR_BUDGET = 180_000; // ~45k tokens of row content
+
+    const rows = await this.repo.manager.query<Array<{
+      caj: string | null; make: string | null; model: string | null; dealer: string | null;
+      allocation_date: Date | null; transcript_text: string | null;
+    }>>(
+      `SELECT TOP ${ROW_CAP}
+        ii.campaign_answers_json AS caj,
+        ia.vehicleMake AS make, ia.vehicleModel AS model, ia.dealer AS dealer,
+        ${EFF_DATE} AS allocation_date,
+        tr.tx AS transcript_text
+      ${FROM_SURVEY}
+      OUTER APPLY (
+        SELECT TOP 1 t.text AS tx FROM app.interaction_transcripts t
+        WHERE t.recordingId = ia.id ORDER BY t.createdAt DESC
+      ) tr
+      ${clause}
+      ORDER BY ${EFF_DATE} DESC`,
+      params,
+    );
+
+    const fmtDate = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : 'n/a');
+    let block = '';
+    let considered = 0;
+    for (const r of rows) {
+      let answers: any = {};
+      try { answers = r.caj ? JSON.parse(r.caj) : {}; } catch { answers = {}; }
+      const tx = (r.transcript_text ?? '').replace(/\s+/g, ' ').trim().slice(0, TRANSCRIPT_CAP);
+      const entry =
+        `--- Record ${considered + 1} ---\n` +
+        `enquired: ${r.make ?? 'n/a'} ${r.model ?? ''}`.trim() + `\n` +
+        `dealer: ${r.dealer ?? 'n/a'} | date: ${fmtDate(r.allocation_date)}\n` +
+        `survey_answers: ${JSON.stringify(answers)}\n` +
+        (tx ? `transcript: ${tx}\n` : '') +
+        `\n`;
+      if (block.length + entry.length > CHAR_BUDGET) break;
+      block += entry;
+      considered++;
+    }
+
+    const truncated = considered < total;
+    const prompt = buildSurveyQaPrompt(q, block, { considered, total, truncated });
+
+    const llm = createProvider(provider as InsightsProviderName | undefined);
+    const res = await llm.extract(prompt);
+    let answer = '';
+    try { answer = (JSON.parse(res.text)?.answer as string) ?? ''; } catch { answer = ''; }
+    if (!answer) answer = res.text?.trim() || 'No answer was produced.';
+
+    return { answer, considered, total, truncated, model: res.model, provider: res.provider };
+  }
+
   // ── Filter options ────────────────────────────────────────────────────────
 
   async getFilterOptions() {
@@ -292,7 +375,9 @@ export class SurveyAnalyticsService {
 
   async getNotPurchaseReasons(f: SurveyFilter) {
     const { clause, params } = this.buildWhere(f);
-    const baseFilter = clause + ` AND ${CA('$.meta.flow_status')} = 'Survey Taken'`;
+    const baseFilter =
+      clause +
+      ` AND ${CA('$.meta.flow_status')} = 'Survey Taken' AND ${NOT_PURCHASED}`;
 
     const rows = await this.repo.manager.query<Array<Record<string, string>>>(
       `SELECT
