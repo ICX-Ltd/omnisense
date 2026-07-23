@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
@@ -162,7 +163,7 @@ onMounted(load);
       <!-- Controls -->
       <div class="tile tile--accent" style="margin-bottom: 14px">
         <div class="tile-head">
-          <div class="tile-icon">⚙</div>
+          <IconChip name="filters" />
           <div class="tile-text">
             <div class="tile-title">Filters</div>
             <div class="tile-desc">Filter narratives by channel, type and provider</div>

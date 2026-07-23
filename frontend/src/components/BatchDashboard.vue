@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
@@ -523,7 +524,7 @@ onUnmounted(stopPolling);
         <!-- Summary tile -->
         <div class="tile tile--accent" @click="toggle('summary')">
           <div class="tile-head">
-            <div class="tile-icon">Σ</div>
+            <IconChip name="totals" />
             <div class="tile-text">
               <div class="tile-title">Queue Summary</div>
               <div class="tile-desc">Counts by status</div>
@@ -578,7 +579,7 @@ onUnmounted(stopPolling);
         <!-- Actions tile -->
         <div class="tile tile--accent" @click="toggle('actions')">
           <div class="tile-head">
-            <div class="tile-icon">⚡</div>
+            <IconChip name="actions" />
             <div class="tile-text">
               <div class="tile-title">Batch Actions</div>
               <div class="tile-desc">Run next N transcribe/insights</div>
@@ -631,7 +632,7 @@ onUnmounted(stopPolling);
         <!-- Chat response-time recompute tile -->
         <div class="tile tile--accent" @click="toggle('actions')">
           <div class="tile-head">
-            <div class="tile-icon">⏱</div>
+            <IconChip name="response-time" />
             <div class="tile-text">
               <div class="tile-title">Chat Response-Time Metrics</div>
               <div class="tile-desc">
@@ -689,7 +690,7 @@ onUnmounted(stopPolling);
         <!-- Failed records (dead-letter) + reprocessing -->
         <div class="tile tile--accent" @click="toggle('failed')">
           <div class="tile-head">
-            <div class="tile-icon">⚠</div>
+            <IconChip name="warning" tone="risk" />
             <div class="tile-text">
               <div class="tile-title">Failed Records</div>
               <div class="tile-desc">Records stuck in <code>error</code> with the real cause — requeue them to retry. Non-destructive.</div>
@@ -729,7 +730,7 @@ onUnmounted(stopPolling);
         <!-- Reprocess insights (re-run after a prompt change) — its own tile -->
         <div class="tile tile--accent" @click="toggle('reprocess')">
           <div class="tile-head">
-            <div class="tile-icon">♻</div>
+            <IconChip name="retries" />
             <div class="tile-text">
               <div class="tile-title">Reprocess Insights</div>
               <div class="tile-desc">Regenerate AI insights for a whole campaign after a prompt change. Deletes existing insights and re-queues completed records — not for failures.</div>
@@ -760,7 +761,7 @@ onUnmounted(stopPolling);
         <!-- Active jobs tile -->
         <div v-if="activeJobs.length" class="tile">
           <div class="tile-head">
-            <div class="tile-icon">⏳</div>
+            <IconChip name="pending" />
             <div class="tile-text">
               <div class="tile-title">Active Jobs</div>
               <div class="tile-desc">Background processing — safe to navigate away</div>
@@ -816,7 +817,7 @@ onUnmounted(stopPolling);
         <!-- Last run tile -->
         <div class="tile" @click="toggle('lastRun')">
           <div class="tile-head">
-            <div class="tile-icon">⎘</div>
+            <IconChip name="result" />
             <div class="tile-text">
               <div class="tile-title">Last Batch Result</div>
               <div class="tile-desc">Inspect the returned payload</div>
@@ -858,7 +859,7 @@ onUnmounted(stopPolling);
         <!-- Batch history tile -->
         <div class="tile" style="grid-column: 1 / -1" @click="toggle('history')">
           <div class="tile-head">
-            <div class="tile-icon">🕓</div>
+            <IconChip name="recent" />
             <div class="tile-text">
               <div class="tile-title">Batch History</div>
               <div class="tile-desc">Last 20 jobs</div>

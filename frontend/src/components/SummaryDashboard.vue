@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
+import IconChip from "./IconChip.vue";
 import { ApiPath } from "@/enums/api";
 
 interface Overview {
@@ -141,7 +142,7 @@ function statusChip(status: string) {
         <!-- Pipeline status -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">🔄</div>
+            <IconChip name="status" />
             <div class="tile-text">
               <div class="tile-title">Processing Status</div>
               <div class="tile-desc">Where interactions sit in the transcription → insights pipeline</div>
@@ -175,7 +176,7 @@ function statusChip(status: string) {
         <!-- Loaded by date -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">📈</div>
+            <IconChip name="loaded-date" />
             <div class="tile-text">
               <div class="tile-title">Data Loaded by Date</div>
               <div class="tile-desc">Interactions created per day — {{ data.loadedByDate.length }} days of history</div>
@@ -200,7 +201,7 @@ function statusChip(status: string) {
         <!-- Interactions by campaign & type -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">📊</div>
+            <IconChip name="distribution" />
             <div class="tile-text">
               <div class="tile-title">Interactions by Campaign &amp; Type</div>
               <div class="tile-desc">Every interaction in the DB, grouped by its campaign label and channel</div>
@@ -232,7 +233,7 @@ function statusChip(status: string) {
         <!-- Campaign timeline -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">🗓</div>
+            <IconChip name="calendar" />
             <div class="tile-text">
               <div class="tile-title">Campaign Data Windows</div>
               <div class="tile-desc">When each campaign's data was loaded, and the span it covers</div>

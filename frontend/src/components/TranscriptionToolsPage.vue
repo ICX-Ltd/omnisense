@@ -8,7 +8,7 @@
     <!-- Vehicle vocabulary editor -->
     <div class="tile">
       <div class="tile-head">
-        <div class="tile-icon">&#128663;</div>
+        <IconChip name="vehicle" />
         <div class="tile-text">
           <div class="tile-title">Vehicle Vocabulary</div>
           <div class="tile-desc">Bias transcription toward makes/models (keyterms) and auto-correct known mishears (replacements). Edited live — no software update needed.</div>
@@ -82,7 +82,7 @@
     <!-- Embed transcripts -->
     <div class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#129517;</div>
+        <IconChip name="semantic" />
         <div class="tile-text">
           <div class="tile-title">Semantic Search — Embed Transcripts</div>
           <div class="tile-desc">Generate meaning vectors so transcripts are searchable by phrase (Find record → Meaning). Cheap; run repeatedly to clear the backlog.</div>
@@ -114,7 +114,7 @@
     <!-- Vocabulary suggestions -->
     <div class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#128257;</div>
+        <IconChip name="vocab" />
         <div class="tile-text">
           <div class="tile-title">Transcription Vocabulary Suggestions</div>
           <div class="tile-desc">Words Deepgram was least sure about, mined from transcripts — candidates to add to the keyterms above.</div>
@@ -157,7 +157,7 @@
     <!-- Lowest-confidence review -->
     <div class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#127911;</div>
+        <IconChip name="listen" />
         <div class="tile-text">
           <div class="tile-title">Review: Lowest-Confidence Transcripts</div>
           <div class="tile-desc">Calls the transcription AI was least sure about — ranked worst first. Click a row to open the transcript.</div>
@@ -197,6 +197,7 @@
 </template>
 
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { RecordingPath } from "@/enums/recording-paths";

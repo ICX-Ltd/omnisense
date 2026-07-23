@@ -43,7 +43,7 @@
               class="drawer-header-score"
               :style="{ background: scoreColorSolid(detailData.insight.overall_score) }"
             >{{ fmtScore(detailData.insight.overall_score) }}</span>
-            <button v-if="detailData" class="ask-ai-btn" @click="openAsk">&#10024; Ask AI</button>
+            <button v-if="detailData" class="ask-ai-btn" @click="openAsk"><Sparkles :size="14" /> Ask AI</button>
             <button class="drawer-close" @click="onClose">&times;</button>
           </div>
         </div>
@@ -770,7 +770,7 @@
     <div v-if="askOpen && recordingId" class="ask-backdrop" @click="closeAsk" />
     <div v-if="askOpen && recordingId" class="ask-modal">
       <div class="ask-header">
-        <div class="ask-title">&#10024; Ask about this interaction</div>
+        <div class="ask-title"><Sparkles :size="16" style="vertical-align: -3px" /> Ask about this interaction</div>
         <button class="drawer-close" @click="closeAsk">&times;</button>
       </div>
       <div class="ask-body">
@@ -831,6 +831,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { Sparkles } from "lucide-vue-next";
 import axios from "axios";
 import {
   getInteractionDetail,
@@ -1367,6 +1368,7 @@ const answerGroups = computed(() => {
 <style scoped>
 /* ── Ask AI ──────────────────────────────────────────────────────────────── */
 .ask-ai-btn {
+  display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.15); color: #fff;
   font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
 }

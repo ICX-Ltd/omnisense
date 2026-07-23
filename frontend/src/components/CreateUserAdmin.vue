@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import { computed, ref } from "vue";
 import { createUser } from "@/services/user.service";
 
@@ -55,7 +56,7 @@ async function submit() {
 <template>
   <div class="tile">
     <div class="tile-head">
-      <div class="tile-icon">👤</div>
+      <IconChip name="user-add" />
       <div class="tile-text">
         <div class="tile-title">Create User</div>
         <div class="tile-desc">Add a new user account</div>

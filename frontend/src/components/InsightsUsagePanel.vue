@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, ref } from "vue";
 import { ApiPath } from "@/enums/api";
@@ -122,7 +123,7 @@ async function load() {
 <template>
   <div class="tile">
     <div class="tile-head" style="cursor: pointer" @click="toggleOpen">
-      <div class="tile-icon">&#163;</div>
+      <IconChip name="cost" />
       <div class="tile-text">
         <div class="tile-title">Insights Usage &amp; Cost</div>
         <div class="tile-desc">Token spend and retry overhead from your own data — no provider console needed.</div>

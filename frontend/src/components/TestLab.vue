@@ -28,7 +28,7 @@
         <!-- Audio tile -->
         <div class="tile tile--accent" @click="() => {}">
           <div class="tile-head">
-            <div class="tile-icon">♫</div>
+            <IconChip name="audio" />
             <div class="tile-text">
               <div class="tile-title">Audio Transcription</div>
               <div class="tile-desc">
@@ -113,7 +113,7 @@
         <!-- Insights tile -->
         <div class="tile" @click="() => {}">
           <div class="tile-head">
-            <div class="tile-icon">🧠</div>
+            <IconChip name="insights" />
             <div class="tile-text">
               <div class="tile-title">Insights</div>
               <div class="tile-desc">
@@ -221,6 +221,7 @@
 </template>
 
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, ref } from "vue";
 import { ApiPath, InsightsProvider, TranscriptionProvider } from "@/enums/api";

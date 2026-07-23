@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
@@ -767,7 +768,7 @@ onMounted(async () => {
     <!-- Filters -->
     <div class="tile tile--accent">
       <div class="tile-head">
-        <div class="tile-icon">&#9881;</div>
+        <IconChip name="filters" />
         <div class="tile-text">
           <div class="tile-title">Filters</div>
           <div class="tile-desc">Select date range, channel and optionally filter by campaign or agent</div>
@@ -1004,7 +1005,7 @@ onMounted(async () => {
       <!-- Campaigns in Dataset -->
       <div v-if="campaignOptions.length && !campaign" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128203;</div>
+          <IconChip name="campaigns" />
           <div class="tile-text">
             <div class="tile-title">Campaigns in Dataset</div>
             <div class="tile-desc">Click a campaign to filter the dashboard</div>
@@ -1031,7 +1032,7 @@ onMounted(async () => {
         style="margin-top: 14px"
       >
         <div class="tile-head">
-          <div class="tile-icon">&#128176;</div>
+          <IconChip name="opportunity" />
           <div class="tile-text">
             <div class="tile-title">Sales Opportunity Classification</div>
             <div class="tile-desc">Breakdown of records classified as opportunities vs not — click a reason to view individual records</div>
@@ -1132,7 +1133,7 @@ onMounted(async () => {
       <!-- Campaign Analysis (Parity) -->
       <div v-if="parityData && parityData.total > 0" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128270;</div>
+          <IconChip name="analysis" />
           <div class="tile-text">
             <div class="tile-title">Campaign Analysis &mdash; Parity</div>
             <div class="tile-desc">
@@ -1517,7 +1518,7 @@ onMounted(async () => {
         <!-- Customer Interest -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128200;</div>
+            <IconChip name="trends" />
             <div class="tile-text">
               <div class="tile-title">Customer Interest</div>
               <div class="tile-desc">Click an interest level to see individual interactions</div>
@@ -1566,7 +1567,7 @@ onMounted(async () => {
         <!-- Competitor Purchases & Objections -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#9878;</div>
+            <IconChip name="comparison" />
             <div class="tile-text">
               <div class="tile-title">Competitor Purchases &amp; Objections</div>
               <div class="tile-desc">Click a competitor to see individual interactions</div>
@@ -1630,7 +1631,7 @@ onMounted(async () => {
       <!-- Top Dealer Follow-ups -->
       <div v-if="!isParityCampaign && csData.top_dealers.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#127970;</div>
+          <IconChip name="dealer" />
           <div class="tile-text">
             <div class="tile-title">Top Dealer Follow-ups</div>
             <div class="tile-desc">Dealers with the most lead follow-ups</div>
@@ -1655,7 +1656,7 @@ onMounted(async () => {
       <!-- Recent Lost Sales -->
       <div v-if="!isParityCampaign && csData.recent_lost_sales.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#9888;</div>
+          <IconChip name="lost" />
           <div class="tile-text">
             <div class="tile-title">Recent Lost Sales</div>
             <div class="tile-desc">Click to view full interaction detail</div>
@@ -1684,7 +1685,7 @@ onMounted(async () => {
     <!-- Generate Narrative -->
     <div v-if="csData" class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#128221;</div>
+        <IconChip name="narrative" />
         <div class="tile-text">
           <div class="tile-title">Generate Narrative</div>
           <div class="tile-desc">AI-generated executive briefing based on current filters</div>

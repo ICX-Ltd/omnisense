@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
+import { Sparkles } from "lucide-vue-next";
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
@@ -639,7 +641,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="hero-subtitle">Structured survey data: purchase intent, competitor switching, dealership experience and interest drivers.</div>
         </div>
         <button class="btn btn--primary ask-ai-btn" @click="askOpen = true">
-          <span style="font-size: 15px">&#10024;</span> Ask AI
+          <Sparkles :size="15" /> Ask AI
         </button>
       </div>
     </div>
@@ -647,7 +649,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
     <!-- Filters -->
     <div class="tile tile--accent">
       <div class="tile-head">
-        <div class="tile-icon">&#9881;</div>
+        <IconChip name="filters" />
         <div class="tile-text">
           <div class="tile-title">Filters</div>
           <div class="tile-desc">Select date range and optionally filter by campaign, manufacturer, model or dealer</div>
@@ -754,7 +756,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div class="grid grid-2" style="margin-top: 14px">
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128203;</div>
+            <IconChip name="list" />
             <div class="tile-text">
               <div class="tile-title">Outcome Categories</div>
               <div class="tile-desc">Click a category to see individual records</div>
@@ -793,7 +795,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <!-- Model Performance -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128663;</div>
+            <IconChip name="performance" />
             <div class="tile-text">
               <div class="tile-title">Model Performance</div>
               <div class="tile-desc">Enquired models: still considering vs purchased elsewhere</div>
@@ -831,7 +833,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div class="grid grid-2" style="margin-top: 14px">
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#11088;</div>
+            <IconChip name="factors" />
             <div class="tile-text">
               <div class="tile-title">Initial Interest Factors</div>
               <div class="tile-desc">What attracted customers ({{ interestFactors?.surveyed ?? 0 }} surveyed)</div>
@@ -856,7 +858,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128683;</div>
+            <IconChip name="not-purchased" />
             <div class="tile-text">
               <div class="tile-title">Not-Purchase Reasons</div>
               <div class="tile-desc">Why customers did not buy ({{ notPurchaseReasons?.surveyed ?? 0 }} non-purchasers)</div>
@@ -897,7 +899,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div class="grid grid-2" style="margin-top: 14px">
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#9878;</div>
+            <IconChip name="comparison" />
             <div class="tile-text">
               <div class="tile-title">Competitor Purchases</div>
               <div class="tile-desc">Click a make to see models and individual records</div>
@@ -946,7 +948,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#127919;</div>
+            <IconChip name="ratings" />
             <div class="tile-text">
               <div class="tile-title">Dealership Ratings</div>
               <div class="tile-desc">Customer ratings (1-5) from survey responses</div>
@@ -995,7 +997,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Dealer visit outcomes -->
       <div v-if="dealerVisits.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#127970;</div>
+          <IconChip name="dealer" />
           <div class="tile-text">
             <div class="tile-title">Dealer Visit Outcomes</div>
             <div class="tile-desc">Did the customer visit? Did they test drive?</div>
@@ -1023,7 +1025,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div v-if="competitorAnalysis" class="grid grid-2" style="margin-top: 14px">
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#9878;</div>
+            <IconChip name="comparison" />
             <div class="tile-text">
               <div class="tile-title">Competitor League</div>
               <div class="tile-desc">Where lost customers went ({{ competitorAnalysis.total_defections }} defections) &mdash; &#127464;&#127475; marks Chinese / Chinese-owned OEMs</div>
@@ -1054,7 +1056,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#127464;&#127475;</div>
+            <IconChip name="threat" />
             <div class="tile-text">
               <div class="tile-title">Chinese OEM Threat</div>
               <div class="tile-desc">Share of defections going to Chinese / Chinese-owned brands</div>
@@ -1091,7 +1093,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Quarterly trend -->
       <div v-if="quarterlyTrends.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128200;</div>
+          <IconChip name="trends" />
           <div class="tile-text">
             <div class="tile-title">Quarter-on-Quarter Trend</div>
             <div class="tile-desc">Surveyed volume, defections and Chinese-OEM share by quarter</div>
@@ -1130,7 +1132,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Monthly trend: Chinese brands as separate lines -->
       <div v-if="chineseBrandChart" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128200;</div>
+          <IconChip name="trend-down" />
           <div class="tile-text">
             <div class="tile-title">Monthly Defections by Chinese OEM</div>
             <div class="tile-desc">Each Chinese / Chinese-owned brand across the selected period — {{ brandChartPct ? '% of that month’s defections' : 'defection counts' }}. Labels mark each brand’s peak.</div>
@@ -1166,7 +1168,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Monthly trend: overall -->
       <div v-if="overallTrendChart" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128201;</div>
+          <IconChip name="trend-down" />
           <div class="tile-text">
             <div class="tile-title">Monthly Defections — Overall</div>
             <div class="tile-desc">All competitor defections vs the Chinese-OEM subset, month by month — {{ overallChartPct ? '% of surveyed (defection rate)' : 'counts' }}</div>
@@ -1202,7 +1204,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Model risk -->
       <div v-if="modelRisk.length" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#9888;</div>
+          <IconChip name="warning" tone="risk" />
           <div class="tile-text">
             <div class="tile-title">Model Risk Ranking</div>
             <div class="tile-desc">Enquired models ranked by defection rate (min 3 records)</div>
@@ -1238,7 +1240,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Why we lose: Chinese vs other -->
       <div v-if="whyWeLose" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128269;</div>
+          <IconChip name="search" />
           <div class="tile-text">
             <div class="tile-title">Why We Lose</div>
             <div class="tile-desc">Not-purchase reasons among defectors &mdash; Chinese-OEM buyers vs everyone else</div>
@@ -1279,7 +1281,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- What's working -->
       <div v-if="whatsWorking" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#9989;</div>
+          <IconChip name="winning" />
           <div class="tile-text">
             <div class="tile-title">What's Working</div>
             <div class="tile-desc">The "won" cohort: {{ whatsWorking.won }} positive outcomes<span v-if="whatsWorking.avg_rating != null"> &middot; avg dealership rating {{ whatsWorking.avg_rating }}&#9733;</span></div>
@@ -1321,7 +1323,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- ══════════ Transcript Insights (beyond the survey) ══════════ -->
       <div v-if="transcriptInsights" class="tile" style="margin-top: 22px; border-top: 3px solid #6366f1">
         <div class="tile-head">
-          <div class="tile-icon">&#127908;</div>
+          <IconChip name="insights" />
           <div class="tile-text">
             <div class="tile-title">Transcript Insights &mdash; beyond the survey</div>
             <div class="tile-desc">
@@ -1338,7 +1340,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Voice-of-customer sentiment -->
       <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128172;</div>
+          <IconChip name="sentiment" />
           <div class="tile-text">
             <div class="tile-title">Voice-of-Customer Sentiment</div>
             <div class="tile-desc">Positive &amp; negative views on the Nissan brand, the vehicle and the dealer</div>
@@ -1367,7 +1369,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Competitors considered (transcript) -->
       <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#127950;</div>
+          <IconChip name="comparison" />
           <div class="tile-text">
             <div class="tile-title">Competitors Considered (from transcript)</div>
             <div class="tile-desc">
@@ -1410,7 +1412,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Why competitors win (transcript) -->
       <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#127942;</div>
+          <IconChip name="trophy" />
           <div class="tile-text">
             <div class="tile-title">Why Competitors Win (from transcript)</div>
             <div class="tile-desc">Reasons the customer preferred a competitor &mdash; split by whether they considered a Chinese OEM</div>
@@ -1467,7 +1469,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Frustrations -->
       <div v-if="transcriptInsights && transcriptInsights.frustrations.total" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#9888;</div>
+          <IconChip name="warning" />
           <div class="tile-text">
             <div class="tile-title">Customer Frustrations &amp; Resolutions</div>
             <div class="tile-desc">{{ transcriptInsights.frustrations.total }} frustrations across the cohort, with what NMGB could do about them</div>
@@ -1533,7 +1535,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Reportable measures -->
       <div v-if="transcriptInsights && transcriptInsights.total_with_transcript" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128202;</div>
+          <IconChip name="distribution" />
           <div class="tile-text">
             <div class="tile-title">Reportable Measures</div>
             <div class="tile-desc">Signals the survey doesn't ask about: EV stance, loyalty, price-expectation gaps and dealer follow-up</div>
@@ -1585,7 +1587,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <!-- Key quotes + survey gaps -->
       <div v-if="transcriptInsights && (transcriptInsights.quotes.length || transcriptInsights.gaps.length)" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128172;</div>
+          <IconChip name="quotes" />
           <div class="tile-text">
             <div class="tile-title">Key Quotes &amp; Survey Gaps Filled</div>
             <div class="tile-desc">Report-ready verbatims, and what the transcript revealed that the survey missed</div>
@@ -1626,7 +1628,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div v-if="askOpen" class="ask-modal">
         <div class="drill-modal-header">
           <div>
-            <div class="drill-modal-title">✨ Ask AI — filtered survey dataset</div>
+            <div class="drill-modal-title"><Sparkles :size="16" style="vertical-align: -3px" /> Ask AI — filtered survey dataset</div>
             <div class="drill-modal-sub">Answers are grounded in the records matching your current filters.</div>
           </div>
           <button class="drawer-close" @click="askOpen = false">&times;</button>
@@ -1748,7 +1750,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
     <!-- Generate Narrative -->
     <div v-if="overview" class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#128221;</div>
+        <IconChip name="narrative" />
         <div class="tile-text">
           <div class="tile-title">Generate Executive Narrative</div>
           <div class="tile-desc">Director-level briefing built from survey answers <strong>and</strong> transcript insights: competitive landscape, Chinese-OEM threat &amp; quarterly trend, why customers defect, model risk, emerging themes, what Nissan does well, and recommendations</div>

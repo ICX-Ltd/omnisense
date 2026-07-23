@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import { ref } from "vue";
 import { changeMyPassword } from "@/services/auth.service";
 
@@ -54,7 +55,7 @@ async function submit() {
 <template>
   <div class="tile">
     <div class="tile-head">
-      <div class="tile-icon">🔑</div>
+      <IconChip name="password" />
       <div class="tile-text">
         <div class="tile-title">Change Password</div>
         <div class="tile-desc">Update your account password</div>

@@ -10,7 +10,7 @@
     <!-- Discover new / updated models -->
     <div class="tile">
       <div class="tile-head tile-head--toggle" @click="discOpen = !discOpen">
-        <div class="tile-icon">&#128225;</div>
+        <IconChip name="discover" />
         <div class="tile-text">
           <div class="tile-title">
             Check for new models
@@ -44,7 +44,7 @@
     <!-- Add -->
     <div class="tile">
       <div class="tile-head">
-        <div class="tile-icon">&#43;</div>
+        <IconChip name="add" />
         <div class="tile-text">
           <div class="tile-title">Add a model</div>
           <div class="tile-desc">For insights, an empty model id means "the provider's own default".</div>
@@ -66,7 +66,7 @@
     <!-- Groups -->
     <div v-for="grp in groups" :key="grp.kind" class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">{{ grp.kind === 'transcription' ? '&#127908;' : '&#129504;' }}</div>
+        <IconChip :name="grp.kind === 'transcription' ? 'transcription' : 'insights'" />
         <div class="tile-text">
           <div class="tile-title">{{ grp.kind === 'transcription' ? 'Transcription models' : 'Insights / narrative models' }}</div>
           <div class="tile-desc">{{ grp.kind === 'transcription' ? 'The starred Deepgram model is what transcription uses.' : 'The starred option per provider is pre-selected in the dropdown.' }}</div>
@@ -93,6 +93,7 @@
 </template>
 
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";

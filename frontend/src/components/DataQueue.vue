@@ -15,7 +15,7 @@
       <div class="grid">
         <div class="tile tile--accent" @click="() => {}">
           <div class="tile-head">
-            <div class="tile-icon">＋</div>
+            <IconChip name="add" />
             <div class="tile-text">
               <div class="tile-title">Add Recording</div>
               <div class="tile-desc">Paste a downloadable URL</div>
@@ -36,7 +36,7 @@
         <!-- Filters tile -->
         <div class="tile tile--accent" @click="() => {}">
           <div class="tile-head">
-            <div class="tile-icon">⚙</div>
+            <IconChip name="filters" />
             <div class="tile-text">
               <div class="tile-title">Filters</div>
               <div class="tile-desc">Search, filter and sort the queue</div>
@@ -230,6 +230,7 @@
 </template>
 
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath, InsightsProvider, TranscriptionProvider } from "@/enums/api";

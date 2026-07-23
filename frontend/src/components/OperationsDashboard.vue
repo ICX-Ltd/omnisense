@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import axios from "axios";
 import { computed, onMounted, ref, watch } from "vue";
 import { ApiPath } from "@/enums/api";
@@ -787,7 +788,7 @@ onMounted(async () => {
     <!-- Filters -->
     <div class="tile tile--accent">
       <div class="tile-head">
-        <div class="tile-icon">&#9881;</div>
+        <IconChip name="filters" />
         <div class="tile-text">
           <div class="tile-title">Filters</div>
           <div class="tile-desc">Select date range, channel and optionally filter by campaign or agent</div>
@@ -1009,7 +1010,7 @@ onMounted(async () => {
            can pick an agent first, then see their comparison numbers below) -->
       <div v-if="agentsInData.length && !agent" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128101;</div>
+          <IconChip name="agents" />
           <div class="tile-text">
             <div class="tile-title">Agents in Dataset</div>
             <div class="tile-desc">Click an agent to compare their scores against the overall average</div>
@@ -1036,7 +1037,7 @@ onMounted(async () => {
       <!-- Agent Trajectory — per-agent QC score trend over a rolling 12 months -->
       <div class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128200;</div>
+          <IconChip name="trends" />
           <div class="tile-text">
             <div class="tile-title">Agent Trajectory</div>
             <div class="tile-desc">Rolling 12-month average QC score per agent — the trend, not just a snapshot. Click an agent to filter the dashboard.</div>
@@ -1107,7 +1108,7 @@ onMounted(async () => {
         style="margin-top: 14px"
       >
         <div class="tile-head">
-          <div class="tile-icon">&#9201;</div>
+          <IconChip name="response-time" />
           <div class="tile-text">
             <div class="tile-title">Chat Response Time</div>
             <div class="tile-desc">
@@ -1298,7 +1299,7 @@ onMounted(async () => {
       <!-- Dimension Averages -->
       <div class="tile dim-averages-tile">
         <div class="tile-head">
-          <div class="tile-icon">&#128202;</div>
+          <IconChip name="distribution" />
           <div class="tile-text">
             <div class="tile-title">Dimension Averages</div>
             <div class="tile-desc">
@@ -1363,7 +1364,7 @@ onMounted(async () => {
       <!-- QA Dimension Averages (RAC-style campaigns) -->
       <div v-if="hasQaData" class="tile dim-averages-tile">
         <div class="tile-head">
-          <div class="tile-icon">&#9989;</div>
+          <IconChip name="compliance" />
           <div class="tile-text">
             <div class="tile-title">QA Assessment Averages</div>
             <div class="tile-desc">
@@ -1444,7 +1445,7 @@ onMounted(async () => {
       <!-- Objection Handling Assessment Summary -->
       <div v-if="objectionAssessData?.categories?.some((c: any) => c.raised_count > 0)" class="tile">
         <div class="tile-head" style="flex-wrap: wrap">
-          <div class="tile-icon">&#128172;</div>
+          <IconChip name="objections" />
           <div class="tile-text" style="flex: 1">
             <div class="tile-title">Objection Handling Assessment</div>
             <div class="tile-desc">
@@ -1595,7 +1596,7 @@ onMounted(async () => {
         class="tile"
       >
         <div class="tile-head">
-          <div class="tile-icon">&#128176;</div>
+          <IconChip name="opportunity" />
           <div class="tile-text">
             <div class="tile-title">Sales Opportunity Classification</div>
             <div class="tile-desc">Breakdown of records classified as opportunities vs not — click a reason to view individual records</div>
@@ -1733,7 +1734,7 @@ onMounted(async () => {
       <!-- Vulnerable Customers (Consumer Duty — QA Q13) -->
       <div v-if="vulnData" class="tile" style="margin-top: 14px">
         <div class="tile-head">
-          <div class="tile-icon">&#128735;</div>
+          <IconChip name="vulnerability" />
           <div class="tile-text">
             <div class="tile-title">Vulnerable Customers (Consumer Duty)</div>
             <div class="tile-desc">From QA Q13 — where a vulnerable customer was identified and whether they were handled appropriately. {{ vulnData.total_qa }} QA-scored interactions in range.</div>
@@ -1783,7 +1784,7 @@ onMounted(async () => {
         <!-- Score Distribution -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128200;</div>
+            <IconChip name="distribution" />
             <div class="tile-text">
               <div class="tile-title">Score Distribution</div>
               <div class="tile-desc">Click a bucket to see individual interactions</div>
@@ -1833,7 +1834,7 @@ onMounted(async () => {
         <!-- Partial Scores by Outcome -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#9888;&#65039;</div>
+            <IconChip name="warning" />
             <div class="tile-text">
               <div class="tile-title">{{ partialLayer === 'qa' ? 'QA Partial Scores' : 'Ops Partial Scores' }} by Outcome</div>
               <div class="tile-desc">Records where the {{ partialLayer === 'qa' ? 'QA' : 'operations' }} scoring was partial (n/a on one or more dimensions), grouped by outcome — click to drill</div>
@@ -1896,7 +1897,7 @@ onMounted(async () => {
         <!-- Low Score Alerts by Agent -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#128680;</div>
+            <IconChip name="alert" />
             <div class="tile-text">
               <div class="tile-title">{{ lowScoreLayer === 'qa' ? 'QA Low Score Alerts' : 'Ops Low Score Alerts' }} by Agent</div>
               <div class="tile-desc">Records where {{ lowScoreLayer === 'qa' ? 'a QA question was answered “no”' : 'an operations dimension scored ≤ 4' }}, grouped by agent — click to drill</div>
@@ -1960,7 +1961,7 @@ onMounted(async () => {
         <!-- Coaching Needs -->
         <div class="tile">
           <div class="tile-head">
-            <div class="tile-icon">&#127891;</div>
+            <IconChip name="coaching" />
             <div class="tile-text">
               <div class="tile-title">Top Coaching Needs</div>
               <div class="tile-desc">Click a need to see affected interactions</div>
@@ -2010,7 +2011,7 @@ onMounted(async () => {
         <!-- Outcome Distribution -->
         <div class="tile" v-if="opsData.outcome_distribution?.length">
           <div class="tile-head">
-            <div class="tile-icon">&#128203;</div>
+            <IconChip name="list" />
             <div class="tile-text">
               <div class="tile-title">Outcome Distribution</div>
               <div class="tile-desc">Click an outcome to see individual interactions</div>
@@ -2062,7 +2063,7 @@ onMounted(async () => {
           class="tile"
         >
         <div class="tile-head">
-          <div class="tile-icon">&#9888;</div>
+          <IconChip name="warning" />
           <div class="tile-text">
             <div class="tile-title">Lowest Scored — Coaching Focus</div>
             <div class="tile-desc">Click to view full interaction detail</div>
@@ -2097,7 +2098,7 @@ onMounted(async () => {
     <!-- Generate Narrative -->
     <div v-if="opsData" class="tile" style="margin-top: 14px">
       <div class="tile-head">
-        <div class="tile-icon">&#128221;</div>
+        <IconChip name="narrative" />
         <div class="tile-text">
           <div class="tile-title">Generate Narrative</div>
           <div class="tile-desc">AI-generated executive briefing based on current filters</div>

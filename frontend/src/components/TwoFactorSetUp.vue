@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconChip from "./IconChip.vue";
 import { ref, onMounted, computed } from "vue";
 import api from "@/services/api";
 import { useAccess } from "@/composables/useAccess";
@@ -153,7 +154,7 @@ onMounted(loadStatus);
 <template>
   <div class="tile">
     <div class="tile-head">
-      <div class="tile-icon">🔐</div>
+      <IconChip name="two-factor" />
       <div class="tile-text">
         <div class="tile-title">Two-Factor Authentication</div>
         <div class="tile-desc">Secure your account with an authenticator app</div>

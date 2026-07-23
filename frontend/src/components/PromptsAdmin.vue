@@ -73,7 +73,7 @@
 
       <section class="editor">
         <div v-if="mode === 'empty'" class="empty-state">
-          <div class="empty-icon">📝</div>
+          <div class="empty-icon"><FileText :size="44" :stroke-width="1.5" /></div>
           <div>Pick a prompt fragment on the left to edit, or create a new one.</div>
         </div>
 
@@ -349,6 +349,7 @@ campaign is anything else (e.g. "Foo")
 </template>
 
 <script setup lang="ts">
+import { FileText } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import {
   createPrompt,
