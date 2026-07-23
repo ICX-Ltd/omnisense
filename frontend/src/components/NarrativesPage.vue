@@ -170,9 +170,9 @@ onMounted(load);
           </div>
         </div>
         <div class="tile-body">
-          <div class="controls-row">
-            <div class="control-group">
-              <label class="control-label">Channel</label>
+          <div class="filters-row">
+            <div class="filter-group">
+              <label class="label">Channel</label>
               <select v-model="filterKey" class="select">
                 <option value="">Any</option>
                 <option value="calls">Calls</option>
@@ -181,8 +181,8 @@ onMounted(load);
               </select>
             </div>
 
-            <div class="control-group">
-              <label class="control-label">Narrative Type</label>
+            <div class="filter-group">
+              <label class="label">Narrative Type</label>
               <select v-model="narrativeType" class="select">
                 <option value="">Any</option>
                 <option value="generic">Generic</option>
@@ -194,8 +194,8 @@ onMounted(load);
               </select>
             </div>
 
-            <div class="control-group">
-              <label class="control-label">Provider</label>
+            <div class="filter-group">
+              <label class="label">Provider</label>
               <select v-model="provider" class="select">
                 <option value="">Any</option>
                 <option value="openai">OpenAI</option>
@@ -205,13 +205,13 @@ onMounted(load);
               </select>
             </div>
 
-            <div class="control-group">
-              <label class="control-label">Created From</label>
+            <div class="filter-group">
+              <label class="label">Created From</label>
               <input type="date" v-model="createdFrom" class="input input--date" />
             </div>
 
-            <div class="control-group">
-              <label class="control-label">Created To</label>
+            <div class="filter-group">
+              <label class="label">Created To</label>
               <input type="date" v-model="createdTo" class="input input--date" />
             </div>
 
@@ -221,8 +221,8 @@ onMounted(load);
           </div>
 
           <!-- Narrative selector -->
-          <div v-if="narratives.length" class="control-group" style="margin-top: 10px">
-            <label class="control-label">Narrative</label>
+          <div v-if="narratives.length" class="filter-group" style="margin-top: 10px">
+            <label class="label">Narrative</label>
             <select v-model="selectedId" class="select select--wide">
               <option v-for="n in narratives" :key="n.id" :value="n.id">
                 {{ labelForEntry(n) }} &mdash; {{ fmtDateTime(n.createdAt) }}
@@ -327,27 +327,6 @@ onMounted(load);
 </template>
 
 <style scoped>
-.controls-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.control-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.control-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
 .select--wide {
   min-width: 320px;
   max-width: 100%;

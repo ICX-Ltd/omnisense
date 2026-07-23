@@ -19,6 +19,7 @@ const vehicleMakeOptions = ref<string[]>([]);
 // from these and the currently-selected make (see vehicleModelOptions).
 const vehicleModelPairs = ref<{ make: string; model: string }[]>([]);
 const excludeOutcomes = ref<string[]>([]);
+const advOpen = ref(false);
 
 // Model options chained to the selected make: when a make is chosen, only its
 // models are offered; otherwise every distinct model is shown.
@@ -775,105 +776,82 @@ onMounted(async () => {
         </div>
       </div>
       <div class="tile-body">
-        <div class="filters-panel">
-          <!-- Left: dates, channel, campaign, agent -->
-          <div class="filters-left">
-            <div class="filters-row">
-              <div class="filter-group">
-                <label class="label">From</label>
-                <input type="date" v-model="fromDateStr" class="input input--date" />
-              </div>
-              <div class="filter-group">
-                <label class="label">To</label>
-                <input type="date" v-model="toDateStr" class="input input--date" />
-              </div>
-              <div class="filter-group">
-                <label class="label">Channel</label>
-                <select v-model="interactionFilter" class="select select--sm">
-                  <option value="calls">Calls only</option>
-                  <option value="chats">Chats only</option>
-                  <option value="all">All</option>
-                </select>
-              </div>
-            </div>
-            <div class="filters-row">
-              <div class="filter-group">
-                <label class="label">Campaign</label>
-                <select v-model="campaign" class="select select--sm">
-                  <option value="">All</option>
-                  <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
-                </select>
-              </div>
-              <div class="filter-group">
-                <label class="label">Agent</label>
-                <select v-model="agent" class="select select--sm">
-                  <option value="">All</option>
-                  <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
-                </select>
-              </div>
-            </div>
-            <div class="filters-row">
-              <button class="btn btn--primary" :disabled="loading" @click="loadAll">
-                {{ loading ? "Loading..." : "Load" }}
-              </button>
-            </div>
+        <div class="filters-row">
+          <div class="filter-group">
+            <label class="label">From</label>
+            <input type="date" v-model="fromDateStr" class="input input--date" />
           </div>
-
-          <!-- Right: Make/Model (col 1) and Outcomes (col 2) on a shared 4-row grid
-               so the controls line up across the columns:
-                 row 1 = Make heading        / Exclude-Outcomes heading
-                 row 2 = Make dropdown       / Select-all toggle
-                 row 3 = Model heading       / Exclude test/abandoned toggle
-                 row 4 = Model multi-select  / Outcomes multi-select -->
-          <div class="filters-right">
-            <!-- Column 1: Make + Model -->
-            <label v-if="vehicleMakeOptions.length" class="label fr-c1 fr-r1">Make</label>
-            <select v-if="vehicleMakeOptions.length" v-model="vehicleMake" class="select select--sm fr-c1 fr-r2">
+          <div class="filter-group">
+            <label class="label">To</label>
+            <input type="date" v-model="toDateStr" class="input input--date" />
+          </div>
+          <div class="filter-group">
+            <label class="label">Channel</label>
+            <select v-model="interactionFilter" class="select select--sm">
+              <option value="calls">Calls only</option>
+              <option value="chats">Chats only</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="label">Campaign</label>
+            <select v-model="campaign" class="select select--sm">
               <option value="">All</option>
-              <option v-for="m in vehicleMakeOptions" :key="m" :value="m">{{ m }}</option>
-            </select>
-            <label v-if="vehicleModelOptions.length" class="label fr-c1 fr-r3">
-              Model
-              <span v-if="vehicleMake" style="font-weight: 400; opacity: 0.6">({{ vehicleMake }} only)</span>
-              <button
-                v-if="vehicleModels.length"
-                type="button"
-                class="btn-quick-exclude"
-                style="margin-left: 6px"
-                @click="vehicleModels = []"
-              >Clear ({{ vehicleModels.length }})</button>
-            </label>
-            <select v-if="vehicleModelOptions.length" v-model="vehicleModels" multiple class="select select--sm select--multi fr-c1 fr-r4" style="height: 190px">
-              <option v-for="m in vehicleModelOptions" :key="m" :value="m">{{ m }}</option>
-            </select>
-
-            <!-- Column 2: Outcomes -->
-            <label v-if="outcomeOptions.length" class="label fr-c2 fr-r1">Exclude Outcomes</label>
-            <button
-              v-if="outcomeOptions.length"
-              type="button"
-              class="btn-quick-exclude fr-c2 fr-r2"
-              style="justify-self: start"
-              @click="toggleAllOutcomes"
-            >{{ allOutcomesExcluded ? "Clear all" : "Select all" }}</button>
-            <button
-              v-if="commonExclusionsAvailable.length"
-              type="button"
-              class="btn-quick-exclude fr-c2 fr-r3"
-              :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
-              style="justify-self: start"
-              @click="toggleCommonExclusions"
-            >{{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}</button>
-            <select v-if="outcomeOptions.length" v-model="excludeOutcomes" multiple class="select select--sm select--multi fr-c2 fr-r4" style="height: 190px">
-              <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
-                <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
-              </optgroup>
-              <optgroup label="All outcomes">
-                <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
-              </optgroup>
+              <option v-for="c in campaignOptions" :key="c" :value="c">{{ c }}</option>
             </select>
           </div>
+          <div class="filter-group">
+            <label class="label">Agent</label>
+            <select v-model="agent" class="select select--sm">
+              <option value="">All</option>
+              <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
+            </select>
+          </div>
+          <button class="btn btn--primary" style="margin-top: 18px" :disabled="loading" @click="loadAll">
+            {{ loading ? "Loading..." : "Load" }}
+          </button>
+          <button v-if="vehicleMakeOptions.length || vehicleModelOptions.length || outcomeOptions.length" class="btn btn--ghost btn--sm filters-adv-toggle" style="margin-left: auto; margin-top: 18px" @click="advOpen = !advOpen">
+            Advanced filters
+            <svg class="chev" :class="{ 'chev--open': advOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
+
+        <div v-show="advOpen && (vehicleMakeOptions.length || vehicleModelOptions.length || outcomeOptions.length)" class="filters-row filters-adv" style="align-items: flex-start">
+            <div v-if="vehicleMakeOptions.length" class="filter-group">
+              <label class="label">Make</label>
+              <select v-model="vehicleMake" class="select select--sm">
+                <option value="">All</option>
+                <option v-for="m in vehicleMakeOptions" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div v-if="vehicleModelOptions.length" class="filter-group">
+              <label class="label">
+                Model
+                <span v-if="vehicleMake" style="font-weight: 400; opacity: 0.6">({{ vehicleMake }} only)</span>
+                <button v-if="vehicleModels.length" type="button" class="btn-quick-exclude" style="margin-left: 6px" @click="vehicleModels = []">Clear ({{ vehicleModels.length }})</button>
+              </label>
+              <select v-model="vehicleModels" multiple class="select select--sm select--multi">
+                <option v-for="m in vehicleModelOptions" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div v-if="outcomeOptions.length" class="filter-group">
+              <label class="label">Exclude Outcomes</label>
+              <div class="exclude-outcomes-wrap">
+                <select v-model="excludeOutcomes" multiple class="select select--sm select--multi">
+                  <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
+                    <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
+                  </optgroup>
+                  <optgroup label="All outcomes">
+                    <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
+                  </optgroup>
+                </select>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                  <button type="button" class="btn-quick-exclude" @click="toggleAllOutcomes">{{ allOutcomesExcluded ? "Clear all" : "Select all" }}</button>
+                  <button v-if="commonExclusionsAvailable.length" type="button" class="btn-quick-exclude" :class="{ 'btn-quick-exclude--active': allCommonExcluded }" @click="toggleCommonExclusions">{{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}</button>
+                </div>
+              </div>
+            </div>
+          </div>
 
         <!-- Compare-to controls -->
         <div class="filters-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border)">
@@ -923,8 +901,31 @@ onMounted(async () => {
         <button class="btn btn--sm" @click="clearCampaign">Clear campaign filter</button>
       </div>
 
+      <!-- Campaigns in Dataset — above the KPIs so you pick a campaign first -->
+      <div v-if="campaignOptions.length && !campaign" class="tile" style="margin-bottom: 14px">
+        <div class="tile-head">
+          <IconChip name="campaigns" />
+          <div class="tile-text">
+            <div class="tile-title">Campaigns in Dataset</div>
+            <div class="tile-desc">Click a campaign to filter the dashboard</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="campaigns-grid">
+            <div
+              v-for="c in campaignOptions"
+              :key="c"
+              class="campaign-card"
+              @click="selectCampaign(c)"
+            >
+              <div class="campaign-card-name">{{ c }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Overview strip -->
-      <div class="stats-strip">
+      <div class="stats-strip" style="align-items: stretch">
         <div class="stat stat--analytics">
           <div class="stat-label">Total Interactions</div>
           <div class="stat-value">{{ csData.totals.total }}</div>
@@ -986,8 +987,11 @@ onMounted(async () => {
           </div>
         </template>
 
-        <!-- Volume breakdown donuts share the overview row with the stat cards.
-             Legend "vs N%" appears per slice when a compare period is loaded. -->
+      </div>
+
+      <!-- Volume breakdown donuts on their own row, so the KPI heights stay consistent.
+           Legend "vs N%" appears per slice when a compare period is loaded. -->
+      <div class="stats-strip" style="margin-top: 14px">
         <div class="stat-chart">
           <div class="stat-label">By Outcome</div>
           <OutcomeDonut :data="outcomeChartData" :compare-data="outcomeChartCompare" :size="120" />
@@ -995,29 +999,6 @@ onMounted(async () => {
         <div class="stat-chart">
           <div class="stat-label">By Vehicle Make</div>
           <OutcomeDonut :data="vehicleMakeChartData" :compare-data="vehicleMakeChartCompare" :size="120" />
-        </div>
-      </div>
-
-      <!-- Campaigns in Dataset -->
-      <div v-if="campaignOptions.length && !campaign" class="tile" style="margin-top: 14px">
-        <div class="tile-head">
-          <IconChip name="campaigns" />
-          <div class="tile-text">
-            <div class="tile-title">Campaigns in Dataset</div>
-            <div class="tile-desc">Click a campaign to filter the dashboard</div>
-          </div>
-        </div>
-        <div class="tile-body">
-          <div class="campaigns-grid">
-            <div
-              v-for="c in campaignOptions"
-              :key="c"
-              class="campaign-card"
-              @click="selectCampaign(c)"
-            >
-              <div class="campaign-card-name">{{ c }}</div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1035,24 +1016,12 @@ onMounted(async () => {
           </div>
         </div>
         <div class="tile-body">
-          <!-- Summary strip -->
-          <div class="opp-summary-strip">
-            <div class="opp-stat">
-              <div class="opp-stat-value">{{ opportunityData.classified }}</div>
-              <div class="opp-stat-label">Classified</div>
-            </div>
-            <div class="opp-stat opp-stat--opportunity">
-              <div class="opp-stat-value">{{ opportunityData.opportunities }}</div>
-              <div class="opp-stat-label">Opportunities</div>
-            </div>
-            <div class="opp-stat opp-stat--not">
-              <div class="opp-stat-value">{{ opportunityData.not_opportunities }}</div>
-              <div class="opp-stat-label">Not Opportunities</div>
-            </div>
-            <div class="opp-stat">
-              <div class="opp-stat-value">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div>
-              <div class="opp-stat-label">Opportunity Rate</div>
-            </div>
+          <!-- Summary KPIs -->
+          <div class="stats" style="margin-bottom: 12px; padding-right: 8px">
+            <div class="stat stat--analytics"><div class="stat-label">Classified</div><div class="stat-value">{{ opportunityData.classified }}</div></div>
+            <div class="stat stat--success"><div class="stat-label">Opportunities</div><div class="stat-value">{{ opportunityData.opportunities }}</div></div>
+            <div class="stat stat--risk"><div class="stat-label">Not Opportunities</div><div class="stat-value">{{ opportunityData.not_opportunities }}</div></div>
+            <div class="stat stat--value"><div class="stat-label">Opportunity Rate</div><div class="stat-value">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div></div>
           </div>
 
           <!-- Opportunity row -->

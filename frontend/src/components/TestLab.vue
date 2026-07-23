@@ -72,7 +72,10 @@
               style="margin-top: 10px"
               v-if="provider === 'openai'"
             >
-              <input type="file" accept="audio/*" @change="onPick" />
+              <label class="btn btn--secondary" style="cursor: pointer">
+                {{ file ? "Change audio file" : "Choose audio file" }}
+                <input type="file" accept="audio/*" @change="onPick" hidden />
+              </label>
             </div>
 
             <div v-if="file" class="hint" style="margin-top: 10px">

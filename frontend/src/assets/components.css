@@ -666,6 +666,31 @@
 .filter-group .label {
   margin: 0;
   font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Collapsible "Advanced filters" — shared across dashboards. */
+.filters-adv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.filters-adv-toggle .chev {
+  transition: transform 0.15s;
+}
+.filters-adv-toggle .chev--open {
+  transform: rotate(180deg);
+}
+.filters-adv {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
 }
 
 /* Compact date input */
@@ -682,11 +707,10 @@
   font-size: 13px;
 }
 
-/* Multi-select */
+/* Multi-select — consistent bigger box wherever it appears */
 .select--multi {
-  min-height: 60px;
-  max-height: 120px;
-  min-width: 160px;
+  width: 240px;
+  height: 200px;
 }
 
 /* ── Pipeline status — neutral base + bottom progress bar; colour only for done/error ── */

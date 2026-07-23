@@ -3,6 +3,7 @@ import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
+import Sparkline from "./Sparkline.vue";
 
 const loading = ref(false);
 const error = ref("");
@@ -209,6 +210,12 @@ const contestCount = computed(
 const doNotContestCount = computed(
   () => (board.value?.decisions ?? []).find((d: any) => d.decision === "do_not_contest")?.count ?? 0,
 );
+const contestPoints = computed<number[]>(
+  () => (board.value?.decisionTrend ?? []).map((t: any) => Number(t.contest) || 0),
+);
+const doNotContestPoints = computed<number[]>(
+  () => (board.value?.decisionTrend ?? []).map((t: any) => Number(t.do_not_contest) || 0),
+);
 
 onMounted(loadAll);
 </script>
@@ -232,15 +239,29 @@ onMounted(loadAll);
     <div v-if="error" class="error-banner">{{ error }}</div>
 
     <!-- Metric tiles -->
-    <div v-if="board" class="stats" style="margin-bottom: 14px">
+    <div v-if="board" class="stats" style="margin-bottom: 14px; padding-right: 8px">
       <div class="stat stat--analytics"><div class="stat-label">Total CSATs</div><div class="stat-value">{{ board.total }}</div></div>
       <div class="stat stat--success"><div class="stat-label">Assessed</div><div class="stat-value">{{ board.assessed }}</div></div>
       <div class="stat stat--warning"><div class="stat-label">Pending</div><div class="stat-value">{{ board.pending }}</div></div>
-      <div class="stat stat--success"><div class="stat-label">Contest</div><div class="stat-value">{{ contestCount }}</div></div>
-      <div class="stat stat--risk"><div class="stat-label">Do Not Contest</div><div class="stat-value">{{ doNotContestCount }}</div></div>
       <div class="stat" :class="board.unmatched > 0 ? 'stat--warning' : 'stat--neutral'"><div class="stat-label">Unmatched</div><div class="stat-value">{{ board.unmatched }}</div></div>
       <div class="stat stat--neutral"><div class="stat-label" title="Scores of 4-5 are not assessed">Excluded (4-5)</div><div class="stat-value">{{ board.excluded ?? 0 }}</div></div>
       <div class="stat" :class="board.errors > 0 ? 'stat--risk' : 'stat--neutral'"><div class="stat-label">Errors</div><div class="stat-value">{{ board.errors }}</div></div>
+    </div>
+
+    <!-- Decision outcomes with monthly trend -->
+    <div v-if="board" class="stats" style="margin-bottom: 14px; padding-right: 8px">
+      <div class="stat stat--success">
+        <div class="stat-label">Contest</div>
+        <div class="stat-value">{{ contestCount }}</div>
+        <div v-if="contestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="contestPoints" color="#059669" :width="150" :height="30" /></div>
+        <div v-if="contestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      </div>
+      <div class="stat stat--risk">
+        <div class="stat-label">Do Not Contest</div>
+        <div class="stat-value">{{ doNotContestCount }}</div>
+        <div v-if="doNotContestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="doNotContestPoints" color="#dc2626" :width="150" :height="30" /></div>
+        <div v-if="doNotContestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      </div>
     </div>
 
     <!-- Controls -->
@@ -311,6 +332,7 @@ onMounted(loadAll);
     <!-- List -->
     <div class="tile">
       <div class="tile-title">CSAT Records <span class="chip chip--secondary" style="font-size: 10px">{{ rows.length }}</span></div>
+      <div class="tbl-scroll">
       <table class="tbl">
         <thead>
           <tr>
@@ -396,6 +418,7 @@ onMounted(loadAll);
           <tr v-if="!rows.length"><td colspan="10" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <InteractionDetailDrawer v-if="drawerRecordingId" :recording-id="drawerRecordingId" @close="drawerRecordingId = null" />
@@ -403,7 +426,7 @@ onMounted(loadAll);
 </template>
 
 <style scoped>
-.page { padding: 16px 20px; }
+.page { box-sizing: border-box; padding: 16px 20px; }
 .hero { margin-bottom: 16px; }
 .hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .hero-title { font-size: 22px; font-weight: 800; margin: 0; color: var(--ink); }
@@ -418,7 +441,7 @@ onMounted(loadAll);
 .metric--bad .metric-value { color: #dc2626; }
 .metric--warn .metric-value { color: #d97706; }
 
-.controls { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
 .control-group { display: flex; flex-direction: column; gap: 4px; }
 .control-group label { font-size: 11px; color: var(--muted); font-weight: 600; }
 .control-group > div, .control-group.row { display: flex; align-items: center; gap: 8px; }
@@ -430,6 +453,7 @@ onMounted(loadAll);
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; }
 .tile-title { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 10px; }
 
+.tbl-scroll { overflow-x: auto; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tbl th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--ink); }

@@ -154,6 +154,17 @@ export class CsatService {
       .orderBy('total', 'DESC')
       .getRawMany<{ campaign: string; total: string; contest: string; do_not_contest: string; assessed: string }>();
 
+    // Monthly contest / do-not-contest counts for the headline sparklines.
+    const decisionTrend = await this.csatRepo
+      .createQueryBuilder('c')
+      .select("FORMAT(COALESCE(c.respondedAt, c.createdAt), 'yyyy-MM')", 'ym')
+      .addSelect("SUM(CASE WHEN c.decision = 'contest' THEN 1 ELSE 0 END)", 'contest')
+      .addSelect("SUM(CASE WHEN c.decision = 'do_not_contest' THEN 1 ELSE 0 END)", 'do_not_contest')
+      .where("c.status = 'assessed'")
+      .groupBy("FORMAT(COALESCE(c.respondedAt, c.createdAt), 'yyyy-MM')")
+      .orderBy('ym', 'ASC')
+      .getRawMany<{ ym: string; contest: string; do_not_contest: string }>();
+
     const num = (v: string | number | null | undefined) => Number(v) || 0;
     const statusCounts: Record<string, number> = {};
     for (const r of byStatus) statusCounts[r.status] = num(r.count);
@@ -171,6 +182,7 @@ export class CsatService {
       unmatched: num(statusCounts['unmatched']),
       excluded: num(statusCounts['excluded']),
       decisions: byDecision.map((r) => ({ decision: r.decision, count: num(r.count) })),
+      decisionTrend: decisionTrend.map((r) => ({ ym: r.ym, contest: num(r.contest), do_not_contest: num(r.do_not_contest) })),
       byCampaign: byCampaign.map((r) => ({
         campaign: r.campaign,
         total: num(r.total),

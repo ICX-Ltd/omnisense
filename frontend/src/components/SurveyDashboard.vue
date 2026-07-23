@@ -712,7 +712,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
     <template v-if="overview">
       <!-- Overview strip (each tile drills to its records) -->
-      <div class="stats-strip">
+      <div class="stats" style="margin-top: 14px; padding-right: 8px">
         <div class="stat stat--click stat--analytics" @click="openDrill('ov:total', 'All survey records', {})">
           <div class="stat-label">Total Records</div><div class="stat-value">{{ overview.total }}</div>
         </div>
@@ -734,21 +734,17 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       </div>
 
       <!-- Headline-rate trends (monthly sparklines) -->
-      <div v-if="defectionTrend || chineseTrend" class="spark-strip">
-        <div v-if="defectionTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Defection rate trend</span>
-            <span class="spark-latest">{{ defectionTrend.latest }}% <span :class="defectionTrend.latest > defectionTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(defectionTrend) }}</span></span>
-          </div>
-          <Sparkline :points="defectionTrend.points" color="#dc2626" :width="150" :height="30" />
+      <div v-if="defectionTrend || chineseTrend" class="stats" style="margin-top: 12px; padding-right: 8px">
+        <div v-if="defectionTrend" class="stat stat--risk">
+          <div class="stat-label">Defection rate trend</div>
+          <div class="stat-value">{{ defectionTrend.latest }}% <span :class="defectionTrend.latest > defectionTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(defectionTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="defectionTrend.points" color="#dc2626" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ defectionTrend.first }}% → {{ defectionTrend.latest }}% over {{ defectionTrend.months }} months</div>
         </div>
-        <div v-if="chineseTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Chinese-OEM defection rate</span>
-            <span class="spark-latest">{{ chineseTrend.latest }}% <span :class="chineseTrend.latest > chineseTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(chineseTrend) }}</span></span>
-          </div>
-          <Sparkline :points="chineseTrend.points" color="#ea580c" :width="150" :height="30" />
+        <div v-if="chineseTrend" class="stat stat--warning">
+          <div class="stat-label">Chinese-OEM defection rate</div>
+          <div class="stat-value">{{ chineseTrend.latest }}% <span :class="chineseTrend.latest > chineseTrend.first ? 'spark-up' : 'spark-down'">{{ trendArrow(chineseTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="chineseTrend.points" color="#ea580c" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ chineseTrend.first }}% → {{ chineseTrend.latest }}% over {{ chineseTrend.months }} months</div>
         </div>
       </div>
@@ -2008,7 +2004,6 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 .stat--click, .rating-block--click, .visit-chip--click,
 .chinese-headline--click, .model-row--click, .trend-row--click,
 .risk-row--click, .ti-sample--click { cursor: pointer; transition: background 0.15s, box-shadow 0.15s, transform 0.1s; }
-.stat--click { border-radius: var(--radius-md, 6px); padding: 4px 8px; margin: -4px -8px; }
 .stat--click:hover, .rating-block--click:hover, .visit-chip--click:hover,
 .model-row--click:hover, .trend-row--click:hover, .ti-sample--click:hover { background: var(--surface-soft, rgba(0, 0, 0, 0.04)); }
 .rating-block--click:hover, .visit-chip--click:hover { box-shadow: 0 2px 8px -3px rgba(0, 0, 0, 0.25); transform: translateY(-1px); }

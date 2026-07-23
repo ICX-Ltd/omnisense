@@ -137,7 +137,6 @@
             <div class="row-top chip-row" style="margin-top: 6px; justify-content: flex-start">
               <span :class="transcriptChip(r.provider)">transcript: {{ r.provider || "unknown" }}</span>
               <span :class="insightChip(r.insightProviderUsed)" v-if="r.insightProviderUsed">insights: {{ r.insightProviderUsed }}</span>
-              <span class="chip chip--secondary" v-else>insights: none</span>
               <span class="mono" style="opacity: 0.5; font-size: 11px; margin-left: auto">{{ fmtDate(r.createdAt) }}</span>
             </div>
 

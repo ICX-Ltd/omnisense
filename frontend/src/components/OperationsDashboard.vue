@@ -12,6 +12,7 @@ const campaignOptions = ref<string[]>([]);
 const agentOptions = ref<string[]>([]);
 const outcomeOptions = ref<string[]>([]);
 const excludeOutcomes = ref<string[]>([]);
+const advOpen = ref(false);
 
 const COMMON_EXCLUSIONS = [
   "npcb", "noanswer", "agam", "test chat", "test chat - client",
@@ -826,17 +827,19 @@ onMounted(async () => {
               <option v-for="a in agentOptions" :key="a" :value="a">{{ a }}</option>
             </select>
           </div>
-          <div v-if="outcomeOptions.length" class="filter-group">
+          <button class="btn btn--primary" style="margin-top: 18px" :disabled="loading" @click="loadAll">
+            {{ loading ? "Loading..." : "Load" }}
+          </button>
+          <button v-if="outcomeOptions.length" class="btn btn--ghost btn--sm filters-adv-toggle" style="margin-left: auto; margin-top: 18px" @click="advOpen = !advOpen">
+            Advanced filters
+            <svg class="chev" :class="{ 'chev--open': advOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <div v-show="advOpen && outcomeOptions.length" class="filters-row filters-adv" style="align-items: flex-start">
+          <div class="filter-group">
             <label class="label">Exclude Outcomes</label>
             <div class="exclude-outcomes-wrap">
-              <button
-                v-if="commonExclusionsAvailable.length"
-                class="btn-quick-exclude"
-                :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
-                @click="toggleCommonExclusions"
-              >
-                {{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}
-              </button>
               <select v-model="excludeOutcomes" multiple class="select select--sm select--multi">
                 <optgroup v-if="commonExclusionsAvailable.length" label="Commonly excluded">
                   <option v-for="o in commonExclusionsAvailable" :key="'c-' + o" :value="o">{{ o }}</option>
@@ -845,11 +848,16 @@ onMounted(async () => {
                   <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
                 </optgroup>
               </select>
+              <button
+                v-if="commonExclusionsAvailable.length"
+                class="btn-quick-exclude"
+                :class="{ 'btn-quick-exclude--active': allCommonExcluded }"
+                @click="toggleCommonExclusions"
+              >
+                {{ allCommonExcluded ? "&#10003; Common excluded" : "Exclude test/abandoned" }}
+              </button>
             </div>
           </div>
-          <button class="btn btn--primary" style="margin-top: 18px" :disabled="loading" @click="loadAll">
-            {{ loading ? "Loading..." : "Load" }}
-          </button>
         </div>
       </div>
     </div>
@@ -860,38 +868,63 @@ onMounted(async () => {
     </div>
 
     <template v-if="opsData && dimData">
-      <!-- Rolling 12-month headline trends (sparklines) -->
-      <div v-if="hasOpsTrends" class="spark-strip">
-        <div v-if="avgScoreTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Avg QC score</span>
-            <span class="spark-latest">{{ avgScoreTrend.latest }} <span :class="avgScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgScoreTrend) }}</span></span>
+      <!-- Agent selection / comparison — above the KPIs so you pick an agent first -->
+      <div v-if="agentsInData.length && !agent" class="tile" style="margin-bottom: 14px">
+        <div class="tile-head">
+          <IconChip name="agents" />
+          <div class="tile-text">
+            <div class="tile-title">Agents in Dataset</div>
+            <div class="tile-desc">Click an agent to compare their scores against the overall average</div>
           </div>
-          <Sparkline :points="avgScoreTrend.points" :color="avgScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+        </div>
+        <div class="tile-body">
+          <div class="agents-grid">
+            <div
+              v-for="(a, idx) in agentsInData"
+              :key="a.agent"
+              class="agent-card"
+              @click="selectAgent(a.agent)"
+            >
+              <div class="agent-card-name"><span class="agent-rank">#{{ idx + 1 }}</span> {{ a.agent }}</div>
+              <div class="agent-card-stats">
+                <span :class="scoreChip(a.avg_score)" style="font-size: 11px">{{ fmtScore(a.avg_score) }}</span>
+                <span class="agent-card-count">{{ a.count }} interactions</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-if="agent" class="agent-banner" style="margin-bottom: 14px">
+        <div class="agent-banner-text">
+          Comparing <strong>{{ agent }}</strong> ({{ agentCount }} interactions) against overall average ({{ overallCount }} interactions)
+        </div>
+        <button class="btn btn--sm" @click="clearAgent">Clear agent filter</button>
+      </div>
+
+      <!-- Rolling 12-month headline trends (sparklines) -->
+      <div v-if="hasOpsTrends" class="stats" style="margin-bottom: 16px">
+        <div v-if="avgScoreTrend" class="stat stat--analytics">
+          <div class="stat-label">Avg QC score</div>
+          <div class="stat-value">{{ avgScoreTrend.latest }} <span :class="avgScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgScoreTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="avgScoreTrend.points" :color="avgScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ avgScoreTrend.first }} → {{ avgScoreTrend.latest }} over {{ avgScoreTrend.months }} months</div>
         </div>
-        <div v-if="avgQaScoreTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Avg QA score</span>
-            <span class="spark-latest">{{ avgQaScoreTrend.latest }} <span :class="avgQaScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgQaScoreTrend) }}</span></span>
-          </div>
-          <Sparkline :points="avgQaScoreTrend.points" :color="avgQaScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+        <div v-if="avgQaScoreTrend" class="stat stat--insights">
+          <div class="stat-label">Avg QA score</div>
+          <div class="stat-value">{{ avgQaScoreTrend.latest }} <span :class="avgQaScoreTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(avgQaScoreTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="avgQaScoreTrend.points" :color="avgQaScoreTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ avgQaScoreTrend.first }} → {{ avgQaScoreTrend.latest }} over {{ avgQaScoreTrend.months }} months</div>
         </div>
-        <div v-if="lowScoreAlertTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Low-score alert rate</span>
-            <span class="spark-latest">{{ lowScoreAlertTrend.latest }}% <span :class="lowScoreAlertTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(lowScoreAlertTrend) }}</span></span>
-          </div>
-          <Sparkline :points="lowScoreAlertTrend.points" :color="lowScoreAlertTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" />
+        <div v-if="lowScoreAlertTrend" class="stat stat--warning">
+          <div class="stat-label">Low-score alert rate</div>
+          <div class="stat-value">{{ lowScoreAlertTrend.latest }}% <span :class="lowScoreAlertTrend.improving ? 'spark-good' : 'spark-bad'">{{ trendArrow(lowScoreAlertTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="lowScoreAlertTrend.points" :color="lowScoreAlertTrend.improving ? '#059669' : '#dc2626'" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ lowScoreAlertTrend.first }}% → {{ lowScoreAlertTrend.latest }}% over {{ lowScoreAlertTrend.months }} months</div>
         </div>
-        <div v-if="volumeTrend" class="spark-card">
-          <div class="spark-head">
-            <span class="spark-title">Volume</span>
-            <span class="spark-latest">{{ volumeTrend.latest }} <span class="spark-neutral">{{ trendArrow(volumeTrend) }}</span></span>
-          </div>
-          <Sparkline :points="volumeTrend.points" color="#6366f1" :width="150" :height="30" />
+        <div v-if="volumeTrend" class="stat stat--neutral">
+          <div class="stat-label">Volume</div>
+          <div class="stat-value">{{ volumeTrend.latest }} <span class="spark-neutral">{{ trendArrow(volumeTrend) }}</span></div>
+          <div style="margin: 10px 0 4px"><Sparkline :points="volumeTrend.points" color="#6366f1" :width="150" :height="30" /></div>
           <div class="spark-sub">{{ volumeTrend.first }} → {{ volumeTrend.latest }} interactions/month</div>
         </div>
       </div>
@@ -1006,34 +1039,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Agents in dataset (positioned before Chat Response Time so users
-           can pick an agent first, then see their comparison numbers below) -->
-      <div v-if="agentsInData.length && !agent" class="tile" style="margin-top: 14px">
-        <div class="tile-head">
-          <IconChip name="agents" />
-          <div class="tile-text">
-            <div class="tile-title">Agents in Dataset</div>
-            <div class="tile-desc">Click an agent to compare their scores against the overall average</div>
-          </div>
-        </div>
-        <div class="tile-body">
-          <div class="agents-grid">
-            <div
-              v-for="(a, idx) in agentsInData"
-              :key="a.agent"
-              class="agent-card"
-              @click="selectAgent(a.agent)"
-            >
-              <div class="agent-card-name"><span class="agent-rank">#{{ idx + 1 }}</span> {{ a.agent }}</div>
-              <div class="agent-card-stats">
-                <span :class="scoreChip(a.avg_score)" style="font-size: 11px">{{ fmtScore(a.avg_score) }}</span>
-                <span class="agent-card-count">{{ a.count }} interactions</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Agent Trajectory — per-agent QC score trend over a rolling 12 months -->
       <div class="tile" style="margin-top: 14px">
         <div class="tile-head">
@@ -1089,14 +1094,6 @@ onMounted(async () => {
             <code>/uiapi/insights/summary/agent-trajectory</code> endpoint is available.
           </p>
         </div>
-      </div>
-
-      <!-- Agent comparison banner — sits above the chat response section -->
-      <div v-if="agent" class="agent-banner" style="margin-top: 14px">
-        <div class="agent-banner-text">
-          Comparing <strong>{{ agent }}</strong> ({{ agentCount }} interactions) against overall average ({{ overallCount }} interactions)
-        </div>
-        <button class="btn btn--sm" @click="clearAgent">Clear agent filter</button>
       </div>
 
       <!-- Chat response time (chats / all filters only). Shown whenever chat data
@@ -1741,26 +1738,34 @@ onMounted(async () => {
           </div>
         </div>
         <div class="tile-body">
-          <div style="display: flex; gap: 24px; flex-wrap: wrap; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg)">
-            <div><div class="opp-stat-label">Identified vulnerable</div><div class="opp-stat-value">{{ vulnData.identified }}</div></div>
-            <div><div class="opp-stat-label">Handled &#10003;</div><div class="opp-stat-value" style="color: #059669">{{ vulnData.handled }}</div></div>
-            <div><div class="opp-stat-label">NOT handled &#10007;</div><div class="opp-stat-value" style="color: #dc2626">{{ vulnData.not_handled }}</div></div>
+          <div class="stats" style="margin-bottom: 4px; padding-right: 8px">
+            <div class="stat stat--warning">
+              <div class="stat-label">Identified vulnerable</div>
+              <div class="stat-value">{{ vulnData.identified }}</div>
+            </div>
+            <div
+              class="stat stat--success"
+              style="cursor: pointer"
+              :style="{ outline: vulnAnswer === 'yes' ? '2px solid #059669' : '' }"
+              title="View handled interactions"
+              @click="loadVulnList('yes')"
+            >
+              <div class="stat-label">Handled &#10003;</div>
+              <div class="stat-value">{{ vulnData.handled }}</div>
+            </div>
+            <div
+              class="stat stat--risk"
+              style="cursor: pointer"
+              :style="{ outline: vulnAnswer === 'no' ? '2px solid #dc2626' : '' }"
+              title="Review not-handled interactions"
+              @click="loadVulnList('no')"
+            >
+              <div class="stat-label">NOT handled &#10007;</div>
+              <div class="stat-value">{{ vulnData.not_handled }}</div>
+            </div>
           </div>
 
           <div v-if="!vulnData.identified" class="hint" style="margin-top: 10px">No vulnerable customers identified in the QA-scored interactions for this range / filter.</div>
-
-          <div v-if="vulnData.identified" style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap">
-            <button
-              class="btn btn--secondary btn--sm"
-              :style="vulnAnswer === 'no' ? 'outline: 2px solid #dc2626' : ''"
-              @click="loadVulnList('no')"
-            >Review not-handled ({{ vulnData.not_handled }})</button>
-            <button
-              class="btn btn--ghost btn--sm"
-              :style="vulnAnswer === 'yes' ? 'outline: 2px solid #059669' : ''"
-              @click="loadVulnList('yes')"
-            >View handled ({{ vulnData.handled }})</button>
-          </div>
 
           <div v-if="vulnAnswer" class="drill-panel" style="margin-top: 10px">
             <div v-if="loadingVuln" class="hint">Loading…</div>
