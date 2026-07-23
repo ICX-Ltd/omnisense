@@ -266,7 +266,10 @@ function handleLogout() {
 }
 
 .app-header {
-  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
+  background:
+    radial-gradient(90% 120% at 92% -25%, rgba(6, 182, 212, 0.34), transparent 55%),
+    radial-gradient(90% 120% at -10% 120%, rgba(139, 92, 246, 0.30), transparent 55%),
+    linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
   border-radius: 18px 18px 0 0;
   padding: 14px 20px 0;
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
@@ -297,11 +300,23 @@ function handleLogout() {
 }
 
 .app-title {
+  display: inline-block;
   margin: 0;
   font-size: 1.35rem;
   font-weight: 800;
   color: #fff;
   letter-spacing: 0.02em;
+}
+
+/* Brand accent bar spanning the width of the title. */
+.app-title::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #38bdf8, #2b6cb0);
 }
 
 .app-topbar-right {
