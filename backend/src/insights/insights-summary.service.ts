@@ -157,6 +157,33 @@ function mergeCoachingNeeds(
     .slice(0, 10);
 }
 
+export interface DataOverviewResult {
+  generatedAt: string;
+  totals: {
+    interactions: number;
+    transcripts: number;
+    embeddings: number;
+    insights: number;
+    errors: number;
+  };
+  byStatus: Array<{ status: string; count: number }>;
+  byCampaignType: Array<{ campaign: string; type: string; count: number }>;
+  campaignTimeline: Array<{
+    campaign: string;
+    count: number;
+    firstLoaded: string | null;
+    lastLoaded: string | null;
+    firstInteraction: string | null;
+    lastInteraction: string | null;
+  }>;
+  loadedByDate: Array<{ date: string; count: number }>;
+  errorSources: {
+    pipeline: number;
+    transcription: number | null;
+    llm: number | null;
+  };
+}
+
 @Injectable()
 export class InsightsSummaryService {
   constructor(
@@ -254,6 +281,120 @@ export class InsightsSummaryService {
       outcomes: outcomes.map((r) => r.outcome),
       vehicleMakes: vehicleMakes.map((r) => r.vehicleMake),
       vehicleModels,
+    };
+  }
+
+  /** DB/data overview for the Summary page — counts across the pipeline tables,
+   *  interactions by campaign & type, per-campaign load window, and daily load
+   *  volume. No filters: this is a whole-database snapshot. */
+  async getDataOverview(): Promise<DataOverviewResult> {
+    const q = <T = any>(sql: string): Promise<T[]> =>
+      this.recordingsRepo.manager.query(sql);
+
+    // Usage-log tables may be absent on a deployment that hasn't run the
+    // migration; treat a failed count as "unknown" rather than 500.
+    const safeCount = async (sql: string): Promise<number | null> => {
+      try {
+        const rows = await q<{ n: number }>(sql);
+        return Number(rows[0]?.n ?? 0);
+      } catch {
+        return null;
+      }
+    };
+
+    const [totalsRow] = await q<{
+      interactions: number;
+      transcripts: number;
+      embeddings: number;
+      insights: number;
+      errors: number;
+    }>(`
+      SELECT
+        (SELECT COUNT(*) FROM app.interactions) AS interactions,
+        (SELECT COUNT(*) FROM app.interaction_transcripts) AS transcripts,
+        (SELECT COUNT(*) FROM app.interaction_transcripts WHERE embedding IS NOT NULL) AS embeddings,
+        (SELECT COUNT(*) FROM app.interaction_insights) AS insights,
+        (SELECT COUNT(*) FROM app.interactions WHERE status = 'error') AS errors
+    `);
+
+    const byStatus = await q<{ status: string; count: number }>(`
+      SELECT COALESCE(NULLIF(status, ''), '(none)') AS status, COUNT(*) AS count
+      FROM app.interactions
+      GROUP BY COALESCE(NULLIF(status, ''), '(none)')
+      ORDER BY COUNT(*) DESC
+    `);
+
+    const byCampaignType = await q<{ campaign: string; type: string; count: number }>(`
+      SELECT
+        COALESCE(NULLIF(ia.campaign, ''), '(unlabelled)') AS campaign,
+        COALESCE(NULLIF(ia.interactionType, ''), 'call') AS type,
+        COUNT(*) AS count
+      FROM app.interactions ia
+      GROUP BY COALESCE(NULLIF(ia.campaign, ''), '(unlabelled)'),
+               COALESCE(NULLIF(ia.interactionType, ''), 'call')
+      ORDER BY campaign ASC, count DESC
+    `);
+
+    const campaignTimeline = await q<{
+      campaign: string;
+      count: number;
+      firstLoaded: string;
+      lastLoaded: string;
+      firstInteraction: string;
+      lastInteraction: string;
+    }>(`
+      SELECT
+        COALESCE(NULLIF(ia.campaign, ''), '(unlabelled)') AS campaign,
+        COUNT(*) AS count,
+        MIN(ia.createdAt) AS firstLoaded,
+        MAX(ia.createdAt) AS lastLoaded,
+        MIN(COALESCE(ia.interactionDateTime, ia.createdAt)) AS firstInteraction,
+        MAX(COALESCE(ia.interactionDateTime, ia.createdAt)) AS lastInteraction
+      FROM app.interactions ia
+      GROUP BY COALESCE(NULLIF(ia.campaign, ''), '(unlabelled)')
+      ORDER BY count DESC
+    `);
+
+    const loadedByDate = await q<{ date: string; count: number }>(`
+      SELECT CONVERT(varchar(10), ia.createdAt, 23) AS date, COUNT(*) AS count
+      FROM app.interactions ia
+      GROUP BY CONVERT(varchar(10), ia.createdAt, 23)
+      ORDER BY date ASC
+    `);
+
+    return {
+      generatedAt: new Date().toISOString(),
+      totals: {
+        interactions: Number(totalsRow?.interactions ?? 0),
+        transcripts: Number(totalsRow?.transcripts ?? 0),
+        embeddings: Number(totalsRow?.embeddings ?? 0),
+        insights: Number(totalsRow?.insights ?? 0),
+        errors: Number(totalsRow?.errors ?? 0),
+      },
+      byStatus: byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
+      byCampaignType: byCampaignType.map((r) => ({
+        campaign: r.campaign,
+        type: r.type,
+        count: Number(r.count),
+      })),
+      campaignTimeline: campaignTimeline.map((r) => ({
+        campaign: r.campaign,
+        count: Number(r.count),
+        firstLoaded: r.firstLoaded ?? null,
+        lastLoaded: r.lastLoaded ?? null,
+        firstInteraction: r.firstInteraction ?? null,
+        lastInteraction: r.lastInteraction ?? null,
+      })),
+      loadedByDate: loadedByDate.map((r) => ({ date: r.date, count: Number(r.count) })),
+      errorSources: {
+        pipeline: Number(totalsRow?.errors ?? 0),
+        transcription: await safeCount(
+          `SELECT COUNT(*) AS n FROM app.transcription_usage_log WHERE outcome = 'error'`,
+        ),
+        llm: await safeCount(
+          `SELECT COUNT(*) AS n FROM app.llm_usage_log WHERE outcome <> 'success'`,
+        ),
+      },
     };
   }
 

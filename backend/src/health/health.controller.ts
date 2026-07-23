@@ -22,4 +22,13 @@ export class HealthController {
     this.health.requireRole(auth, READ_ROLES);
     return this.health.getConnectivity();
   }
+
+  // Live LLM provider probes — a minimal real call to each provider to verify the
+  // API key is valid and the account still has tokens/credit. On demand (spends
+  // a trivial number of tokens), not on every page load.
+  @Get('providers')
+  async providers(@Headers('authorization') auth: string) {
+    this.health.requireRole(auth, READ_ROLES);
+    return this.health.getProviderConnectivity();
+  }
 }

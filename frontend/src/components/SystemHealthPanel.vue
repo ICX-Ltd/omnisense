@@ -56,6 +56,29 @@
       </div>
     </div>
     <div v-if="conn" class="sh-ts">Tested {{ fmtTime(conn.generatedAt) }}</div>
+
+    <!-- LLM provider probes (on demand) -->
+    <div class="sh-conn-head">
+      <div>
+        <h3 class="sh-subtitle">LLM provider connections</h3>
+        <p class="sh-sub">Sends a tiny 1-token call to each configured provider to confirm the API key is valid and the account still has tokens/credit. Runs on demand — it makes real (but negligible-cost) provider calls.</p>
+      </div>
+      <button class="sh-btn sh-btn--ghost" :disabled="provLoading" @click="runProviders">
+        {{ provLoading ? "Testing…" : "Test LLM providers" }}
+      </button>
+    </div>
+    <div v-if="provError" class="sh-error">{{ provError }}</div>
+    <div v-if="prov" class="sh-grid">
+      <div v-for="c in prov.checks" :key="c.key" class="sh-card" :class="'sh-card--' + c.status">
+        <div class="sh-card-head">
+          <span class="sh-dot" :class="'sh-dot--' + c.status" />
+          <span class="sh-card-label">{{ c.label }}</span>
+          <span class="sh-card-status" :class="'sh-pill--' + c.status">{{ statusLabel(c.status) }}</span>
+        </div>
+        <div class="sh-card-detail">{{ c.detail }}</div>
+      </div>
+    </div>
+    <div v-if="prov" class="sh-ts">Tested {{ fmtTime(prov.generatedAt) }}</div>
   </div>
 </template>
 
@@ -84,6 +107,10 @@ const error = ref("");
 const conn = ref<HealthReport | null>(null);
 const connLoading = ref(false);
 const connError = ref("");
+
+const prov = ref<HealthReport | null>(null);
+const provLoading = ref(false);
+const provError = ref("");
 
 function statusLabel(s: CheckStatus) {
   return s === "ok" ? "OK" : s === "warn" ? "Attention" : "Error";
@@ -114,6 +141,18 @@ async function runConnectivity() {
     connError.value = e?.response?.data?.message || e?.message || "Failed to run connectivity tests";
   } finally {
     connLoading.value = false;
+  }
+}
+
+async function runProviders() {
+  provLoading.value = true;
+  provError.value = "";
+  try {
+    prov.value = (await api.get<HealthReport>("/uiapi/health/providers")).data;
+  } catch (e: any) {
+    provError.value = e?.response?.data?.message || e?.message || "Failed to test LLM providers";
+  } finally {
+    provLoading.value = false;
   }
 }
 

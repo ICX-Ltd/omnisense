@@ -552,6 +552,12 @@ export class InsightsController {
     return this.svcSummary.getMetricsSummary(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw));
   }
 
+  // Whole-database snapshot for the Data Overview page — no filters.
+  @Get('summary/overview')
+  async summaryOverview() {
+    return this.svcSummary.getDataOverview();
+  }
+
   @Get('summary/operations')
   async summaryOperations(
     @Query('from') from?: string,

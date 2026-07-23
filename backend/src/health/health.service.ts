@@ -185,6 +185,97 @@ const PROVIDER_KEYS: Array<[name: string, env: string]> = [
   ['Gemini', 'GEMINI_API_KEY'],
 ];
 
+// Live provider probes — a real, minimal (max 1-token) generation call per
+// provider so the on-demand check can tell apart: valid key / invalid-or-expired
+// key / out-of-tokens (quota) / unreachable. `build` is a function because the
+// key is only read at probe time, and the model mirrors the same env override →
+// fast default that each insights provider uses. Costs a trivial number of
+// tokens, which is why it runs on demand rather than on every page load.
+interface ProviderProbe {
+  key: string;
+  label: string;
+  keyEnv: string;
+  build: (apiKey: string) => { url: string; init: RequestInit; model: string };
+}
+
+const PROVIDER_PROBES: ProviderProbe[] = [
+  {
+    key: 'openai',
+    label: 'OpenAI',
+    keyEnv: 'OPENAI_API_KEY',
+    build: (apiKey) => {
+      const model = process.env.OPENAI_INSIGHTS_MODEL || 'gpt-4o-mini';
+      return {
+        url: 'https://api.openai.com/v1/chat/completions',
+        model,
+        init: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+        },
+      };
+    },
+  },
+  {
+    key: 'anthropic',
+    label: 'Anthropic',
+    keyEnv: 'ANTHROPIC_API_KEY',
+    build: (apiKey) => {
+      const model = process.env.ANTHROPIC_INSIGHTS_MODEL || 'claude-haiku-4-5';
+      return {
+        url: 'https://api.anthropic.com/v1/messages',
+        model,
+        init: {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+        },
+      };
+    },
+  },
+  {
+    key: 'grok',
+    label: 'Grok (x.ai)',
+    keyEnv: 'XAI_API_KEY',
+    build: (apiKey) => {
+      const model = process.env.GROK_INSIGHTS_MODEL || 'grok-4-1-fast-non-reasoning';
+      return {
+        url: 'https://api.x.ai/v1/chat/completions',
+        model,
+        init: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+        },
+      };
+    },
+  },
+  {
+    key: 'gemini',
+    label: 'Gemini',
+    keyEnv: 'GEMINI_API_KEY',
+    build: (apiKey) => {
+      const model = process.env.GEMINI_INSIGHTS_MODEL || 'gemini-1.5-flash';
+      return {
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        model,
+        init: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'ping' }] }],
+            generationConfig: { maxOutputTokens: 1 },
+          }),
+        },
+      };
+    },
+  },
+];
+
 function worst(statuses: CheckStatus[]): CheckStatus {
   if (statuses.includes('error')) return 'error';
   if (statuses.includes('warn')) return 'warn';
@@ -429,6 +520,102 @@ export class HealthService {
         ? `Reachable — HTTP ${r.status} in ${r.ms}ms.`
         : `Unreachable after ${r.ms}ms: ${r.error}`,
     };
+  }
+
+  // ─── on-demand LLM provider probe (real minimal call) ───────────────────────
+  // Answers the question env-key presence can't: is each key actually valid, and
+  // does the account still have tokens/credit?
+  async getProviderConnectivity(): Promise<HealthReport> {
+    const checks = await Promise.all(PROVIDER_PROBES.map((p) => this.probeProvider(p)));
+    return {
+      status: worst(checks.map((c) => c.status)),
+      generatedAt: new Date().toISOString(),
+      checks,
+    };
+  }
+
+  private async probeProvider(p: ProviderProbe): Promise<HealthCheck> {
+    const apiKey = process.env[p.keyEnv]?.trim();
+    if (!apiKey) {
+      return {
+        key: `provider_${p.key}`,
+        label: p.label,
+        status: 'warn',
+        detail: `${p.keyEnv} not set — provider not configured, skipped.`,
+      };
+    }
+    const { url, init, model } = p.build(apiKey);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const start = Date.now();
+    try {
+      const res = await fetch(url, { ...init, signal: ctrl.signal });
+      const body = await res.text().catch(() => '');
+      const ms = Date.now() - start;
+      const cls = this.classifyLlmResponse(res.status, body);
+      return {
+        key: `provider_${p.key}`,
+        label: p.label,
+        status: cls.status,
+        detail:
+          cls.status === 'ok'
+            ? `Key valid — reachable (HTTP ${res.status}, ${ms}ms, model ${model}).`
+            : `${cls.summary} (HTTP ${res.status}, ${ms}ms, model ${model}). ${this.shortBody(body)}`.trim(),
+      };
+    } catch (e) {
+      const ms = Date.now() - start;
+      return {
+        key: `provider_${p.key}`,
+        label: p.label,
+        status: 'error',
+        detail: `Unreachable after ${ms}ms: ${describeError(e)}`,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Map an HTTP status + error body to a health verdict. Detection is
+  // best-effort string matching across the four providers' error shapes; quota
+  // is checked before invalid-key because an exhausted account can 403.
+  private classifyLlmResponse(
+    httpStatus: number,
+    body: string,
+  ): { status: CheckStatus; summary: string } {
+    if (httpStatus >= 200 && httpStatus < 300) return { status: 'ok', summary: 'key valid' };
+
+    const outOfQuota =
+      /insufficient_quota|insufficient quota|exceeded your current quota|credit balance is too low|resource_exhausted|out of credits|billing_hard_limit|quota exceeded/i.test(
+        body,
+      );
+    if (outOfQuota) return { status: 'error', summary: 'OUT OF TOKENS / quota or credit exhausted' };
+
+    const invalidKey =
+      httpStatus === 401 ||
+      httpStatus === 403 ||
+      /invalid api key|incorrect api key|api key not valid|api_key_invalid|invalid_api_key|authentication_error|permission_denied|unauthorized/i.test(
+        body,
+      );
+    if (invalidKey) return { status: 'error', summary: 'INVALID or expired API key' };
+
+    if (httpStatus === 429) return { status: 'warn', summary: 'rate limited (transient — key looks OK)' };
+
+    return { status: 'warn', summary: `unexpected response HTTP ${httpStatus}` };
+  }
+
+  // Compact a provider error body to one short line for the UI detail.
+  private shortBody(body: string): string {
+    if (!body) return '';
+    let msg = body;
+    try {
+      const j = JSON.parse(body);
+      msg = j?.error?.message ?? j?.error?.[0]?.message ?? j?.message ?? j?.error ?? body;
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+    } catch {
+      /* not JSON — use raw */
+    }
+    msg = msg.replace(/\s+/g, ' ').trim();
+    return msg.length > 200 ? `${msg.slice(0, 200)}…` : msg;
   }
 
   private async pingRecordingHost(): Promise<HealthCheck> {

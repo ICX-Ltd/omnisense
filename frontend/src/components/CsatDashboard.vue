@@ -218,7 +218,7 @@ onMounted(loadAll);
     <div class="hero">
       <div class="hero-row">
         <div class="hero-left">
-          <h1 class="hero-title">CSAT Contest Assessment</h1>
+          <h1 class="hero-title">CSAT Assessment</h1>
           <div class="hero-subtitle">
             Reviews CSAT survey scores against the campaign contest framework — separate from the
             standard transcribe/insights pipeline. Only scores of 3 or less (out of 5) are assessed;

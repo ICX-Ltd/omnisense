@@ -7,6 +7,40 @@
 
     <div v-if="msg" class="chip chip--primary" style="margin-bottom: 12px">{{ msg }}</div>
 
+    <!-- Discover new / updated models -->
+    <div class="tile">
+      <div class="tile-head tile-head--toggle" @click="discOpen = !discOpen">
+        <div class="tile-icon">&#128225;</div>
+        <div class="tile-text">
+          <div class="tile-title">
+            Check for new models
+            <span v-if="discovery" class="mr-disc-badge">{{ discNewTotal ? `${discNewTotal} new` : "up to date" }}</span>
+          </div>
+          <div class="tile-desc">Asks each configured provider what models it currently offers and flags any that aren't in the registry yet — so new releases and upgrades don't get missed.</div>
+        </div>
+        <div class="spacer" />
+        <button class="btn btn--primary btn--sm" :disabled="discovering" @click.stop="discover">{{ discovering ? "Checking…" : "Check now" }}</button>
+        <svg class="mr-chev" :class="{ 'mr-chev--open': discOpen }" width="12" height="12" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div v-if="discOpen && discovery" class="tile-body">
+        <div class="mr-ts">Checked {{ fmtTime(discovery.generatedAt) }}</div>
+        <div v-for="p in discovery.providers" :key="p.provider" class="mr-disc">
+          <div class="mr-disc-head">
+            <span class="mr-prov-head" style="margin: 0">{{ p.provider }}</span>
+            <span v-if="!p.ok" class="mr-disc-note mr-disc-note--warn">{{ p.error || "unavailable" }}</span>
+            <span v-else-if="!p.newModels.length" class="mr-disc-note">up to date — {{ p.registeredCount }} registered, {{ p.totalOffered }} offered</span>
+            <span v-else class="mr-disc-note mr-disc-note--new">{{ p.newModels.length }} new model{{ p.newModels.length === 1 ? "" : "s" }} available</span>
+          </div>
+          <div v-if="p.ok && p.newModels.length" class="mr-disc-list">
+            <div v-for="id in p.newModels" :key="id" class="mr-disc-row">
+              <span class="mr-model mono">{{ id }}</span>
+              <button class="mr-mini" title="Add to insights registry" @click="addDiscovered(p.provider, id)">+ add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Add -->
     <div class="tile">
       <div class="tile-head">
@@ -68,9 +102,26 @@ interface ModelRow {
   modelId: string; label: string; active: boolean; isDefault: boolean; sortOrder: number;
 }
 
+interface DiscoverProvider {
+  provider: string; ok: boolean; error?: string;
+  newModels: string[]; registeredCount: number; totalOffered: number;
+}
+interface DiscoverResult { generatedAt: string; providers: DiscoverProvider[] }
+
 const rows = ref<ModelRow[]>([]);
 const loading = ref(false);
 const msg = ref("");
+const discovery = ref<DiscoverResult | null>(null);
+const discovering = ref(false);
+const discOpen = ref(true);
+const discNewTotal = computed(() =>
+  (discovery.value?.providers ?? []).reduce((n, p) => n + (p.ok ? p.newModels.length : 0), 0),
+);
+
+function fmtTime(iso: string) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleTimeString();
+}
 const add = ref<{ kind: "insights" | "transcription"; provider: string; modelId: string; label: string }>({
   kind: "insights",
   provider: "openai",
@@ -137,6 +188,28 @@ async function removeRow(r: ModelRow) {
   await load();
 }
 
+async function discover() {
+  discovering.value = true;
+  discOpen.value = true;
+  msg.value = "";
+  try {
+    discovery.value = (await axios.get(ApiPath.ModelsDiscover)).data;
+  } catch (e: any) {
+    msg.value = e?.response?.data?.message || "Discovery failed";
+  } finally {
+    discovering.value = false;
+  }
+}
+async function addDiscovered(provider: string, modelId: string) {
+  try {
+    await axios.post(ApiPath.Models, { kind: "insights", provider, modelId, label: modelId });
+    msg.value = `Added ${modelId} (${provider}).`;
+    await Promise.all([load(), discover()]);
+  } catch (e: any) {
+    msg.value = e?.response?.data?.message || "Add failed";
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -157,4 +230,22 @@ onMounted(load);
 .mr-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .mr-mini { border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; cursor: pointer; }
 .mr-mini--del { color: #dc2626; }
+
+.tile-head--toggle { cursor: pointer; }
+.mr-chev { color: var(--muted); flex-shrink: 0; transition: transform 0.15s; margin-left: 4px; }
+.mr-chev--open { transform: rotate(180deg); }
+.mr-disc-badge {
+  font-size: 11px; font-weight: 700; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--brand, #6366f1) 14%, transparent); color: var(--brand, #6366f1);
+  vertical-align: middle;
+}
+.mr-ts { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+.mr-disc { margin-bottom: 12px; }
+.mr-disc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.mr-disc-note { font-size: 12px; color: var(--muted); }
+.mr-disc-note--new { color: #059669; font-weight: 700; }
+.mr-disc-note--warn { color: #b45309; font-style: italic; }
+.mr-disc-list { display: flex; flex-direction: column; gap: 3px; padding-left: 4px; }
+.mr-disc-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.mr-disc-row .mr-model { flex: 1; }
 </style>

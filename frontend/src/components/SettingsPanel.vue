@@ -3,13 +3,13 @@
     <div class="hero">
       <div class="hero-row">
         <div class="hero-left">
-          <h1 class="hero-title">Settings</h1>
+          <h1 class="hero-title">User Set Up</h1>
           <div class="hero-subtitle">
             Manage your security settings and user administration.
           </div>
         </div>
         <div class="hero-right">
-          <span class="chip chip--primary">Settings</span>
+          <span class="chip chip--primary">User Set Up</span>
         </div>
       </div>
     </div>

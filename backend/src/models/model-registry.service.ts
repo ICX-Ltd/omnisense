@@ -3,6 +3,107 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ModelOption } from '../db/entities/model-option.entity';
+import { describeError } from '../utils/describe-error.util';
+
+// Live model-listing config per insights provider — used by discover() to spot
+// models a provider now offers that aren't in the registry yet. `keyEnv` is the
+// API key; `list` fetches and normalises the provider's models endpoint to plain
+// ids; `relevant` keeps only chat/insights-capable models (providers also return
+// embeddings, TTS, image models we don't want cluttering the list).
+interface ProviderCatalog {
+  provider: string;
+  keyEnv: string;
+  list: (apiKey: string) => Promise<string[]>;
+  relevant: (id: string) => boolean;
+}
+
+async function fetchJson(url: string, init: RequestInit, timeoutMs = 12000): Promise<any> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const body = await res.text().catch(() => '');
+    if (!res.ok) {
+      let msg = body;
+      try {
+        const j = JSON.parse(body);
+        msg = j?.error?.message ?? j?.message ?? j?.error ?? body;
+        if (typeof msg !== 'string') msg = JSON.stringify(msg);
+      } catch {
+        /* raw */
+      }
+      throw new Error(`HTTP ${res.status}: ${String(msg).replace(/\s+/g, ' ').trim().slice(0, 180)}`);
+    }
+    return body ? JSON.parse(body) : {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const PROVIDER_CATALOGS: ProviderCatalog[] = [
+  {
+    provider: 'openai',
+    keyEnv: 'OPENAI_API_KEY',
+    relevant: (id) => /^(gpt-|o[0-9]|chatgpt)/i.test(id),
+    list: async (apiKey) => {
+      const j = await fetchJson('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      return (j.data ?? []).map((m: any) => String(m.id)).filter(Boolean);
+    },
+  },
+  {
+    provider: 'anthropic',
+    keyEnv: 'ANTHROPIC_API_KEY',
+    relevant: (id) => /^claude/i.test(id),
+    list: async (apiKey) => {
+      const j = await fetchJson('https://api.anthropic.com/v1/models?limit=1000', {
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      });
+      return (j.data ?? []).map((m: any) => String(m.id)).filter(Boolean);
+    },
+  },
+  {
+    provider: 'grok',
+    keyEnv: 'XAI_API_KEY',
+    relevant: (id) => /^grok/i.test(id),
+    list: async (apiKey) => {
+      const j = await fetchJson('https://api.x.ai/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      return (j.data ?? []).map((m: any) => String(m.id)).filter(Boolean);
+    },
+  },
+  {
+    provider: 'gemini',
+    keyEnv: 'GEMINI_API_KEY',
+    relevant: (id) => /gemini|gemma/i.test(id),
+    list: async (apiKey) => {
+      const j = await fetchJson(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=1000`,
+        {},
+      );
+      // Gemini ids arrive as "models/gemini-1.5-flash" — strip the prefix.
+      return (j.models ?? [])
+        .map((m: any) => String(m.name ?? '').replace(/^models\//, ''))
+        .filter(Boolean);
+    },
+  },
+];
+
+export interface DiscoverProviderResult {
+  provider: string;
+  ok: boolean;
+  error?: string;
+  newModels: string[];
+  registeredCount: number;
+  totalOffered: number;
+}
+
+export interface DiscoverResult {
+  generatedAt: string;
+  providers: DiscoverProviderResult[];
+}
 
 // The previous hardcoded options — used to seed the table on first boot so
 // nothing is lost. After that the table is the source of truth.
@@ -135,5 +236,62 @@ export class ModelRegistryService {
     await this.repo.delete(id);
     this.invalidate();
     return { ok: true };
+  }
+
+  // Ask each configured provider what models it currently offers and flag the
+  // ones not yet in the registry — the "keep an eye out for new/updated models"
+  // check. Providers without a key set are skipped (ok:false, explained).
+  async discover(): Promise<DiscoverResult> {
+    // What insights modelIds we already track per provider. '' (provider
+    // default) can't map to a concrete id, so it never suppresses a real id.
+    const rows = await this.repo.find({ where: { kind: 'insights' } });
+    const knownByProvider = new Map<string, Set<string>>();
+    for (const r of rows) {
+      if (!r.modelId?.trim()) continue;
+      (knownByProvider.get(r.provider) ?? knownByProvider.set(r.provider, new Set()).get(r.provider)!).add(
+        r.modelId.trim().toLowerCase(),
+      );
+    }
+
+    const providers = await Promise.all(
+      PROVIDER_CATALOGS.map(async (cat): Promise<DiscoverProviderResult> => {
+        const apiKey = process.env[cat.keyEnv]?.trim();
+        if (!apiKey) {
+          return {
+            provider: cat.provider,
+            ok: false,
+            error: `${cat.keyEnv} not set`,
+            newModels: [],
+            registeredCount: 0,
+            totalOffered: 0,
+          };
+        }
+        try {
+          const offered = (await cat.list(apiKey)).filter(cat.relevant);
+          const known = knownByProvider.get(cat.provider) ?? new Set<string>();
+          const newModels = [...new Set(offered)]
+            .filter((id) => !known.has(id.toLowerCase()))
+            .sort();
+          return {
+            provider: cat.provider,
+            ok: true,
+            newModels,
+            registeredCount: known.size,
+            totalOffered: offered.length,
+          };
+        } catch (e) {
+          return {
+            provider: cat.provider,
+            ok: false,
+            error: describeError(e),
+            newModels: [],
+            registeredCount: (knownByProvider.get(cat.provider) ?? new Set()).size,
+            totalOffered: 0,
+          };
+        }
+      }),
+    );
+
+    return { generatedAt: new Date().toISOString(), providers };
   }
 }

@@ -32,12 +32,24 @@
           </div>
           <div class="app-topbar-right">
             <GlobalRecordSearch />
+            <div class="settings-dropdown" ref="setRef">
+              <button class="settings-btn" :class="{ 'settings-btn--active': isSettingsMenuTab }" @click="setOpen = !setOpen" title="Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                <svg class="tab-chev" :class="{ 'tab-chev--open': setOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div v-if="setOpen" class="tab-dropdown-menu settings-dropdown-menu">
+                <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'settings' }" @click="tab = 'settings'; setOpen = false">User Set Up</button>
+                <template v-if="canSeeAdminTools">
+                  <div class="settings-menu-divider" />
+                  <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'prompts' }" @click="tab = 'prompts'; setOpen = false">Prompts</button>
+                  <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'models' }" @click="tab = 'models'; setOpen = false">Models</button>
+                  <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'health' }" @click="tab = 'health'; setOpen = false">System Health</button>
+                </template>
+              </div>
+            </div>
             <div class="app-user" v-if="user">
               <div class="app-user-name">{{ user.name || user.email }}</div>
             </div>
-            <button class="settings-btn" :class="{ 'settings-btn--active': tab === 'settings' }" @click="tab = 'settings'" title="Settings">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-            </button>
             <button class="logout-btn" @click="handleLogout">Sign out</button>
           </div>
         </div>
@@ -59,15 +71,25 @@
               <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'transcription' }" @click="tab = 'transcription'; dpOpen = false">Transcription Tools</button>
             </div>
           </div>
-          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Summary</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'ops' }" @click="tab = 'ops'">Operations (QC)</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'clientservices' }" @click="tab = 'clientservices'">Campaign Insights</button>
-          <button class="tab" :class="{ 'tab--active': tab === 'survey' }" @click="tab = 'survey'">Survey Analytics</button>
-          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'csat' }" @click="tab = 'csat'">CSAT Contest</button>
+          <button v-if="canSeeFullUI" class="tab" :class="{ 'tab--active': tab === 'summary' }" @click="tab = 'summary'">Data Overview</button>
+          <!-- Dashboards dropdown -->
+          <div class="tab-dropdown" ref="dashRef">
+            <button
+              class="tab"
+              :class="{ 'tab--active': isDashboardTab }"
+              @click="dashOpen = !dashOpen"
+            >
+              Dashboards
+              <svg class="tab-chev" :class="{ 'tab-chev--open': dashOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div v-if="dashOpen" class="tab-dropdown-menu">
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'ops' }" @click="tab = 'ops'; dashOpen = false">Operations (QC)</button>
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'clientservices' }" @click="tab = 'clientservices'; dashOpen = false">Campaign Insights</button>
+              <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'survey' }" @click="tab = 'survey'; dashOpen = false">Survey Analytics</button>
+              <button v-if="canSeeFullUI" class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'csat' }" @click="tab = 'csat'; dashOpen = false">CSAT Assessment</button>
+            </div>
+          </div>
           <button class="tab" :class="{ 'tab--active': tab === 'narratives' }" @click="tab = 'narratives'">Narratives</button>
-          <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'prompts' }" @click="tab = 'prompts'">Prompts</button>
-          <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'health' }" @click="tab = 'health'">System Health</button>
-          <button v-if="canSeeAdminTools" class="tab" :class="{ 'tab--active': tab === 'models' }" @click="tab = 'models'">Models</button>
         </nav>
       </div>
 
@@ -124,6 +146,17 @@ const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
 const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcription"].includes(tab.value));
 
+// Settings menu (gear button) now also houses the admin surfaces: User Set Up,
+// Prompts, Models, System Health.
+const setOpen = ref(false);
+const setRef = ref<HTMLElement | null>(null);
+const isSettingsMenuTab = computed(() => ["settings", "prompts", "models", "health"].includes(tab.value));
+
+// Dashboards menu — the analytics dashboards (Operations, Campaign Insights, Survey).
+const dashOpen = ref(false);
+const dashRef = ref<HTMLElement | null>(null);
+const isDashboardTab = computed(() => ["ops", "clientservices", "survey", "csat"].includes(tab.value));
+
 // Deep-linkable active tab — read from ?tab= on load, keep the URL in sync so a
 // view can be shared/pasted (dashboards sync their own filters into the query).
 const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "models", "settings"] as const;
@@ -138,13 +171,20 @@ watch(tab, (t) => {
   window.history.replaceState({}, "", url);
 });
 
-function onClickOutsideDp(e: MouseEvent) {
-  if (dpOpen.value && dpRef.value && !dpRef.value.contains(e.target as Node)) {
+function onClickOutsideMenus(e: MouseEvent) {
+  const target = e.target as Node;
+  if (dpOpen.value && dpRef.value && !dpRef.value.contains(target)) {
     dpOpen.value = false;
   }
+  if (setOpen.value && setRef.value && !setRef.value.contains(target)) {
+    setOpen.value = false;
+  }
+  if (dashOpen.value && dashRef.value && !dashRef.value.contains(target)) {
+    dashOpen.value = false;
+  }
 }
-onMounted(() => document.addEventListener("click", onClickOutsideDp));
-onUnmounted(() => document.removeEventListener("click", onClickOutsideDp));
+onMounted(() => document.addEventListener("click", onClickOutsideMenus));
+onUnmounted(() => document.removeEventListener("click", onClickOutsideMenus));
 const booting = ref(true);
 const authStep = ref<"login" | "2fa" | "app">("login");
 const pendingTwoFactorToken = ref("");
@@ -334,12 +374,17 @@ function handleLogout() {
 }
 
 /* ── Settings icon button ──────────────────────────────────────────────────── */
+.settings-dropdown {
+  position: relative;
+}
+
 .settings-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
+  gap: 3px;
   height: 36px;
+  padding: 0 8px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.12);
@@ -358,6 +403,18 @@ function handleLogout() {
   background: #fff;
   border-color: #fff;
   color: #1a3a5c;
+}
+
+/* Settings menu opens below the gear, right-aligned to it. */
+.settings-dropdown-menu {
+  left: auto;
+  right: 0;
+}
+
+.settings-menu-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 6px;
 }
 
 /* ── Tab dropdown ─────────────────────────────────────────────────────────── */

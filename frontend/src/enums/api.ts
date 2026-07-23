@@ -4,6 +4,7 @@ export const ApiPath = {
 
   InsightsCall: "/uiapi/insights/call",
   InsightsSummary: "/uiapi/insights/summary",
+  InsightsSummaryOverview: "/uiapi/insights/summary/overview",
   InsightsSummaryOperations: "/uiapi/insights/summary/operations",
   InsightsSummaryOperationsTrends: "/uiapi/insights/summary/operations-trends",
   InsightsSummaryAgentTrajectory: "/uiapi/insights/summary/agent-trajectory",
@@ -44,6 +45,7 @@ export const ApiPath = {
   ClientServicesTrends: "/uiapi/insights/client-services/trends",
   Models: "/uiapi/models",
   ModelInsightsOptions: "/uiapi/models/insights-options",
+  ModelsDiscover: "/uiapi/models/discover",
   ParityInteractions: "/uiapi/insights/parity/interactions",
 
   SurveyFilters: "/uiapi/survey/filters",

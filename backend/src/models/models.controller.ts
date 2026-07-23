@@ -17,6 +17,12 @@ export class ModelsController {
     return this.svc.insightsByProvider();
   }
 
+  // Live check: which models each provider now offers that aren't registered yet.
+  @Get('discover')
+  discover() {
+    return this.svc.discover();
+  }
+
   @Post()
   add(@Body() body: any) {
     return this.svc.add(body ?? {});
