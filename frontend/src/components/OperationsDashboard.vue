@@ -898,9 +898,9 @@ onMounted(async () => {
 
       <!-- Score overview: interactions + grouped ops/qa panels + flag tiles -->
       <div class="summary-grid">
-        <div class="summary-hero">
-          <div class="summary-hero-label">Interactions</div>
-          <div class="summary-hero-value">{{ overallCount }}</div>
+        <div class="stat stat--analytics">
+          <div class="stat-label">Interactions</div>
+          <div class="stat-value">{{ overallCount }}</div>
           <div v-if="agent" class="summary-hero-sub">{{ agentCount }} for {{ agent }}</div>
         </div>
 
@@ -2482,6 +2482,7 @@ onMounted(async () => {
 .spark-card {
   flex: 1; min-width: 200px;
   padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.25);
 }
 .spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .spark-title { font-size: 12px; font-weight: 700; color: var(--ink); }
@@ -2496,7 +2497,7 @@ onMounted(async () => {
 .traj-list { display: flex; flex-direction: column; }
 .traj-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) 140px auto auto 1fr;
+  grid-template-columns: minmax(120px, 1.4fr) 160px auto auto 1fr;
   align-items: center;
   gap: 12px;
   padding: 8px 6px;
@@ -2517,7 +2518,7 @@ onMounted(async () => {
 .traj-empty code { font-family: ui-monospace, "Courier New", monospace; font-size: 11px; }
 @media (max-width: 640px) {
   .traj-row { grid-template-columns: 1fr auto; row-gap: 4px; }
-  .traj-row .spark { grid-column: 1 / -1; }
+  .traj-row .spark-wrap { grid-column: 1 / -1; }
 }
 
 /* ── Stats strip ───────────────────────────────────────────────────────────── */

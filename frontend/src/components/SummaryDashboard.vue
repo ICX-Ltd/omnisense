@@ -85,12 +85,12 @@ function fmtStamp(iso: string) {
 }
 function statusChip(status: string) {
   const s = (status || "").toLowerCase();
-  if (s === "insights_done") return "chip chip--success";
-  if (s === "transcribed") return "chip chip--info";
-  if (s === "transcribing" || s === "insights_pending") return "chip chip--info";
-  if (s === "pending_transcription") return "chip chip--warning";
-  if (s === "error") return "chip chip--danger";
-  return "chip chip--secondary";
+  if (s === "insights_done") return "chip chip--st-done";
+  if (s === "insights_pending" || s === "transcribed") return "chip chip--st-transcribed";
+  if (s === "transcribing") return "chip chip--st-transcribing";
+  if (s === "pending_transcription") return "chip chip--st-pending";
+  if (s === "error") return "chip chip--st-error";
+  return "chip chip--st-incomplete";
 }
 </script>
 
@@ -120,19 +120,19 @@ function statusChip(status: string) {
     <template v-else-if="data">
       <!-- KPI row -->
       <div class="stats" style="margin-bottom: 14px">
-        <div class="stat">
+        <div class="stat stat--analytics">
           <div class="stat-label">Interactions</div>
           <div class="stat-value">{{ fmtInt(data.totals.interactions) }}</div>
         </div>
-        <div class="stat">
+        <div class="stat stat--neutral">
           <div class="stat-label">Transcriptions</div>
           <div class="stat-value">{{ fmtInt(data.totals.transcripts) }}</div>
         </div>
-        <div class="stat">
+        <div class="stat stat--insights">
           <div class="stat-label">Insights</div>
           <div class="stat-value">{{ fmtInt(data.totals.insights) }}</div>
         </div>
-        <div class="stat">
+        <div class="stat stat--value">
           <div class="stat-label">Embeddings</div>
           <div class="stat-value">{{ fmtInt(data.totals.embeddings) }}</div>
         </div>
@@ -186,7 +186,7 @@ function statusChip(status: string) {
             <div class="hint" v-if="!data.loadedByDate.length">No data.</div>
             <div v-else class="ov-bars">
               <div v-for="d in data.loadedByDate" :key="d.date" class="ov-bar-row">
-                <div class="ov-bar-date mono">{{ d.date }}</div>
+                <div class="ov-bar-date mono">{{ fmtDate(d.date) }}</div>
                 <div class="ov-bar-track">
                   <div class="ov-bar-fill" :style="{ width: (d.count / maxDayCount * 100) + '%' }" />
                 </div>

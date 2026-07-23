@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import IconChip from "./IconChip.vue";
+import { Phone, MessageSquare } from "lucide-vue-next";
 import axios from "axios";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiPath, InsightsProvider } from "@/enums/api";
@@ -440,11 +441,13 @@ const chatStatusEntries = computed(() =>
 );
 
 function badgeClass(status: string) {
-  if (status === "insights_done") return "chip chip--success";
-  if (status === "transcribed") return "chip chip--info";
-  if (status === "pending_transcription") return "chip chip--warning";
-  if (status === "error") return "chip chip--danger";
-  return "chip";
+  if (status === "insights_done") return "chip chip--st-done";
+  if (status === "insights_pending") return "chip chip--st-transcribed";
+  if (status === "transcribed") return "chip chip--st-transcribed";
+  if (status === "transcribing") return "chip chip--st-transcribing";
+  if (status === "pending_transcription") return "chip chip--st-pending";
+  if (status === "error") return "chip chip--st-error";
+  return "chip chip--st-incomplete";
 }
 
 function jobTypeLabel(type: BatchJobType) {
@@ -547,7 +550,7 @@ onUnmounted(stopPolling);
             <div v-if="summary">
               <!-- Calls row -->
               <div class="summary-row">
-                <span class="summary-row-label">📞 Calls</span>
+                <span class="summary-row-label"><Phone :size="14" style="vertical-align:-2px" /> Calls</span>
                 <span class="chip chip--primary">{{ summary.calls.total }} total</span>
                 <span
                   v-for="[st, count] in callStatusEntries"
@@ -560,7 +563,7 @@ onUnmounted(stopPolling);
               </div>
               <!-- Chats row -->
               <div class="summary-row" style="margin-top: 10px">
-                <span class="summary-row-label">💬 Chats</span>
+                <span class="summary-row-label"><MessageSquare :size="14" style="vertical-align:-2px" /> Chats</span>
                 <span class="chip chip--secondary">{{ summary.chats.total }} total</span>
                 <span
                   v-for="[st, count] in chatStatusEntries"

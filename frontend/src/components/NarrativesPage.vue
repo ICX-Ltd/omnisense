@@ -247,7 +247,7 @@ onMounted(load);
           <span :class="channelChip(selected.filterKey)">{{ selected.filterKey || "any" }}</span>
           <span class="chip chip--primary">{{ selected.narrativeType || "generic" }}</span>
           <span :class="providerChip(selected.providerUsed)">{{ selected.providerUsed }}</span>
-          <span v-if="selected.model" class="chip chip--secondary">{{ selected.model }}</span>
+          <span v-if="selected.model" :class="providerChip(selected.providerUsed)">{{ selected.model }}</span>
           <span v-if="selected.campaign" class="chip chip--secondary">Campaign: {{ selected.campaign }}</span>
           <span v-if="selected.agent" class="chip chip--secondary">Agent: {{ selected.agent }}</span>
           <span class="chip chip--info">{{ fmtDate(selected.from) }} → {{ fmtDate(selected.to) }}</span>
@@ -377,15 +377,13 @@ onMounted(load);
 }
 
 .narr-headline {
-  font-size: 22px;
-  font-weight: 900;
+  font-size: 20px;
+  font-weight: 800;
   color: var(--ink);
-  line-height: 1.2;
+  line-height: 1.35;
   margin-bottom: 16px;
-  padding: 16px 18px;
-  background: linear-gradient(135deg, var(--brand-soft), var(--surface-soft-2));
-  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
-  border-radius: var(--radius-lg);
+  padding: 2px 0 2px 14px;
+  border-left: 4px solid var(--brand);
 }
 
 .narr-body {

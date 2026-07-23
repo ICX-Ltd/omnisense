@@ -925,7 +925,7 @@ onMounted(async () => {
 
       <!-- Overview strip -->
       <div class="stats-strip">
-        <div class="stat">
+        <div class="stat stat--analytics">
           <div class="stat-label">Total Interactions</div>
           <div class="stat-value">{{ csData.totals.total }}</div>
           <div v-if="csDataCompare" class="cmp-line">
@@ -939,13 +939,10 @@ onMounted(async () => {
         <!-- Negative View Rate — share of customers who raised ANY negative view
              (brand / vehicle / dealer / finance). Sourced from the Parity campaign
              answers, so it only has data when the Parity campaign is in scope. -->
-        <div class="stat stat--wide">
+        <div class="stat stat--risk" :title="negativeViewRate !== null ? `${fmtInt(parityData.any_negative_view)} of ${fmtInt(parityData.total)} raised a negative view — brand · vehicle · dealer · finance` : 'Select the Parity campaign to populate'">
           <div class="stat-label">Negative View Rate</div>
           <template v-if="negativeViewRate !== null">
-            <div class="stat-value chip chip--danger">{{ negativeViewRate }}%</div>
-            <div class="stat-subnote">
-              {{ fmtInt(parityData.any_negative_view) }} of {{ fmtInt(parityData.total) }} — brand · vehicle · dealer · finance
-            </div>
+            <div class="stat-value">{{ negativeViewRate }}%</div>
             <div v-if="negativeViewRateCompare !== null" class="cmp-line">
               <span>vs <strong>{{ negativeViewRateCompare }}%</strong></span>
               <span :class="compareClass(compareDelta(negativeViewRate, negativeViewRateCompare).dir)">
@@ -959,14 +956,13 @@ onMounted(async () => {
             </div>
           </template>
           <template v-else>
-            <div class="stat-value chip chip--secondary">—</div>
-            <div class="stat-subnote">Select the Parity campaign to populate</div>
+            <div class="stat-value">—</div>
           </template>
         </div>
         <template v-if="opportunityData && opportunityData.classified > 0">
-          <div class="stat">
+          <div class="stat stat--success">
             <div class="stat-label">Opportunity Rate</div>
-            <div class="stat-value chip chip--success">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div>
+            <div class="stat-value">{{ Math.round(opportunityData.opportunities / opportunityData.classified * 100) }}%</div>
             <div v-if="opportunityDataCompare && opportunityDataCompare.classified > 0" class="cmp-line">
               <span>vs <strong>{{ Math.round(opportunityDataCompare.opportunities / opportunityDataCompare.classified * 100) }}%</strong></span>
               <span :class="compareClass(compareDelta(
@@ -1084,7 +1080,7 @@ onMounted(async () => {
                   <span class="chip chip--success" style="font-size: 11px">Opportunity</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -1120,7 +1116,7 @@ onMounted(async () => {
                   <span class="chip chip--danger" style="font-size: 11px">{{ opportunityReasonLabel(ix.not_opportunity_reason || r.reason) }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -1187,7 +1183,7 @@ onMounted(async () => {
                   <span :class="parityAnswerChip(ix.consent_answer)" style="font-size: 11px">consent: {{ ix.consent_answer || 'n/a' }}</span>
                   <span v-if="ix.outcome" class="chip chip--info" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.consent_quote" class="parity-drill-quote">"{{ ix.consent_quote }}"</div>
@@ -1232,7 +1228,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.decision_detail" class="drill-row-summary">{{ ix.decision_detail }}</div>
@@ -1283,7 +1279,7 @@ onMounted(async () => {
                       </span>
                       <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                       <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                     </div>
                     <div v-if="ix[sk.detailField]" class="drill-row-summary">{{ ix[sk.detailField] }}</div>
@@ -1341,7 +1337,7 @@ onMounted(async () => {
                       >{{ vk.label }}: {{ viewAnswerLabel(ix[vk.rowField]) }}</span>
                       <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                       <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                      <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                     <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                     </div>
                     <div v-if="ix[vk.summaryField]" class="drill-row-summary">{{ ix[vk.summaryField] }}</div>
@@ -1432,7 +1428,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.competitor_reasons_detail" class="drill-row-summary">{{ ix.competitor_reasons_detail }}</div>
@@ -1498,7 +1494,7 @@ onMounted(async () => {
                   </span>
                   <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">outcome: {{ ix.outcome }}</span>
                   <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
-                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                  <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                 </div>
                 <div v-if="ix.competitor_reasons_detail" class="drill-row-summary">{{ ix.competitor_reasons_detail }}</div>
@@ -1554,7 +1550,7 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -1617,7 +1613,7 @@ onMounted(async () => {
                     <span v-if="ix.agent" class="chip chip--secondary" style="font-size: 11px">{{ ix.agent }}</span>
                     <span v-if="ix.campaign" class="chip chip--secondary" style="font-size: 11px">{{ ix.campaign }}</span>
                     <span v-if="ix.outcome" class="chip chip--secondary" style="font-size: 11px">{{ ix.outcome }}</span>
-                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
+                    <span v-if="ix.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="ix.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ ix.dealer_name }}<sup v-if="ix.dealer_inferred" class="chip-infer">*</sup></span>
                   <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(ix.interactionDateTime) }}</span><span v-if="ix.interactionTpsId" class="drill-row-tps" title="TPS ID">{{ ix.interactionTpsId }}</span>
                   </div>
                   <div class="drill-row-summary">{{ ix.summary_short || "(no summary)" }}</div>
@@ -1673,7 +1669,7 @@ onMounted(async () => {
               <span class="chip chip--danger" style="font-size: 11px">lost sale</span>
               <span v-if="x.competitor_purchased" class="chip chip--warning" style="font-size: 11px">{{ x.competitor_purchased }}</span>
               <span class="chip chip--secondary" style="font-size: 11px">{{ x.campaign_detected || "unknown" }}</span>
-              <span v-if="x.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="x.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">&#127970; {{ x.dealer_name }}<sup v-if="x.dealer_inferred" class="chip-infer">*</sup></span>
+              <span v-if="x.dealer_name" class="chip chip--dealer" style="font-size: 11px" :title="x.dealer_inferred ? 'Dealer — inferred from transcript (no source dealer)' : 'Dealer — from source data'">{{ x.dealer_name }}<sup v-if="x.dealer_inferred" class="chip-infer">*</sup></span>
               <span class="mono" style="font-size: 11px; opacity: 0.6">{{ fmtDate(x.interactionDateTime) }}</span>
             </div>
             <div class="drill-row-summary">{{ x.summary_short || "(no summary)" }}</div>

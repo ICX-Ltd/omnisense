@@ -67,7 +67,7 @@
                     <div v-if="detailData.interaction.interactionSource"><span class="drawer-label">Source</span><span class="drawer-value">{{ detailData.interaction.interactionSource }}</span></div>
                     <div><span class="drawer-label">Status</span><span class="chip chip--secondary">{{ detailData.interaction.status }}</span></div>
                     <div v-if="detailData.interaction.outcome"><span class="drawer-label">Outcome</span><span class="chip chip--secondary">{{ detailData.interaction.outcome }}</span></div>
-                    <div v-if="detailData.insight?.dealer_name"><span class="drawer-label">Dealer</span><span class="chip chip--dealer" :title="detailData.insight.dealer_inferred ? 'Inferred from transcript (no source dealer)' : 'From source data'">&#127970; {{ detailData.insight.dealer_name }}<sup v-if="detailData.insight.dealer_inferred" class="chip-infer">*</sup></span></div>
+                    <div v-if="detailData.insight?.dealer_name"><span class="drawer-label">Dealer</span><span class="chip chip--dealer" :title="detailData.insight.dealer_inferred ? 'Inferred from transcript (no source dealer)' : 'From source data'">{{ detailData.insight.dealer_name }}<sup v-if="detailData.insight.dealer_inferred" class="chip-infer">*</sup></span></div>
                   </div>
                   <div v-if="detailData.interaction.recordingUrl && !isChat" class="audio-player">
                     <div class="drawer-label" style="margin-bottom: 6px">Recording</div>
@@ -170,7 +170,7 @@
                       class="dim-chip"
                       :style="{ background: scoreColorSolid(detailData.insight.qa_scores.overall_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
                     >{{ fmtQaScore(detailData.insight.qa_scores.overall_score) }}</span>
-                    <button class="corr-pencil" title="Correct the overall QA score" @click.stop="openCorrection('qa.overall_score', 'QA — Overall Score', detailData.insight.qa_scores.overall_score)">&#9998;</button>
+                    <button class="corr-pencil" title="Correct the overall QA score" @click.stop="openCorrection('qa.overall_score', 'QA — Overall Score', detailData.insight.qa_scores.overall_score)"><Pencil :size="12" /></button>
                     <span v-if="correctionsByField['qa.overall_score']" class="corr-badge">corrected</span>
                   </div>
                   <template v-for="(section, sectionKey) in detailData.insight.qa_scores.scores" :key="sectionKey">
@@ -181,7 +181,7 @@
                           class="dim-chip"
                           :style="{ background: scoreColorSolid(section.section_score), color: '#fff', fontSize: '11px', minWidth: '42px', textAlign: 'center' }"
                         >{{ fmtQaScore(section.section_score) }}</span>
-                        <button class="corr-pencil" title="Correct this section score" @click.stop="openCorrection('qa.section.' + String(sectionKey), 'QA Section Score — ' + String(sectionKey).replace(/_/g, ' '), section.section_score)">&#9998;</button>
+                        <button class="corr-pencil" title="Correct this section score" @click.stop="openCorrection('qa.section.' + String(sectionKey), 'QA Section Score — ' + String(sectionKey).replace(/_/g, ' '), section.section_score)"><Pencil :size="12" /></button>
                         <span v-if="correctionsByField['qa.section.' + String(sectionKey)]" class="corr-badge">corrected</span>
                       </div>
                       <div v-for="(q, qKey) in section" :key="qKey" class="qa-row">
@@ -192,7 +192,7 @@
                             :class="q.answer === 'yes' ? 'chip--success' : q.answer === 'no' ? 'chip--danger' : 'chip--secondary'"
                             style="font-size: 11px"
                           >{{ q.answer }}</span>
-                          <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('qa.answer.' + String(sectionKey) + '.' + String(qKey), 'QA — ' + (qaQuestionLabels[String(qKey)] || String(qKey).replace(/_/g, ' ')), q.answer)">&#9998;</button>
+                          <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('qa.answer.' + String(sectionKey) + '.' + String(qKey), 'QA — ' + (qaQuestionLabels[String(qKey)] || String(qKey).replace(/_/g, ' ')), q.answer)"><Pencil :size="12" /></button>
                           <span v-if="correctionsByField['qa.answer.' + String(sectionKey) + '.' + String(qKey)]" class="corr-badge">corrected</span>
                           <div class="qa-rationale">{{ q.rationale }}</div>
                         </template>
@@ -246,7 +246,7 @@
                 <div v-if="detailData.insight" class="drawer-section">
                   <div class="drawer-section-title">
                     Summary
-                    <button class="corr-pencil" title="Correct the summary" @click.stop="openCorrection('summary_short', 'Summary', detailData.insight.summary_short)">&#9998;</button>
+                    <button class="corr-pencil" title="Correct the summary" @click.stop="openCorrection('summary_short', 'Summary', detailData.insight.summary_short)"><Pencil :size="12" /></button>
                     <span v-if="correctionsByField['summary_short']" class="corr-badge" title="A reviewer correction has been logged for this field">corrected</span>
                   </div>
                   <p style="margin: 0 0 8px; font-weight: 600">{{ detailData.insight.summary_short }}</p>
@@ -522,7 +522,7 @@
                   <!-- Headline answers: consent + decision -->
                   <div class="parity-row parity-row--headline">
                     <div class="parity-row-label">Consent to pass to dealer
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.consent_to_dealer', 'Campaign Q&A — Consent to pass to dealer', campaignAnswers.consent_to_dealer?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.consent_to_dealer', 'Campaign Q&A — Consent to pass to dealer', campaignAnswers.consent_to_dealer?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.consent_to_dealer']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.consent_to_dealer?.answer)" style="font-size: 11px">
@@ -533,7 +533,7 @@
 
                   <div class="parity-row">
                     <div class="parity-row-label">Already decided
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.decision_made', 'Campaign Q&A — Already decided', campaignAnswers.decision_made?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.decision_made', 'Campaign Q&A — Already decided', campaignAnswers.decision_made?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.decision_made']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.decision_made?.answer)" style="font-size: 11px">
@@ -547,7 +547,7 @@
                   <div class="parity-subheader">Views on current setup</div>
                   <div v-for="viewKey in viewKeys" :key="viewKey" class="parity-row">
                     <div class="parity-row-label">{{ viewLabels[viewKey] }}
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.' + viewKey, 'Campaign Q&A — ' + viewLabels[viewKey], campaignAnswers[viewKey]?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.' + viewKey, 'Campaign Q&A — ' + viewLabels[viewKey], campaignAnswers[viewKey]?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.' + viewKey]" class="corr-badge">corrected</span>
                     </div>
                     <span
@@ -563,7 +563,7 @@
                   <div class="parity-subheader">Constraints &amp; circumstances</div>
                   <div class="parity-row">
                     <div class="parity-row-label">Affordability issues
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.affordability_issues', 'Campaign Q&A — Affordability issues', campaignAnswers.affordability_issues?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.affordability_issues', 'Campaign Q&A — Affordability issues', campaignAnswers.affordability_issues?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.affordability_issues']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.affordability_issues?.answer)" style="font-size: 11px">
@@ -574,7 +574,7 @@
                   </div>
                   <div class="parity-row">
                     <div class="parity-row-label">Lifestyle change
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.lifestyle_change_vehicle', 'Campaign Q&A — Lifestyle change', campaignAnswers.lifestyle_change_vehicle?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.lifestyle_change_vehicle', 'Campaign Q&A — Lifestyle change', campaignAnswers.lifestyle_change_vehicle?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.lifestyle_change_vehicle']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.lifestyle_change_vehicle?.answer)" style="font-size: 11px">
@@ -591,7 +591,7 @@
 
                   <div class="parity-row">
                     <div class="parity-row-label">Dealer already in touch
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.dealer_already_in_touch', 'Campaign Q&A — Dealer already in touch', campaignAnswers.dealer_already_in_touch?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.dealer_already_in_touch', 'Campaign Q&A — Dealer already in touch', campaignAnswers.dealer_already_in_touch?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.dealer_already_in_touch']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.dealer_already_in_touch?.answer)" style="font-size: 11px">
@@ -602,7 +602,7 @@
 
                   <div class="parity-row parity-row--headline">
                     <div class="parity-row-label">Looking at a competitor
-                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.competitor_vehicle', 'Campaign Q&A — Looking at a competitor', campaignAnswers.competitor_vehicle?.answer)">&#9998;</button>
+                      <button class="corr-pencil" title="Correct this answer" @click.stop="openCorrection('campaign.competitor_vehicle', 'Campaign Q&A — Looking at a competitor', campaignAnswers.competitor_vehicle?.answer)"><Pencil :size="12" /></button>
                       <span v-if="correctionsByField['campaign.competitor_vehicle']" class="corr-badge">corrected</span>
                     </div>
                     <span class="chip" :class="answerChip(campaignAnswers.competitor_vehicle?.answer)" style="font-size: 11px">
@@ -805,7 +805,7 @@
     <div v-if="correctionOpen" class="corr-backdrop" @click="closeCorrection" />
     <div v-if="correctionOpen" class="corr-modal">
       <div class="corr-head">
-        <div class="corr-title">&#9998; Correct field</div>
+        <div class="corr-title"><Pencil :size="14" style="vertical-align:-2px" /> Correct field</div>
         <button class="drawer-close" @click="closeCorrection">&times;</button>
       </div>
       <div class="corr-body">
@@ -831,7 +831,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Sparkles } from "lucide-vue-next";
+import { Sparkles, Pencil } from "lucide-vue-next";
 import axios from "axios";
 import {
   getInteractionDetail,

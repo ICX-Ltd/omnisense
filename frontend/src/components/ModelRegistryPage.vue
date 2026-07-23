@@ -14,7 +14,7 @@
         <div class="tile-text">
           <div class="tile-title">
             Check for new models
-            <span v-if="discovery" class="mr-disc-badge">{{ discNewTotal ? `${discNewTotal} new` : "up to date" }}</span>
+            <span v-if="discovery" class="chip kpi-chip" :class="discNewTotal ? 'chip--info' : 'chip--secondary'">{{ discNewTotal ? `${discNewTotal} new` : "up to date" }}</span>
           </div>
           <div class="tile-desc">Asks each configured provider what models it currently offers and flags any that aren't in the registry yet — so new releases and upgrades don't get missed.</div>
         </div>

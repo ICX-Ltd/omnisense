@@ -1,22 +1,23 @@
 <template>
-  <svg
-    v-if="points.length > 1"
-    :width="width"
-    :height="height"
-    class="spark"
-    :viewBox="`0 0 ${width} ${height}`"
-    preserveAspectRatio="none"
-  >
-    <polyline
-      :points="linePoints"
-      fill="none"
-      :stroke="color"
-      stroke-width="1.5"
-      stroke-linejoin="round"
-      stroke-linecap="round"
-    />
-    <circle :cx="lastX" :cy="lastY" r="2.2" :fill="color" />
-  </svg>
+  <div v-if="points.length > 1" class="spark-wrap" :style="{ background: plateBg }">
+    <svg
+      :width="width"
+      :height="height"
+      class="spark"
+      :viewBox="`0 0 ${width} ${height}`"
+      preserveAspectRatio="none"
+    >
+      <polyline
+        :points="linePoints"
+        fill="none"
+        :stroke="color"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      />
+      <circle :cx="lastX" :cy="lastY" r="2.2" :fill="color" />
+    </svg>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -26,6 +27,10 @@ const props = withDefaults(
   defineProps<{ points: number[]; color?: string; width?: number; height?: number }>(),
   { color: "#6366f1", width: 130, height: 30 },
 );
+
+// A subtle plate tinted with the line colour, so every sparkline sits in a
+// consistent little chart container instead of floating as a bare line.
+const plateBg = computed(() => `color-mix(in srgb, ${props.color} 8%, transparent)`);
 
 const coords = computed<Array<[number, number]>>(() => {
   const n = props.points.length;
@@ -48,6 +53,12 @@ const lastY = computed(() => last.value[1]);
 </script>
 
 <style scoped>
+.spark-wrap {
+  display: inline-flex;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ink, #121a32) 6%, transparent);
+}
 .spark {
   display: block;
 }

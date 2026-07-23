@@ -174,6 +174,7 @@ function sortedCounts(arr: any[] | undefined): any[] {
   return [...(arr ?? [])].sort((a, b) => b.count - a.count);
 }
 const SEVERITY_CLS: Record<string, string> = { high: "chip--danger", medium: "chip--warning", low: "" };
+const SEVERITY_STAT: Record<string, string> = { high: "stat--risk", medium: "stat--warning", low: "stat--neutral" };
 
 // Panel size: collapsed panels show only the top few rows; each can be expanded.
 const PANEL_LIMIT = 6;
@@ -712,23 +713,23 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
     <template v-if="overview">
       <!-- Overview strip (each tile drills to its records) -->
       <div class="stats-strip">
-        <div class="stat stat--click" @click="openDrill('ov:total', 'All survey records', {})">
+        <div class="stat stat--click stat--analytics" @click="openDrill('ov:total', 'All survey records', {})">
           <div class="stat-label">Total Records</div><div class="stat-value">{{ overview.total }}</div>
         </div>
-        <div class="stat stat--click" @click="openDrill('ov:taken', 'Survey Taken', { flowStatus: 'Survey Taken' })">
-          <div class="stat-label">Survey Taken</div><div class="stat-value chip chip--success">{{ overview.survey_taken }}</div>
+        <div class="stat stat--click stat--success" @click="openDrill('ov:taken', 'Survey Taken', { flowStatus: 'Survey Taken' })">
+          <div class="stat-label">Survey Taken</div><div class="stat-value">{{ overview.survey_taken }}</div>
         </div>
-        <div class="stat stat--click" @click="openDrill('ov:nottaken', 'Survey Not Taken', { flowStatus: 'Survey Not Taken' })">
-          <div class="stat-label">Survey Not Taken</div><div class="stat-value chip chip--secondary">{{ overview.survey_not_taken }}</div>
+        <div class="stat stat--click stat--neutral" @click="openDrill('ov:nottaken', 'Survey Not Taken', { flowStatus: 'Survey Not Taken' })">
+          <div class="stat-label">Survey Not Taken</div><div class="stat-value">{{ overview.survey_not_taken }}</div>
         </div>
-        <div class="stat stat--click" @click="openDrill('ov:won', 'Bought client brand (won)', { wonOnly: 'true' })">
-          <div class="stat-label">Bought Client Brand</div><div class="stat-value chip chip--success">{{ overview.won }}</div>
+        <div class="stat stat--click stat--success" @click="openDrill('ov:won', 'Bought client brand (won)', { wonOnly: 'true' })">
+          <div class="stat-label">Bought Client Brand</div><div class="stat-value">{{ overview.won }}</div>
         </div>
-        <div class="stat stat--click" @click="openDrill('ov:defected', 'Defected to a competitor', { defectedOnly: 'true' })">
-          <div class="stat-label">Defected (Competitor)</div><div class="stat-value chip chip--danger">{{ overview.defected }}</div>
+        <div class="stat stat--click stat--risk" @click="openDrill('ov:defected', 'Defected to a competitor', { defectedOnly: 'true' })">
+          <div class="stat-label">Defected (Competitor)</div><div class="stat-value">{{ overview.defected }}</div>
         </div>
-        <div class="stat stat--click" @click="openDrill('ov:considering', 'Still considering', { stillConsidering: 'true' })">
-          <div class="stat-label">Still Considering</div><div class="stat-value chip chip--info">{{ overview.still_considering }}</div>
+        <div class="stat stat--click stat--warning" @click="openDrill('ov:considering', 'Still considering', { stillConsidering: 'true' })">
+          <div class="stat-label">Still Considering</div><div class="stat-value">{{ overview.still_considering }}</div>
         </div>
       </div>
 
@@ -1004,15 +1005,15 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           </div>
         </div>
         <div class="tile-body">
-          <div style="display: flex; gap: 12px; flex-wrap: wrap">
+          <div class="stats-strip" style="margin-top: 0; padding: 0; background: none; border: none">
             <div
               v-for="v in dealerVisits"
               :key="v.visit_type"
-              class="visit-chip visit-chip--click"
+              class="stat stat--click stat--people"
               @click="openDrill(`dv:${v.visit_type}`, `Dealer visit — ${v.visit_type}`, { dealerVisit: v.visit_type })"
             >
-              <div class="visit-label">{{ v.visit_type }}</div>
-              <div class="visit-count">{{ v.count }}</div>
+              <div class="stat-label">{{ v.visit_type }}</div>
+              <div class="stat-value">{{ v.count }}</div>
             </div>
           </div>
         </div>
@@ -1379,13 +1380,13 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           </div>
         </div>
         <div class="tile-body">
-          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px">
-            <div class="stat"><div class="stat-label">Brand mentions</div><div class="stat-value">{{ transcriptInsights.competitors.considered_total }}</div></div>
+          <div class="stats-strip" style="margin: 0 0 12px; padding: 0; background: none; border: none">
+            <div class="stat stat--analytics"><div class="stat-label">Brand mentions</div><div class="stat-value">{{ transcriptInsights.competitors.considered_total }}</div></div>
             <div
-              class="stat stat--click"
+              class="stat stat--click stat--risk"
               @click="openTranscriptDrill('ti:cn', 'Considered a Chinese / Chinese-owned OEM', { transcriptChineseOnly: 'true' })"
             >
-              <div class="stat-label">Chinese-OEM mentions</div><div class="stat-value chip chip--danger">{{ transcriptInsights.competitors.chinese_considered }}</div>
+              <div class="stat-label">Chinese-OEM mentions</div><div class="stat-value">{{ transcriptInsights.competitors.chinese_considered }}</div>
             </div>
           </div>
           <div
@@ -1476,20 +1477,21 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           </div>
         </div>
         <div class="tile-body">
-          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px">
+          <div class="stats-strip" style="margin: 0 0 12px; padding: 0; background: none; border: none">
             <div
               v-for="(count, sev) in transcriptInsights.frustrations.by_severity"
               :key="'sev'+sev"
               class="stat stat--click"
+              :class="SEVERITY_STAT[sev] || 'stat--neutral'"
               @click="openTranscriptDrill(`ti:frsev:${sev}`, `Frustrations — ${sev} severity`, { frustrationSeverity: sev })"
             >
               <div class="stat-label">{{ sev }} severity</div>
-              <div class="stat-value chip" :class="SEVERITY_CLS[sev] || ''">{{ count }}</div>
+              <div class="stat-value">{{ count }}</div>
             </div>
             <div
               v-for="(count, res) in transcriptInsights.frustrations.by_resolvable"
               :key="'res'+res"
-              class="stat stat--click"
+              class="stat stat--click stat--neutral"
               @click="openTranscriptDrill(`ti:frres:${res}`, `Frustrations — resolvable: ${res}`, { frustrationResolvable: res })"
             >
               <div class="stat-label">resolvable: {{ res }}</div>
@@ -1542,15 +1544,15 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           </div>
         </div>
         <div class="tile-body">
-          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px">
-            <div class="stat stat--click" @click="openTranscriptDrill('ti:pricegap', 'Price-expectation gap', { priceGap: 'true' })">
-              <div class="stat-label">Price-expectation gap</div><div class="stat-value chip chip--warning">{{ transcriptInsights.measures.price_expectation_gap_yes }}</div>
+          <div class="stats-strip" style="margin: 0 0 14px; padding: 0; background: none; border: none">
+            <div class="stat stat--click stat--warning" @click="openTranscriptDrill('ti:pricegap', 'Price-expectation gap', { priceGap: 'true' })">
+              <div class="stat-label">Price-expectation gap</div><div class="stat-value">{{ transcriptInsights.measures.price_expectation_gap_yes }}</div>
             </div>
-            <div class="stat stat--click" @click="openTranscriptDrill('ti:fu:yes', 'Dealer followed up', { dealerFollowUp: 'yes' })">
+            <div class="stat stat--click stat--success" @click="openTranscriptDrill('ti:fu:yes', 'Dealer followed up', { dealerFollowUp: 'yes' })">
               <div class="stat-label">Dealer followed up</div><div class="stat-value">{{ transcriptInsights.measures.dealer_follow_up_yes }}</div>
             </div>
-            <div class="stat stat--click" @click="openTranscriptDrill('ti:fu:no', 'Dealer did NOT follow up', { dealerFollowUp: 'no' })">
-              <div class="stat-label">Dealer did NOT follow up</div><div class="stat-value chip chip--danger">{{ transcriptInsights.measures.dealer_follow_up_no }}</div>
+            <div class="stat stat--click stat--risk" @click="openTranscriptDrill('ti:fu:no', 'Dealer did NOT follow up', { dealerFollowUp: 'no' })">
+              <div class="stat-label">Dealer did NOT follow up</div><div class="stat-value">{{ transcriptInsights.measures.dealer_follow_up_no }}</div>
             </div>
           </div>
           <div class="grid grid-2">
@@ -1814,15 +1816,18 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 
 /* ── Stats strip ─────────────────────────────────────────────────────────── */
 .stats-strip {
-  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px;
+  display: flex; gap: 14px 20px; flex-wrap: wrap; margin-top: 14px;
   padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
+/* KPI tiles sit at a reasonable fixed size and wrap — don't stretch to fill the row. */
+.stats-strip > .stat { flex: 0 1 170px; }
 
 /* ── Headline-rate sparklines ────────────────────────────────────────────── */
 .spark-strip { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
 .spark-card {
-  flex: 1; min-width: 220px;
+  flex: 1; min-width: 200px;
   padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.25);
 }
 .spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .spark-title { font-size: 12px; font-weight: 700; color: var(--ink); }

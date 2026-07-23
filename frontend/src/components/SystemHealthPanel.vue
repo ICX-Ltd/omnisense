@@ -6,7 +6,7 @@
         <p class="sh-sub">Live checks on the pieces the pipeline depends on. Green = OK, amber = attention, red = broken.</p>
       </div>
       <div class="sh-actions">
-        <span v-if="report" class="sh-overall" :class="'sh-pill--' + report.status">{{ statusLabel(report.status) }}</span>
+        <span v-if="report" :class="pillClass(report.status)">{{ statusLabel(report.status) }}</span>
         <button class="sh-btn" :disabled="loading" @click="load">{{ loading ? "Checking…" : "Refresh" }}</button>
       </div>
     </div>
@@ -20,7 +20,7 @@
         <div class="sh-card-head">
           <span class="sh-dot" :class="'sh-dot--' + c.status" />
           <span class="sh-card-label">{{ c.label }}</span>
-          <span class="sh-card-status" :class="'sh-pill--' + c.status">{{ statusLabel(c.status) }}</span>
+          <span :class="pillClass(c.status)">{{ statusLabel(c.status) }}</span>
         </div>
         <div class="sh-card-detail">{{ c.detail }}</div>
         <div v-if="c.items && c.items.length" class="sh-items">
@@ -50,7 +50,7 @@
         <div class="sh-card-head">
           <span class="sh-dot" :class="'sh-dot--' + c.status" />
           <span class="sh-card-label">{{ c.label }}</span>
-          <span class="sh-card-status" :class="'sh-pill--' + c.status">{{ statusLabel(c.status) }}</span>
+          <span :class="pillClass(c.status)">{{ statusLabel(c.status) }}</span>
         </div>
         <div class="sh-card-detail">{{ c.detail }}</div>
       </div>
@@ -73,7 +73,7 @@
         <div class="sh-card-head">
           <span class="sh-dot" :class="'sh-dot--' + c.status" />
           <span class="sh-card-label">{{ c.label }}</span>
-          <span class="sh-card-status" :class="'sh-pill--' + c.status">{{ statusLabel(c.status) }}</span>
+          <span :class="pillClass(c.status)">{{ statusLabel(c.status) }}</span>
         </div>
         <div class="sh-card-detail">{{ c.detail }}</div>
       </div>
@@ -114,6 +114,9 @@ const provError = ref("");
 
 function statusLabel(s: CheckStatus) {
   return s === "ok" ? "OK" : s === "warn" ? "Attention" : "Error";
+}
+function pillClass(s: CheckStatus) {
+  return "chip kpi-chip " + (s === "ok" ? "chip--success" : s === "warn" ? "chip--warning" : "chip--danger");
 }
 function fmtTime(iso: string) {
   const d = new Date(iso);

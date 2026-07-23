@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import {
+  Target, ShieldAlert, Scale, TrendingDown, TrendingUp, CircleCheck,
+  TriangleAlert, Lightbulb,
+} from "lucide-vue-next";
 
 // Reusable rich "executive briefing" renderer for a survey-analytics narrative
 // object. The markup, styles and helpers below were extracted verbatim from the
@@ -72,7 +76,7 @@ function dirArrow(d?: string): string {
 
     <div class="nb-grid">
       <div v-if="narrative.competitive_landscape" class="nb-card">
-        <div class="nb-card-title">&#127919; Who we're losing to</div>
+        <div class="nb-card-title"><Target :size="16" class="nb-ico" style="color:#e11d48" /> Who we're losing to</div>
         <p class="nb-muted">{{ narrative.competitive_landscape.summary }}</p>
         <div v-for="(c, i) in narrative.competitive_landscape.top_competitors" :key="i" class="nb-lb-row">
           <div class="nb-lb-rank">{{ Number(i) + 1 }}</div>
@@ -87,7 +91,7 @@ function dirArrow(d?: string): string {
       </div>
 
       <div v-if="narrative.chinese_oem_threat" class="nb-card nb-card--threat">
-        <div class="nb-card-title">&#128009; Emerging Chinese-OEM threat</div>
+        <div class="nb-card-title"><ShieldAlert :size="16" class="nb-ico" style="color:#e11d48" /> Emerging Chinese-OEM threat</div>
         <div class="nb-threat-top">
           <div class="nb-threat-share">
             <div class="nb-threat-share-val">{{ narrative.chinese_oem_threat.current_share }}</div>
@@ -111,7 +115,7 @@ function dirArrow(d?: string): string {
     </div>
 
     <div v-if="narrative.why_customers_choose_competitors" class="nb-card">
-      <div class="nb-card-title">&#128184; Why customers choose competitors</div>
+      <div class="nb-card-title"><Scale :size="16" class="nb-ico" style="color:#64748b" /> Why customers choose competitors</div>
       <div class="nb-2col">
         <div>
           <div class="nb-eyebrow-inline">All competitors</div>
@@ -132,7 +136,7 @@ function dirArrow(d?: string): string {
     </div>
 
     <div v-if="narrative.model_risk?.length" class="nb-card">
-      <div class="nb-card-title">&#128663; Model risk</div>
+      <div class="nb-card-title"><TrendingDown :size="16" class="nb-ico" style="color:#e11d48" /> Model risk</div>
       <div class="nb-model-grid">
         <div v-for="(m, i) in narrative.model_risk" :key="i" class="nb-model">
           <div class="nb-model-head"><span class="nb-dot" :class="'nb-dot--' + (m.risk || 'low')" /> {{ m.model }} <span class="nb-model-risk">{{ m.risk }}</span></div>
@@ -143,7 +147,7 @@ function dirArrow(d?: string): string {
     </div>
 
     <div v-if="narrative.emerging_themes?.length" class="nb-card">
-      <div class="nb-card-title">&#128200; Emerging themes</div>
+      <div class="nb-card-title"><TrendingUp :size="16" class="nb-ico" style="color:#2b6cb0" /> Emerging themes</div>
       <div v-for="(t, i) in narrative.emerging_themes" :key="i" class="nb-theme">
         <div class="nb-theme-head">
           <span class="nb-dir" :class="'nb-dir--' + (t.direction || 'stable')">{{ dirArrow(t.direction) }}</span>
@@ -158,14 +162,14 @@ function dirArrow(d?: string): string {
 
     <div class="nb-grid">
       <div v-if="narrative.what_nissan_does_well?.length" class="nb-card nb-card--good">
-        <div class="nb-card-title">&#9989; What Nissan does well</div>
+        <div class="nb-card-title"><CircleCheck :size="16" class="nb-ico" style="color:#059669" /> What Nissan does well</div>
         <div v-for="(s, i) in narrative.what_nissan_does_well" :key="i" class="nb-item">
           <div class="nb-item-title">{{ s.strength }}</div>
           <div class="nb-reason-ev">{{ s.evidence }}</div>
         </div>
       </div>
       <div v-if="narrative.key_risks?.length" class="nb-card nb-card--risk">
-        <div class="nb-card-title">&#9888;&#65039; Key risks</div>
+        <div class="nb-card-title"><TriangleAlert :size="16" class="nb-ico" style="color:#d97706" /> Key risks</div>
         <div v-for="(r, i) in narrative.key_risks" :key="i" class="nb-item">
           <div class="nb-item-title">{{ r.risk }}</div>
           <div class="nb-reason-ev">{{ r.commercial_implication }}</div>
@@ -174,7 +178,7 @@ function dirArrow(d?: string): string {
     </div>
 
     <div v-if="narrative.recommendations?.length" class="nb-card nb-card--reco">
-      <div class="nb-card-title">&#128640; Recommendations</div>
+      <div class="nb-card-title"><Lightbulb :size="16" class="nb-ico" style="color:#7c3aed" /> Recommendations</div>
       <div v-for="(r, i) in narrative.recommendations" :key="i" class="nb-reco">
         <div class="nb-reco-num">{{ Number(i) + 1 }}</div>
         <div class="nb-reco-body">
@@ -200,18 +204,15 @@ function dirArrow(d?: string): string {
 
 /* Hero */
 .nb-hero {
-  position: relative; overflow: hidden;
-  padding: 28px 30px; border-radius: 16px; color: #fff;
-  background: linear-gradient(120deg, #0f172a 0%, #3730a3 55%, #6d28d9 100%);
-  box-shadow: 0 12px 30px -12px rgba(55,48,163,0.6);
+  padding: 20px 22px; border-radius: 12px;
+  color: var(--ink, #121a32);
+  background: color-mix(in srgb, var(--brand, #2b6cb0) 5%, var(--surface, #fff));
+  border: 1px solid var(--border, #e5e7eb);
+  border-left: 4px solid var(--brand, #2b6cb0);
 }
-.nb-hero::after {
-  content: ""; position: absolute; top: -40%; right: -10%; width: 320px; height: 320px;
-  background: radial-gradient(circle, rgba(236,72,153,0.45), transparent 70%);
-}
-.nb-hero-eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; font-weight: 700; }
-.nb-hero-headline { font-size: 26px; font-weight: 800; line-height: 1.2; margin-top: 8px; max-width: 42ch; position: relative; z-index: 1; }
-.nb-hero-sub { font-size: 13px; opacity: 0.82; margin-top: 10px; position: relative; z-index: 1; }
+.nb-hero-eyebrow { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--brand, #2b6cb0); font-weight: 700; }
+.nb-hero-headline { font-size: 24px; font-weight: 800; line-height: 1.2; margin-top: 8px; max-width: 46ch; color: var(--ink, #121a32); }
+.nb-hero-sub { font-size: 13px; color: var(--muted, #64748b); margin-top: 10px; }
 
 /* KPI row */
 .nb-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
@@ -236,6 +237,14 @@ function dirArrow(d?: string): string {
 .nb-card--risk { border-left: 4px solid #dc2626; }
 .nb-card--reco { border-left: 4px solid #6366f1; }
 .nb-card-title { font-size: 15px; font-weight: 800; color: var(--ink, #0f172a); margin-bottom: 10px; }
+.nb-ico {
+  box-sizing: content-box;
+  padding: 5px;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  vertical-align: -9px;
+  margin-right: 8px;
+}
 .nb-muted { font-size: 12.5px; color: var(--muted, #64748b); line-height: 1.5; margin: 0 0 12px; }
 
 /* Competitor leaderboard */

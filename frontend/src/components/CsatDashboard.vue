@@ -232,15 +232,15 @@ onMounted(loadAll);
     <div v-if="error" class="error-banner">{{ error }}</div>
 
     <!-- Metric tiles -->
-    <div v-if="board" class="metric-grid">
-      <div class="metric"><div class="metric-label">Total CSATs</div><div class="metric-value">{{ board.total }}</div></div>
-      <div class="metric"><div class="metric-label">Assessed</div><div class="metric-value">{{ board.assessed }}</div></div>
-      <div class="metric"><div class="metric-label">Pending</div><div class="metric-value">{{ board.pending }}</div></div>
-      <div class="metric metric--good"><div class="metric-label">Contest</div><div class="metric-value">{{ contestCount }}</div></div>
-      <div class="metric metric--bad"><div class="metric-label">Do Not Contest</div><div class="metric-value">{{ doNotContestCount }}</div></div>
-      <div class="metric" :class="{ 'metric--warn': board.unmatched > 0 }"><div class="metric-label">Unmatched</div><div class="metric-value">{{ board.unmatched }}</div></div>
-      <div class="metric"><div class="metric-label" title="Scores of 4-5 are not assessed">Excluded (4-5)</div><div class="metric-value">{{ board.excluded ?? 0 }}</div></div>
-      <div class="metric" :class="{ 'metric--bad': board.errors > 0 }"><div class="metric-label">Errors</div><div class="metric-value">{{ board.errors }}</div></div>
+    <div v-if="board" class="stats" style="margin-bottom: 14px">
+      <div class="stat stat--analytics"><div class="stat-label">Total CSATs</div><div class="stat-value">{{ board.total }}</div></div>
+      <div class="stat stat--success"><div class="stat-label">Assessed</div><div class="stat-value">{{ board.assessed }}</div></div>
+      <div class="stat stat--warning"><div class="stat-label">Pending</div><div class="stat-value">{{ board.pending }}</div></div>
+      <div class="stat stat--success"><div class="stat-label">Contest</div><div class="stat-value">{{ contestCount }}</div></div>
+      <div class="stat stat--risk"><div class="stat-label">Do Not Contest</div><div class="stat-value">{{ doNotContestCount }}</div></div>
+      <div class="stat" :class="board.unmatched > 0 ? 'stat--warning' : 'stat--neutral'"><div class="stat-label">Unmatched</div><div class="stat-value">{{ board.unmatched }}</div></div>
+      <div class="stat stat--neutral"><div class="stat-label" title="Scores of 4-5 are not assessed">Excluded (4-5)</div><div class="stat-value">{{ board.excluded ?? 0 }}</div></div>
+      <div class="stat" :class="board.errors > 0 ? 'stat--risk' : 'stat--neutral'"><div class="stat-label">Errors</div><div class="stat-value">{{ board.errors }}</div></div>
     </div>
 
     <!-- Controls -->
