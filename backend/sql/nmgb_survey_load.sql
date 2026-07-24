@@ -1,31 +1,27 @@
 -- =============================================================================
--- NMGB Survey — re-derive survey answers onto the insight row (idempotent UPDATE)
+-- NMGB Survey — load feed answers into app.interaction_survey (idempotent INSERT)
 -- =============================================================================
--- Companion to sql/nmgb_survey_insights.sql (the initial manual INSERT).
+-- REPLACES sql/nmgb_survey_backfill.sql. The backfill existed only to restore
+-- campaign_answers_json on the insight row after each LLM batch nulled it. Now
+-- survey answers live in their own table the LLM never touches, so there is
+-- nothing to restore — this simply loads the answers once, as part of the data
+-- load. Safe to run repeatedly (skips interactions already loaded).
 --
--- Purpose:
---   The survey dashboard filters interaction_insights on BOTH
---     ii.campaign_answers_json IS NOT NULL   AND   ii.conversation_type = 'survey'
---   (see backend/src/insights/survey-analytics.service.ts). Running the LLM
---   insights batch upserts the whole insight row keyed on recordingId, which
---   nulls campaign_answers_json and overwrites conversation_type — so the survey
---   rows drop off the dashboard. This UPDATE restores both from the source
---   survey table, keyed on recordingUrl. It is the single source of truth for
---   the survey blob and is safe to run repeatedly, before or after the LLM run.
+-- Survey interactions still flow through the normal transcribe -> LLM pipeline
+-- for the campaign_transcript_json layer on interaction_insights; that is
+-- unaffected by this script.
 --
--- Typical sequence when (re)processing these records through the model:
---   1. Reset the rows to 'pending_transcription'
---   2. Batch transcribe   -> real transcript replaces the placeholder
---   3. Batch insights      -> LLM fills summary/scores/etc.; nulls the survey blob
---   4. Run THIS script      -> restores conversation_type='survey' + survey blob
---   (rows end at 'insights_done', so no queue re-picks them — backfill stays put)
+-- Match key: interactions.recordingUrl = LeadDataSurvey_NMGB.[Call Recording].
+-- Run against the ai_insight database after add-interaction-survey.sql.
 -- =============================================================================
 
-UPDATE ii
-SET
-  conversation_type   = 'survey',
-  campaign_detected   = 'NMGB Survey',
-  campaign_answers_json = (
+INSERT INTO app.interaction_survey (recordingId, interactionTpsId, campaign, surveyType, answersJson, respondedAt)
+SELECT
+  i.id                                    AS recordingId,
+  i.interactionTpsId                      AS interactionTpsId,
+  i.campaign                              AS campaign,
+  'nmgb'                                  AS surveyType,
+  (
     SELECT
       'NMGB'                                                 AS [survey],
       s.[IDOpportunity]                                      AS [meta.id_opportunity],
@@ -108,12 +104,15 @@ SET
     FROM [icx-rep].[bi].[LeadDataSurvey_NMGB] s
     WHERE LTRIM(RTRIM(s.[Call Recording])) = LTRIM(RTRIM(i.recordingUrl)) COLLATE DATABASE_DEFAULT
     FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
-  )
-FROM app.interaction_insights ii
-INNER JOIN app.interactions i ON i.id = ii.recordingId
+  )                                       AS answersJson,
+  i.interactionDateTime                   AS respondedAt
+FROM app.interactions i
 WHERE i.campaign = 'NMGB Survey'
   AND EXISTS (
     SELECT 1 FROM [icx-rep].[bi].[LeadDataSurvey_NMGB] s
     WHERE LTRIM(RTRIM(s.[Call Recording])) = LTRIM(RTRIM(i.recordingUrl)) COLLATE DATABASE_DEFAULT
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM app.interaction_survey xs WHERE xs.recordingId = i.id
   );
 GO

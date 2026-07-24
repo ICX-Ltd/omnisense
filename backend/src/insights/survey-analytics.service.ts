@@ -17,18 +17,29 @@ export type SurveyFilter = {
   surveyTakenOnly?: boolean;
 };
 
-// ── campaign_answers_json access helpers ─────────────────────────────────────
-// Survey answers live in app.interaction_insights.campaign_answers_json (written
-// per interaction — see sql/nmgb_survey_insights.sql), joined to app.interactions
-// for context (make/model/dealer/date/outcome). The old app.survey_responses
-// table is decommissioned. Everything is scoped to conversation_type='survey' so
-// it never mixes in Parity or other campaigns that share this column.
+// ── survey answer access helpers ─────────────────────────────────────────────
+// Survey feed answers now live in their OWN table (app.interaction_survey),
+// populated at data-load time from the survey feed — no longer in
+// interaction_insights.campaign_answers_json (which the LLM run would null,
+// forcing the old backfill). Joined to app.interactions for context
+// (make/model/dealer/date/outcome). The table only holds surveys, so no
+// conversation_type gate is needed here.
 const FROM_SURVEY =
-  `FROM app.interaction_insights ii INNER JOIN app.interactions ia ON ia.id = ii.recordingId`;
+  `FROM app.interaction_survey s INNER JOIN app.interactions ia ON ia.id = s.recordingId`;
 const EFF_DATE = 'COALESCE(ia.interactionDateTime, ia.createdAt)';
 
-// JSON scalar accessor.
-const CA = (p: string) => `JSON_VALUE(ii.campaign_answers_json, '${p}')`;
+// JSON scalar accessor over the survey answer blob.
+const CA = (p: string) => `JSON_VALUE(s.answersJson, '${p}')`;
+
+// The LLM-mined transcript layer (campaign_transcript_json) STAYS on
+// interaction_insights. These FROMs back the "beyond the survey" transcript
+// methods (which read ii, aliased) — separate from the feed-answer FROM above.
+const FROM_SURVEY_TX =
+  `FROM app.interaction_insights ii INNER JOIN app.interactions ia ON ia.id = ii.recordingId`;
+// Transcript base + LEFT JOIN the survey answers, for the transcript drill which
+// projects survey answer fields (recordSelect) alongside transcript evidence.
+const FROM_SURVEY_TX_ANSWERS =
+  `FROM app.interaction_insights ii INNER JOIN app.interactions ia ON ia.id = ii.recordingId LEFT JOIN app.interaction_survey s ON s.recordingId = ii.recordingId`;
 // A survey boolean flag may serialise as true / 1 / "Yes" depending on the source
 // column type — treat all as set.
 const TRUTHY = `('true', '1', 'Yes', 'Y')`;
@@ -181,10 +192,7 @@ export class SurveyAnalyticsService {
   ) {}
 
   private buildWhere(f: SurveyFilter): { clause: string; params: any[] } {
-    const parts: string[] = [
-      `ii.campaign_answers_json IS NOT NULL`,
-      `ii.conversation_type = 'survey'`,
-    ];
+    const parts: string[] = [`s.answersJson IS NOT NULL`];
     const params: any[] = [];
 
     if (f.from) { parts.push(`${EFF_DATE} >= @${params.length}`); params.push(f.from); }
@@ -194,6 +202,24 @@ export class SurveyAnalyticsService {
     if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
     if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
     if (f.surveyTakenOnly) parts.push(`${CA('$.meta.flow_status')} = 'Survey Taken'`);
+
+    return { clause: 'WHERE ' + parts.join(' AND '), params };
+  }
+
+  // WHERE builder for the transcript methods, which read
+  // interaction_insights.campaign_transcript_json (alias ii). Same context
+  // filters as buildWhere, but gated on the survey conversation_type rather than
+  // the survey answer blob (which now lives in a different table).
+  private buildWhereTx(f: SurveyFilter): { clause: string; params: any[] } {
+    const parts: string[] = [`ii.conversation_type = 'survey'`];
+    const params: any[] = [];
+
+    if (f.from) { parts.push(`${EFF_DATE} >= @${params.length}`); params.push(f.from); }
+    if (f.to) { parts.push(`${EFF_DATE} < @${params.length}`); params.push(f.to); }
+    if (f.campaign) { parts.push(`ia.campaign = @${params.length}`); params.push(f.campaign); }
+    if (f.manufacture) { parts.push(`ia.vehicleMake = @${params.length}`); params.push(f.manufacture); }
+    if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
+    if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
 
     return { clause: 'WHERE ' + parts.join(' AND '), params };
   }
@@ -228,7 +254,7 @@ export class SurveyAnalyticsService {
       allocation_date: Date | null; transcript_text: string | null;
     }>>(
       `SELECT TOP ${ROW_CAP}
-        ii.campaign_answers_json AS caj,
+        s.answersJson AS caj,
         ia.vehicleMake AS make, ia.vehicleModel AS model, ia.dealer AS dealer,
         ${EFF_DATE} AS allocation_date,
         tr.tx AS transcript_text
@@ -279,7 +305,7 @@ export class SurveyAnalyticsService {
     const distinct = async (col: string) =>
       (await this.repo.manager.query<Array<{ v: string }>>(
         `SELECT DISTINCT ${col} AS v ${FROM_SURVEY}
-         WHERE ii.conversation_type = 'survey' AND ii.campaign_answers_json IS NOT NULL
+         WHERE s.answersJson IS NOT NULL
            AND ${col} IS NOT NULL AND ${col} <> '' ORDER BY ${col}`,
       )).map((r) => r.v);
 
@@ -706,7 +732,7 @@ export class SurveyAnalyticsService {
       transcript_text: string | null; transcript_model: string | null;
     }>>(
       `SELECT TOP 1
-        ii.campaign_answers_json AS caj,
+        s.answersJson AS caj,
         ii.campaign_transcript_json AS ctj,
         ia.id AS interaction_id, ia.interactionTpsId AS interaction_tps_id,
         ia.vehicleMake AS manufacture, ia.vehicleModel AS model, ia.dealer AS dealer,
@@ -714,14 +740,14 @@ export class SurveyAnalyticsService {
         ${EFF_DATE} AS allocation_date,
         tr.tx AS transcript_text, tr.tmodel AS transcript_model
       ${FROM_SURVEY}
+      LEFT JOIN app.interaction_insights ii ON ii.recordingId = s.recordingId
       OUTER APPLY (
         SELECT TOP 1 t.text AS tx, t.model AS tmodel
         FROM app.interaction_transcripts t
         WHERE t.recordingId = ia.id
         ORDER BY t.createdAt DESC
       ) tr
-      WHERE ii.conversation_type = 'survey'
-        AND (ii.campaign_answers_json IS NOT NULL OR ii.campaign_transcript_json IS NOT NULL)
+      WHERE (s.answersJson IS NOT NULL OR ii.campaign_transcript_json IS NOT NULL)
         AND (CAST(ia.id AS VARCHAR(36)) = @0
              OR CAST(TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS VARCHAR(20)) = @0)`,
       [String(id)],
@@ -1142,7 +1168,10 @@ export class SurveyAnalyticsService {
   // the survey backfill. One combined method → one endpoint → one dashboard
   // section, so the frontend makes a single call.
   async getTranscriptInsights(f: SurveyFilter) {
-    const { clause, params } = this.buildWhere(f);
+    // Transcript insights read interaction_insights (ii). Shadow FROM_SURVEY for
+    // this method so every query below targets that table, not the answer table.
+    const FROM_SURVEY = FROM_SURVEY_TX;
+    const { clause, params } = this.buildWhereTx(f);
     const tClause = clause + ` AND ii.campaign_transcript_json IS NOT NULL`;
     const CT = (p: string) => `JSON_VALUE(ii.campaign_transcript_json, '${p}')`;
     const q = <T = any>(sql: string) => this.repo.manager.query<T[]>(sql, params);
@@ -1341,7 +1370,11 @@ export class SurveyAnalyticsService {
     limit = 200,
     offset = 0,
   ) {
-    const { clause, params } = this.buildWhere(f);
+    // Transcript drill projects survey answer fields (recordSelect → CA/s) AND
+    // transcript evidence (ii), so shadow FROM_SURVEY to the hybrid FROM that
+    // has both tables, and gate on the survey conversation_type.
+    const FROM_SURVEY = FROM_SURVEY_TX_ANSWERS;
+    const { clause, params } = this.buildWhereTx(f);
     const CT = (p: string) => `JSON_VALUE(ii.campaign_transcript_json, '${p}')`;
     const conds: string[] = [`ii.campaign_transcript_json IS NOT NULL`];
     const extra: any[] = [];

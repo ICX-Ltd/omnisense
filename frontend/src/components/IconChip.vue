@@ -45,6 +45,7 @@ const REGISTRY: Record<string, { icon: Component; tone: IconTone }> = {
   dealer: { icon: Building2, tone: "people" },
   "user-add": { icon: UserPlus, tone: "people" },
   coaching: { icon: GraduationCap, tone: "people" },
+  survey: { icon: ClipboardList, tone: "people" },
   // trends / charts
   trends: { icon: TrendingUp, tone: "analytics" },
   "trend-down": { icon: TrendingDown, tone: "risk" },

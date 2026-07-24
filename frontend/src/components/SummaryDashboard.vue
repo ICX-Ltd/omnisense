@@ -25,6 +25,11 @@ interface Overview {
   }>;
   loadedByDate: Array<{ date: string; count: number }>;
   errorSources: { pipeline: number; transcription: number | null; llm: number | null };
+  survey: {
+    total: number;
+    byType: Array<{ type: string; count: number }>;
+    byCampaign: Array<{ campaign: string; count: number }>;
+  };
 }
 
 const data = ref<Overview | null>(null);
@@ -260,6 +265,50 @@ function statusChip(status: string) {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top: 14px">
+        <!-- Survey output -->
+        <div class="tile">
+          <div class="tile-head">
+            <IconChip name="survey" />
+            <div class="tile-text">
+              <div class="tile-title">Survey Output</div>
+              <div class="tile-desc">Survey responses loaded into the dedicated survey table, by kind</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="stats" style="margin-bottom: 12px">
+              <div class="stat stat--people">
+                <div class="stat-label">Survey responses</div>
+                <div class="stat-value">{{ fmtInt(data.survey.total) }}</div>
+              </div>
+            </div>
+            <div class="hint" v-if="!data.survey.byType.length">No survey responses loaded.</div>
+            <div v-for="s in data.survey.byType" :key="s.type" class="metric-row">
+              <div class="metric-left"><span class="chip chip--secondary">{{ s.type }}</span></div>
+              <div class="metric-right"><span class="count-pill">{{ fmtInt(s.count) }}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Surveys by campaign -->
+        <div class="tile">
+          <div class="tile-head">
+            <IconChip name="distribution" />
+            <div class="tile-text">
+              <div class="tile-title">Surveys by Campaign</div>
+              <div class="tile-desc">Survey responses grouped by campaign</div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="hint" v-if="!data.survey.byCampaign.length">No survey responses loaded.</div>
+            <div v-for="c in data.survey.byCampaign" :key="c.campaign" class="metric-row">
+              <div class="metric-left"><span class="chip chip--secondary">{{ c.campaign }}</span></div>
+              <div class="metric-right"><span class="count-pill">{{ fmtInt(c.count) }}</span></div>
             </div>
           </div>
         </div>

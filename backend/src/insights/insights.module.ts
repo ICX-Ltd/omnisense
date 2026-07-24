@@ -11,12 +11,12 @@ import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { Interaction } from '../db/entities/interaction.entity';
 import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
 import { InsightSummary } from '../db/entities/insight-summary.entity';
-import { SurveyResponse } from '../db/entities/survey-response.entity';
+import { InteractionSurvey } from '../db/entities/interaction-survey.entity';
 import { PromptsModule } from '../modules/prompts/prompts.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([InteractionInsight, Interaction, InteractionTranscript, InsightSummary, SurveyResponse]),
+    TypeOrmModule.forFeature([InteractionInsight, Interaction, InteractionTranscript, InsightSummary, InteractionSurvey]),
     PromptsModule,
   ],
   controllers: [InsightsController, SurveyAnalyticsController],

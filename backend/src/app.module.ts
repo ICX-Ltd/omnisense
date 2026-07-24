@@ -17,7 +17,7 @@ import { InteractionInsight } from './db/entities/interaction-insight.entity';
 import { InsightSummary } from './db/entities/insight-summary.entity';
 import { UserAccount } from './db/entities/user-account.entity';
 import { BatchJob } from './db/entities/batch-job.entity';
-import { SurveyResponse } from './db/entities/survey-response.entity';
+import { InteractionSurvey } from './db/entities/interaction-survey.entity';
 import { PromptTemplate } from './db/entities/prompt-template.entity';
 import { PromptTemplateHistory } from './db/entities/prompt-template-history.entity';
 import { LlmUsageLog } from './db/entities/llm-usage-log.entity';
@@ -51,7 +51,7 @@ import { CsatModule } from './csat/csat.module';
             InsightSummary,
             UserAccount,
             BatchJob,
-            SurveyResponse,
+            InteractionSurvey,
             PromptTemplate,
             PromptTemplateHistory,
             LlmUsageLog,

@@ -6,7 +6,7 @@ import { InteractionInsight } from '../db/entities/interaction-insight.entity';
 import { Interaction } from '../db/entities/interaction.entity';
 import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
 import { InsightSummary } from '../db/entities/insight-summary.entity';
-import { SurveyResponse } from '../db/entities/survey-response.entity';
+import { InteractionSurvey } from '../db/entities/interaction-survey.entity';
 
 import { createProvider } from './providers/provider.factory';
 import { SurveyAnalyticsService, buildSurveyDetail } from './survey-analytics.service';
@@ -182,6 +182,11 @@ export interface DataOverviewResult {
     transcription: number | null;
     llm: number | null;
   };
+  survey: {
+    total: number;
+    byType: Array<{ type: string; count: number }>;
+    byCampaign: Array<{ campaign: string; count: number }>;
+  };
 }
 
 @Injectable()
@@ -195,8 +200,8 @@ export class InsightsSummaryService {
     private transcriptsRepo: Repository<InteractionTranscript>,
     @InjectRepository(InsightSummary)
     private summariesRepo: Repository<InsightSummary>,
-    @InjectRepository(SurveyResponse)
-    private surveyRepo: Repository<SurveyResponse>,
+    @InjectRepository(InteractionSurvey)
+    private surveyRepo: Repository<InteractionSurvey>,
     // Reused for its transcript-insight aggregation (campaign_transcript_json)
     // so the survey narrative can blend transcript signal with survey answers.
     private surveyAnalytics: SurveyAnalyticsService,
@@ -362,6 +367,29 @@ export class InsightsSummaryService {
       ORDER BY date ASC
     `);
 
+    // Survey output — the interaction_survey table may not exist yet on a
+    // deployment that hasn't run the DDL, so fail soft to zeros.
+    const safeRows = async <T = any>(sql: string): Promise<T[]> => {
+      try {
+        return await q<T>(sql);
+      } catch {
+        return [];
+      }
+    };
+    const surveyTotal = await safeCount(`SELECT COUNT(*) AS n FROM app.interaction_survey`);
+    const surveyByType = await safeRows<{ type: string; count: number }>(`
+      SELECT COALESCE(NULLIF(surveyType, ''), '(none)') AS type, COUNT(*) AS count
+      FROM app.interaction_survey
+      GROUP BY COALESCE(NULLIF(surveyType, ''), '(none)')
+      ORDER BY count DESC
+    `);
+    const surveyByCampaign = await safeRows<{ campaign: string; count: number }>(`
+      SELECT COALESCE(NULLIF(campaign, ''), '(unlabelled)') AS campaign, COUNT(*) AS count
+      FROM app.interaction_survey
+      GROUP BY COALESCE(NULLIF(campaign, ''), '(unlabelled)')
+      ORDER BY count DESC
+    `);
+
     return {
       generatedAt: new Date().toISOString(),
       totals: {
@@ -394,6 +422,11 @@ export class InsightsSummaryService {
         llm: await safeCount(
           `SELECT COUNT(*) AS n FROM app.llm_usage_log WHERE outcome <> 'success'`,
         ),
+      },
+      survey: {
+        total: Number(surveyTotal ?? 0),
+        byType: surveyByType.map((r) => ({ type: r.type, count: Number(r.count) })),
+        byCampaign: surveyByCampaign.map((r) => ({ campaign: r.campaign, count: Number(r.count) })),
       },
     };
   }
@@ -3598,16 +3631,21 @@ ${prompt}
 
     const transcript = await this.transcriptsRepo.findOne({ where: { recordingId } });
 
+    // Survey feed answers now live in their own table (interaction_survey), no
+    // longer in interaction_insights.campaign_answers_json. The LLM-mined
+    // transcript layer stays on the insight row.
+    const surveyRow = await this.surveyRepo.findOne({ where: { recordingId } });
+
     // Survey records get an extra projected block so the shared drawer can render
     // the full survey answer set + mined transcript insights (same shape as the
     // survey dashboard's own detail endpoint). Null for non-survey interactions.
-    const survey =
-      insight?.conversation_type === 'survey'
-        ? buildSurveyDetail(
-            insight.campaign_answers_json
-              ? safeParseJson(insight.campaign_answers_json)
+    const isSurvey = !!surveyRow || insight?.conversation_type === 'survey';
+    const survey = isSurvey
+      ? buildSurveyDetail(
+            surveyRow?.answersJson
+              ? safeParseJson(surveyRow.answersJson)
               : {},
-            insight.campaign_transcript_json
+            insight?.campaign_transcript_json
               ? safeParseJson(insight.campaign_transcript_json)
               : null,
             {
