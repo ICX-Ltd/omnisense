@@ -296,6 +296,82 @@ const doNotContestPoints = computed<number[]>(
   () => (board.value?.decisionTrend ?? []).map((t: any) => Number(t.do_not_contest) || 0),
 );
 
+// Supervisor review outcomes. "Raise with client" (accept a contest OR disagree
+// with a do-not-contest) is the key exported metric.
+const raiseWithClientCount = computed(() => board.value?.reviews?.raiseWithClient ?? 0);
+const doNotRaiseCount = computed(() => board.value?.reviews?.doNotRaise ?? 0);
+const raiseWithClientPoints = computed<number[]>(
+  () => (board.value?.reviewTrend ?? []).map((t: any) => Number(t.raiseWithClient) || 0),
+);
+const doNotRaisePoints = computed<number[]>(
+  () => (board.value?.reviewTrend ?? []).map((t: any) => Number(t.doNotRaise) || 0),
+);
+
+// ── Supervisor review action (on the expanded record) ────────────────────────
+const reviewSaving = ref(false);
+async function setReview(action: "accept" | "disagree" | "clear") {
+  if (!expandedId.value) return;
+  reviewSaving.value = true;
+  try {
+    const author = user.value?.name || user.value?.email || "";
+    const res = await axios.post(`${ApiPath.CsatItem}/${expandedId.value}/review`, { action, user: author });
+    // The endpoint returns the authoritative values (nulls when cleared).
+    if (detail.value && res.data) {
+      detail.value.reviewAction = res.data.reviewAction ?? null;
+      detail.value.reviewOutcome = res.data.reviewOutcome ?? null;
+      detail.value.reviewedBy = res.data.reviewedBy ?? null;
+      detail.value.reviewedAt = res.data.reviewedAt ?? null;
+    }
+    await Promise.all([loadBoard(), loadList()]);
+  } catch {
+    /* ignore */
+  } finally {
+    reviewSaving.value = false;
+  }
+}
+
+// ── KPI drill-down modal (record list + CSV export) ──────────────────────────
+const kpiModalOpen = ref(false);
+const kpiModalTitle = ref("");
+const kpiModalRows = ref<any[]>([]);
+const kpiModalLoading = ref(false);
+
+async function openKpiModal(filter: Record<string, string>, title: string) {
+  kpiModalOpen.value = true;
+  kpiModalTitle.value = title;
+  kpiModalRows.value = [];
+  kpiModalLoading.value = true;
+  try {
+    kpiModalRows.value = (await axios.get(ApiPath.CsatList, { params: { ...filter, limit: 1000 } })).data ?? [];
+  } catch {
+    kpiModalRows.value = [];
+  } finally {
+    kpiModalLoading.value = false;
+  }
+}
+
+function exportKpiCsv() {
+  const rows = kpiModalRows.value;
+  if (!rows.length) return;
+  const cols = [
+    "interactionId", "interactionTpsId", "agent", "campaign", "score", "scoreMax",
+    "status", "decision", "confidence", "reviewAction", "reviewOutcome", "reviewedBy",
+    "reviewedAt", "interactionDateTime",
+  ];
+  const esc = (v: any) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [cols.join(","), ...rows.map((r: any) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `csat-${kpiModalTitle.value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 onMounted(loadAll);
 </script>
 
@@ -327,19 +403,32 @@ onMounted(loadAll);
       <div class="stat" :class="board.errors > 0 ? 'stat--risk' : 'stat--neutral'"><div class="stat-label">Errors</div><div class="stat-value">{{ board.errors }}</div></div>
     </div>
 
-    <!-- Decision outcomes with monthly trend -->
+    <!-- Decision outcomes + supervisor review, with monthly trend. Click a tile
+         to see the underlying records and export them to CSV. -->
     <div v-if="board" class="stats" style="margin-bottom: 14px; padding-right: 8px">
-      <div class="stat stat--success">
+      <div class="stat stat--success" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ decision: 'contest' }, 'Contest')">
         <div class="stat-label">Contest</div>
         <div class="stat-value">{{ contestCount }}</div>
         <div v-if="contestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="contestPoints" color="#059669" :width="150" :height="30" /></div>
         <div v-if="contestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
       </div>
-      <div class="stat stat--risk">
+      <div class="stat stat--risk" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ decision: 'do_not_contest' }, 'Do Not Contest')">
         <div class="stat-label">Do Not Contest</div>
         <div class="stat-value">{{ doNotContestCount }}</div>
         <div v-if="doNotContestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="doNotContestPoints" color="#dc2626" :width="150" :height="30" /></div>
         <div v-if="doNotContestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      </div>
+      <div class="stat stat--warning" style="cursor: pointer" title="Accept a contest, or disagree with a do-not-contest. Click to list & export these records." @click="openKpiModal({ reviewOutcome: 'raise_with_client' }, 'Raise with client')">
+        <div class="stat-label">Raise with client</div>
+        <div class="stat-value">{{ raiseWithClientCount }}</div>
+        <div v-if="raiseWithClientPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="raiseWithClientPoints" color="#d97706" :width="150" :height="30" /></div>
+        <div v-if="raiseWithClientPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      </div>
+      <div class="stat stat--neutral" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ reviewOutcome: 'do_not_raise' }, 'Do not raise')">
+        <div class="stat-label">Do not raise</div>
+        <div class="stat-value">{{ doNotRaiseCount }}</div>
+        <div v-if="doNotRaisePoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="doNotRaisePoints" color="#64748b" :width="150" :height="30" /></div>
+        <div v-if="doNotRaisePoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
       </div>
     </div>
 
@@ -416,7 +505,7 @@ onMounted(loadAll);
         <thead>
           <tr>
             <th></th><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th>
-            <th>Status</th><th>Decision</th><th>Conf.</th><th>Date</th><th></th>
+            <th>Status</th><th>Decision</th><th>Raise with client</th><th>Conf.</th><th>Date</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -429,15 +518,29 @@ onMounted(loadAll);
               <td>{{ r.score ?? "—" }}<span v-if="r.scoreMax">/{{ r.scoreMax }}</span></td>
               <td><span :class="statusChip(r.status)" style="font-size: 10px">{{ r.status }}</span></td>
               <td><span :class="decisionChip(r.decision)" style="font-size: 10px">{{ decisionLabel(r.decision) }}</span></td>
+              <td>
+                <span
+                  v-if="r.reviewOutcome === 'raise_with_client'"
+                  class="chip chip--warning"
+                  style="font-size: 10px"
+                  title="Supervisor: raise with client"
+                >Yes</span>
+                <span
+                  v-else-if="r.reviewOutcome === 'do_not_raise'"
+                  class="chip chip--secondary"
+                  style="font-size: 10px"
+                  title="Supervisor: do not raise"
+                >No</span>
+                <span v-else class="muted">—</span>
+              </td>
               <td>{{ fmtPct(r.confidence) }}</td>
               <td class="muted">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</td>
               <td @click.stop>
                 <button v-if="r.status === 'pending' || r.status === 'awaiting_transcript' || r.status === 'error'" class="btn btn--sm" @click="assessRow(r.id)">Assess</button>
-                <button v-else-if="r.status === 'assessed'" class="btn btn--sm" @click="requeueRow(r.id)">Re-assess</button>
               </td>
             </tr>
             <tr v-if="expandedId === r.id" class="detail-row">
-              <td colspan="10">
+              <td colspan="11">
                 <div v-if="loadingDetail" class="muted">Loading…</div>
                 <div v-else-if="detail" class="csat-detail" :class="{ 'csat-detail--split': transcriptOpen }">
                   <div class="csat-assessment">
@@ -456,9 +559,43 @@ onMounted(loadAll);
                       <span v-else-if="detail.parsed?.knowledge_verified === false" class="vbadge vbadge--bad">knowledge incorrect</span>
                       <span v-if="detail.agent_materially_contributed === true" class="vbadge vbadge--bad">agent contributed</span>
                       <span v-else-if="detail.agent_materially_contributed === false" class="vbadge vbadge--good">agent not at fault</span>
-                      <button v-if="detail.recordingId" class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
-                      <button v-if="detail.recordingId" class="btn btn--sm" @click.stop="toggleTranscript">{{ transcriptOpen ? "Hide transcript/comments" : "View transcript/comments" }}</button>
                     </div>
+                  </div>
+
+                  <!-- Supervisor action toolbar — kept separate from the banner's
+                       info chips so buttons and chips don't merge together. -->
+                  <div class="csat-actions">
+                    <button v-if="detail.recordingId" class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
+                    <button v-if="detail.recordingId && !transcriptOpen" class="btn btn--sm" @click.stop="toggleTranscript">View transcript/comments</button>
+                    <button v-if="detail.status === 'assessed'" class="btn btn--sm" @click.stop="requeueRow(r.id)">Re-assess</button>
+                    <span class="csat-actions-sep" />
+                    <template v-if="detail.status === 'assessed'">
+                      <div class="csat-toggle" role="group" aria-label="Supervisor review">
+                        <button
+                          type="button"
+                          class="csat-toggle-btn"
+                          :class="{ 'csat-toggle-btn--active': detail.reviewAction === 'accept' }"
+                          :disabled="reviewSaving"
+                          :title="detail.reviewAction === 'accept' ? 'Click to clear' : 'Accept the AI recommendation'"
+                          @click.stop="setReview(detail.reviewAction === 'accept' ? 'clear' : 'accept')"
+                        >Accept recommendation</button>
+                        <button
+                          type="button"
+                          class="csat-toggle-btn"
+                          :class="{ 'csat-toggle-btn--active': detail.reviewAction === 'disagree' }"
+                          :disabled="reviewSaving"
+                          :title="detail.reviewAction === 'disagree' ? 'Click to clear' : 'Disagree with the AI recommendation'"
+                          @click.stop="setReview(detail.reviewAction === 'disagree' ? 'clear' : 'disagree')"
+                        >Disagree</button>
+                      </div>
+                    </template>
+                    <span
+                      v-if="detail.reviewOutcome"
+                      class="chip"
+                      :class="detail.reviewOutcome === 'raise_with_client' ? 'chip--warning' : 'chip--secondary'"
+                      style="font-size: 10px"
+                      :title="detail.reviewedBy ? 'by ' + detail.reviewedBy : ''"
+                    >{{ detail.reviewOutcome === "raise_with_client" ? "Raise with client" : "Do not raise" }}<template v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</template></span>
                   </div>
 
                   <p v-if="detail.parsed?.headline" class="csat-headline">{{ detail.parsed.headline }}</p>
@@ -520,13 +657,51 @@ onMounted(loadAll);
               </td>
             </tr>
           </template>
-          <tr v-if="!rows.length"><td colspan="10" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
+          <tr v-if="!rows.length"><td colspan="11" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
         </tbody>
       </table>
       </div>
     </div>
 
     <InteractionDetailDrawer v-if="drawerRecordingId" :recording-id="drawerRecordingId" @close="drawerRecordingId = null" />
+
+    <!-- KPI drill-down: records behind a decision/review tile, with CSV export -->
+    <Teleport to="body">
+      <div v-if="kpiModalOpen" class="csat-modal-backdrop" @click="kpiModalOpen = false" />
+      <div v-if="kpiModalOpen" class="csat-modal csat-modal--wide">
+        <div class="csat-modal-head">
+          <div class="csat-modal-title">{{ kpiModalTitle }} · {{ kpiModalRows.length }} record{{ kpiModalRows.length === 1 ? "" : "s" }}</div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <button class="btn btn--sm" :disabled="!kpiModalRows.length" @click="exportKpiCsv">Export CSV</button>
+            <button class="drawer-close-x" @click="kpiModalOpen = false">&times;</button>
+          </div>
+        </div>
+        <div class="csat-modal-body" style="max-height: 62vh; overflow: auto">
+          <div v-if="kpiModalLoading" class="muted">Loading…</div>
+          <div v-else-if="!kpiModalRows.length" class="muted">No records.</div>
+          <table v-else class="tbl">
+            <thead>
+              <tr><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th><th>Decision</th><th>Raise with client</th><th>Date</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in kpiModalRows" :key="r.id">
+                <td>{{ r.interactionId || r.interactionTpsId }}</td>
+                <td>{{ r.agent || "—" }}</td>
+                <td>{{ r.campaign || "—" }}</td>
+                <td>{{ r.score ?? "—" }}<span v-if="r.scoreMax">/{{ r.scoreMax }}</span></td>
+                <td><span :class="decisionChip(r.decision)" style="font-size: 10px">{{ decisionLabel(r.decision) }}</span></td>
+                <td>
+                  <span v-if="r.reviewOutcome === 'raise_with_client'" class="chip chip--warning" style="font-size: 10px">Yes</span>
+                  <span v-else-if="r.reviewOutcome === 'do_not_raise'" class="chip chip--secondary" style="font-size: 10px">No</span>
+                  <span v-else class="muted">—</span>
+                </td>
+                <td class="muted">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Add-comment modal -->
     <Teleport to="body">
@@ -603,6 +778,43 @@ onMounted(loadAll);
 .detail-row td { background: color-mix(in srgb, var(--ink) 3%, transparent); padding: 0; }
 .csat-detail { padding: 14px 16px; }
 
+/* Supervisor action toolbar under the verdict banner (kept apart from the
+   banner's info chips so buttons and chips don't visually merge). */
+.csat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.csat-actions-sep { flex: 1 1 auto; }
+
+/* Deselectable segmented toggle for the supervisor review (accept / disagree).
+   Clicking the active option again clears it. */
+.csat-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.csat-toggle-btn {
+  background: transparent;
+  border: none;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.csat-toggle-btn:not(:last-child) { border-right: 1px solid var(--border); }
+.csat-toggle-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--brand, #6366f1) 8%, transparent); }
+.csat-toggle-btn--active { background: var(--brand, #6366f1); color: #fff; }
+.csat-toggle-btn--active:hover:not(:disabled) { background: var(--brand, #6366f1); }
+.csat-toggle-btn:disabled { opacity: 0.6; cursor: default; }
+
 /* Side-by-side: assessment on the left half, transcript on the right half */
 .csat-detail--split { display: flex; gap: 16px; align-items: flex-start; }
 .csat-detail--split .csat-assessment { flex: 1 1 50%; min-width: 0; }
@@ -676,6 +888,7 @@ onMounted(loadAll);
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
+.csat-modal--wide { width: min(860px, 94vw); }
 .csat-modal-title { font-size: 14px; font-weight: 800; color: var(--ink); }
 .drawer-close-x {
   background: none;

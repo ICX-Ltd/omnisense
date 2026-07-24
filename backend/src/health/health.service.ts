@@ -166,6 +166,16 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     ],
   },
   {
+    file: 'add-csat-review-outcome.sql',
+    columns: [
+      ['interaction_csat', 'reviewOutcome'],
+      ['interaction_csat', 'reviewAction'],
+      ['interaction_csat', 'reviewedBy'],
+      ['interaction_csat', 'reviewedAt'],
+    ],
+    indexes: ['IX_interaction_csat_review'],
+  },
+  {
     file: 'add-interaction-survey.sql',
     tables: ['interaction_survey'],
     indexes: [

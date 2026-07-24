@@ -106,6 +106,26 @@ export class InteractionCsat {
   @Column({ type: 'int', nullable: true })
   attempts!: number | null;
 
+  // ── Supervisor review of the AI decision ─────────────────────────────────
+  // A CSAT supervisor either ACCEPTS the AI recommendation or DISAGREES with it.
+  // The business OUTCOME is what matters: a record is "raise with client" when
+  // the supervisor accepts a CONTEST, or disagrees with a DO NOT CONTEST — those
+  // are the records we export and pass back. reviewOutcome holds that derived
+  // verdict; reviewAction records what the supervisor did relative to the AI.
+  // Both null = not yet reviewed. reviewOutcome indexed (the board KPIs group on it).
+  @Index('IX_interaction_csat_review')
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  reviewOutcome!: string | null; // 'raise_with_client' | 'do_not_raise'
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  reviewAction!: string | null; // 'accept' | 'disagree'
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  reviewedBy!: string | null;
+
+  @Column({ type: 'datetime2', nullable: true })
+  reviewedAt!: Date | null;
+
   // ── Reviewer comments ─────────────────────────────────────────────────────
   // Free-text notes a reviewer adds in the UI while reading the transcript
   // side-by-side. JSON array of { user, comment, at } — never filtered or

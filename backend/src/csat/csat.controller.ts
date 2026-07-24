@@ -46,12 +46,14 @@ export class CsatController {
     @Query('status') status?: string,
     @Query('decision') decision?: string,
     @Query('campaign') campaign?: string,
+    @Query('reviewOutcome') reviewOutcome?: string,
     @Query('limit') limit?: string,
   ) {
     return this.svc.list({
       status,
       decision,
       campaign,
+      reviewOutcome,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
   }
@@ -87,5 +89,13 @@ export class CsatController {
     @Body() body: { comment: string; user?: string },
   ) {
     return this.svc.addComment(id, body?.user ?? null, body?.comment ?? '');
+  }
+
+  @Post('item/:id/review')
+  review(
+    @Param('id') id: string,
+    @Body() body: { action: string; user?: string },
+  ) {
+    return this.svc.setReview(id, body?.action ?? '', body?.user ?? null);
   }
 }

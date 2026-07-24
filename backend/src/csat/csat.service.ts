@@ -177,6 +177,27 @@ export class CsatService {
       .orderBy('ym', 'ASC')
       .getRawMany<{ ym: string; contest: string; do_not_contest: string }>();
 
+    // Supervisor review outcomes. "Raise with client" (accept a contest OR
+    // disagree with a do-not-contest) is the key exported metric.
+    const byReview = await this.csatRepo
+      .createQueryBuilder('c')
+      .select("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' THEN 1 ELSE 0 END)", 'raise_with_client')
+      .addSelect("SUM(CASE WHEN c.reviewOutcome = 'do_not_raise' THEN 1 ELSE 0 END)", 'do_not_raise')
+      .addSelect("SUM(CASE WHEN c.status = 'assessed' AND c.reviewOutcome IS NULL THEN 1 ELSE 0 END)", 'pending_review')
+      .getRawOne<{ raise_with_client: string; do_not_raise: string; pending_review: string }>();
+
+    // Monthly raise-with-client / do-not-raise counts (by review date) for the
+    // headline sparklines.
+    const reviewTrend = await this.csatRepo
+      .createQueryBuilder('c')
+      .select("FORMAT(c.reviewedAt, 'yyyy-MM')", 'ym')
+      .addSelect("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' THEN 1 ELSE 0 END)", 'raise_with_client')
+      .addSelect("SUM(CASE WHEN c.reviewOutcome = 'do_not_raise' THEN 1 ELSE 0 END)", 'do_not_raise')
+      .where('c.reviewOutcome IS NOT NULL AND c.reviewedAt IS NOT NULL')
+      .groupBy("FORMAT(c.reviewedAt, 'yyyy-MM')")
+      .orderBy('ym', 'ASC')
+      .getRawMany<{ ym: string; raise_with_client: string; do_not_raise: string }>();
+
     const num = (v: string | number | null | undefined) => Number(v) || 0;
     const statusCounts: Record<string, number> = {};
     for (const r of byStatus) statusCounts[r.status] = num(r.count);
@@ -195,6 +216,16 @@ export class CsatService {
       excluded: num(statusCounts['excluded']),
       decisions: byDecision.map((r) => ({ decision: r.decision, count: num(r.count) })),
       decisionTrend: decisionTrend.map((r) => ({ ym: r.ym, contest: num(r.contest), do_not_contest: num(r.do_not_contest) })),
+      reviews: {
+        raiseWithClient: num(byReview?.raise_with_client),
+        doNotRaise: num(byReview?.do_not_raise),
+        pendingReview: num(byReview?.pending_review),
+      },
+      reviewTrend: reviewTrend.map((r) => ({
+        ym: r.ym,
+        raiseWithClient: num(r.raise_with_client),
+        doNotRaise: num(r.do_not_raise),
+      })),
       byCampaign: byCampaign.map((r) => ({
         campaign: r.campaign,
         total: num(r.total),
@@ -206,7 +237,7 @@ export class CsatService {
   }
 
   // ─── List (board table) ────────────────────────────────────────────────────
-  async list(opts: { status?: string; decision?: string; campaign?: string; limit?: number }) {
+  async list(opts: { status?: string; decision?: string; campaign?: string; reviewOutcome?: string; limit?: number }) {
     const qb = this.csatRepo
       .createQueryBuilder('c')
       .leftJoin(Interaction, 'ia', 'ia.id = c.recordingId')
@@ -223,6 +254,10 @@ export class CsatService {
         'c.dissatisfaction_source AS dissatisfaction_source',
         'c.rationale AS rationale',
         'c.comment AS comment',
+        'c.reviewOutcome AS reviewOutcome',
+        'c.reviewAction AS reviewAction',
+        'c.reviewedBy AS reviewedBy',
+        'c.reviewedAt AS reviewedAt',
         'c.assessedAt AS assessedAt',
         'c.createdAt AS createdAt',
         'ia.agent AS agent',
@@ -235,6 +270,7 @@ export class CsatService {
     if (opts.status) qb.andWhere('c.status = :st', { st: opts.status });
     if (opts.decision) qb.andWhere('c.decision = :dc', { dc: opts.decision });
     if (opts.campaign) qb.andWhere('c.campaign = :cp', { cp: opts.campaign });
+    if (opts.reviewOutcome) qb.andWhere('c.reviewOutcome = :ro', { ro: opts.reviewOutcome });
 
     return qb.getRawMany();
   }
@@ -246,6 +282,44 @@ export class CsatService {
       ...row,
       parsed: row.json ? safeParse(row.json) : null,
       comments: row.reviewerCommentsJson ? safeParse(row.reviewerCommentsJson) ?? [] : [],
+    };
+  }
+
+  // Record a supervisor review: they ACCEPT the AI decision or DISAGREE with it.
+  // The business outcome is derived: "raise with client" when they accept a
+  // CONTEST or disagree with a DO NOT CONTEST (those get exported/passed back),
+  // else "do not raise". Stamps who + when.
+  async setReview(id: string, action: string, user: string | null) {
+    const act = (action ?? '').trim().toLowerCase();
+    if (act !== 'accept' && act !== 'disagree' && act !== 'clear') {
+      throw new BadRequestException("action must be 'accept', 'disagree' or 'clear'");
+    }
+    const row = await this.csatRepo.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('CSAT record not found');
+
+    if (act === 'clear') {
+      // Full deselection — record is back to un-reviewed.
+      row.reviewAction = null;
+      row.reviewOutcome = null;
+      row.reviewedBy = null;
+      row.reviewedAt = null;
+    } else {
+      // AI said contest? Accepting a contest, or disagreeing with a non-contest,
+      // both mean "raise with client".
+      const aiContest = row.decision === 'contest';
+      const raise = act === 'accept' ? aiContest : !aiContest;
+
+      row.reviewAction = act;
+      row.reviewOutcome = raise ? 'raise_with_client' : 'do_not_raise';
+      row.reviewedBy = (user ?? '').trim() || null;
+      row.reviewedAt = new Date();
+    }
+    await this.csatRepo.save(row);
+    return {
+      reviewOutcome: row.reviewOutcome,
+      reviewAction: row.reviewAction,
+      reviewedBy: row.reviewedBy,
+      reviewedAt: row.reviewedAt,
     };
   }
 
