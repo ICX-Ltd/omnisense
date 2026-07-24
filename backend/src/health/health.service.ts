@@ -166,6 +166,15 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     ],
   },
   {
+    file: 'add-interaction-survey.sql',
+    tables: ['interaction_survey'],
+    indexes: [
+      'IX_interaction_survey_recording',
+      'IX_interaction_survey_tpsid',
+      'IX_interaction_survey_type',
+    ],
+  },
+  {
     file: 'add-llm-usage-log.sql',
     tables: ['llm_usage_log'],
     indexes: ['IX_llm_usage_log_createdAt'],
