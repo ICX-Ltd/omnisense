@@ -80,4 +80,12 @@ export class CsatController {
   detail(@Param('id') id: string) {
     return this.svc.getDetail(id);
   }
+
+  @Post('item/:id/comment')
+  addComment(
+    @Param('id') id: string,
+    @Body() body: { comment: string; user?: string },
+  ) {
+    return this.svc.addComment(id, body?.user ?? null, body?.comment ?? '');
+  }
 }

@@ -1424,7 +1424,11 @@ const answerGroups = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  background: linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
+  /* Same aurora treatment as the main app header. */
+  background:
+    radial-gradient(90% 140% at 96% -30%, rgba(6, 182, 212, 0.34), transparent 55%),
+    radial-gradient(90% 140% at -8% 130%, rgba(139, 92, 246, 0.30), transparent 55%),
+    linear-gradient(135deg, #1a3a5c 0%, #2b6cb0 100%);
   color: #fff;
   flex-shrink: 0;
 }
@@ -1632,6 +1636,7 @@ const answerGroups = computed(() => {
 }
 
 .drawer-section-title {
+  position: relative;
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -1639,19 +1644,22 @@ const answerGroups = computed(() => {
   color: var(--brand, #6366f1);
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--brand, #6366f1) 20%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--brand, #6366f1) 15%, var(--border));
   display: flex;
   align-items: center;
   gap: 8px;
 }
-/* Leading accent bar marks the start of each top-level section. */
-.drawer-section-title::before {
+/* Short tab-style underline accent under the heading start (replaces the old
+   vertical bar, which read like a stray "I" next to the text). */
+.drawer-section-title::after {
   content: "";
-  width: 3px;
-  height: 13px;
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 26px;
+  height: 2px;
   border-radius: 2px;
   background: var(--brand, #6366f1);
-  flex-shrink: 0;
 }
 
 .chat-view-toggle {
@@ -1732,12 +1740,22 @@ const answerGroups = computed(() => {
 
 .stats-strip {
   display: flex;
-  gap: 16px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+}
+/* Drawer KPIs sit in narrow columns — keep each compact (sized to its content)
+   rather than stretching to fill the panel. */
+.stats-strip .stat {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 8px 12px;
+}
+.stats-strip .stat-value {
+  font-size: 15px;
 }
 
 .dim-row {

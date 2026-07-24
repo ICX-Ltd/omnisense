@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 
@@ -13,6 +18,13 @@ import { InsightsProviderName } from '../insights/types/insights-provider.type';
 // Only CSATs at/below this score (out of 5) are assessed — 4 and 5 are excluded
 // (the framework is about contesting negative scores). Env-overridable.
 const CSAT_MAX_SCORE = Number(process.env.CSAT_ASSESS_MAX_SCORE) || 3;
+
+// A reviewer comment stored on a CSAT record (reviewerCommentsJson array).
+export interface CsatReviewerComment {
+  user: string | null;
+  comment: string;
+  at: string; // ISO timestamp
+}
 
 // One CSAT survey result arriving from the third-party feed.
 export interface CsatFeedItem {
@@ -233,7 +245,28 @@ export class CsatService {
     return {
       ...row,
       parsed: row.json ? safeParse(row.json) : null,
+      comments: row.reviewerCommentsJson ? safeParse(row.reviewerCommentsJson) ?? [] : [],
     };
+  }
+
+  // Append a reviewer comment (user + timestamp + text) to a CSAT record.
+  async addComment(id: string, user: string | null, comment: string) {
+    const text = (comment ?? '').trim();
+    if (!text) throw new BadRequestException('comment is required');
+    const row = await this.csatRepo.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('CSAT record not found');
+
+    const list: CsatReviewerComment[] = row.reviewerCommentsJson
+      ? safeParse(row.reviewerCommentsJson) ?? []
+      : [];
+    list.push({
+      user: (user ?? '').trim() || null,
+      comment: text,
+      at: new Date().toISOString(),
+    });
+    row.reviewerCommentsJson = JSON.stringify(list);
+    await this.csatRepo.save(row);
+    return { comments: list };
   }
 
   // ─── Batch assessment ──────────────────────────────────────────────────────

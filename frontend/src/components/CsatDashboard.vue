@@ -4,6 +4,10 @@ import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import Sparkline from "./Sparkline.vue";
+import { getInteractionDetail } from "@/services/interaction-search.service";
+import { useAuth } from "@/composables/useAuth";
+
+const { user } = useAuth();
 
 const loading = ref(false);
 const error = ref("");
@@ -28,6 +32,70 @@ const loadingDetail = ref(false);
 
 // Interaction transcript drawer
 const drawerRecordingId = ref<string | null>(null);
+
+// Side-by-side transcript for the expanded CSAT record
+const transcriptOpen = ref(false);
+const transcriptText = ref("");
+const transcriptLoading = ref(false);
+const transcriptError = ref("");
+
+async function toggleTranscript() {
+  if (transcriptOpen.value) {
+    transcriptOpen.value = false;
+    return;
+  }
+  const rid = detail.value?.recordingId;
+  if (!rid) return;
+  transcriptOpen.value = true;
+  if (transcriptText.value) return; // already loaded for this record
+  transcriptLoading.value = true;
+  transcriptError.value = "";
+  try {
+    const d = await getInteractionDetail(rid);
+    transcriptText.value = d?.transcript?.text || "";
+    if (!transcriptText.value) transcriptError.value = "No transcript available for this interaction.";
+  } catch {
+    transcriptError.value = "Could not load transcript.";
+  } finally {
+    transcriptLoading.value = false;
+  }
+}
+
+// ── Reviewer comments ────────────────────────────────────────────────────────
+const comments = ref<Array<{ user: string | null; comment: string; at: string }>>([]);
+const commentModalOpen = ref(false);
+const commentDraft = ref("");
+const commentSaving = ref(false);
+const commentError = ref("");
+
+function openCommentModal() {
+  commentDraft.value = "";
+  commentError.value = "";
+  commentModalOpen.value = true;
+}
+function closeCommentModal() {
+  commentModalOpen.value = false;
+}
+
+async function saveComment() {
+  const text = commentDraft.value.trim();
+  if (!text || !expandedId.value) return;
+  commentSaving.value = true;
+  commentError.value = "";
+  try {
+    const author = user.value?.name || user.value?.email || "";
+    const res = await axios.post(`${ApiPath.CsatItem}/${expandedId.value}/comment`, {
+      comment: text,
+      user: author,
+    });
+    comments.value = res.data?.comments ?? comments.value;
+    commentModalOpen.value = false;
+  } catch (e: any) {
+    commentError.value = e?.response?.data?.message || e?.message || "Could not save comment";
+  } finally {
+    commentSaving.value = false;
+  }
+}
 
 const campaigns = computed<string[]>(() =>
   (board.value?.byCampaign ?? []).map((c: any) => c.campaign).filter((c: string) => c && c !== "unknown"),
@@ -89,17 +157,28 @@ async function rematch() {
   }
 }
 
+function resetTranscript() {
+  transcriptOpen.value = false;
+  transcriptText.value = "";
+  transcriptError.value = "";
+  comments.value = [];
+  commentModalOpen.value = false;
+}
+
 async function toggleRow(id: string) {
   if (expandedId.value === id) {
     expandedId.value = null;
     detail.value = null;
+    resetTranscript();
     return;
   }
   expandedId.value = id;
   detail.value = null;
+  resetTranscript();
   loadingDetail.value = true;
   try {
     detail.value = (await axios.get(`${ApiPath.CsatItem}/${id}`)).data;
+    comments.value = detail.value?.comments ?? [];
   } catch {
     detail.value = null;
   } finally {
@@ -360,7 +439,8 @@ onMounted(loadAll);
             <tr v-if="expandedId === r.id" class="detail-row">
               <td colspan="10">
                 <div v-if="loadingDetail" class="muted">Loading…</div>
-                <div v-else-if="detail" class="csat-detail">
+                <div v-else-if="detail" class="csat-detail" :class="{ 'csat-detail--split': transcriptOpen }">
+                  <div class="csat-assessment">
                   <!-- Verdict banner -->
                   <div class="verdict" :class="'verdict--' + (detail.decision || 'unknown')">
                     <div class="verdict-main">
@@ -377,6 +457,7 @@ onMounted(loadAll);
                       <span v-if="detail.agent_materially_contributed === true" class="vbadge vbadge--bad">agent contributed</span>
                       <span v-else-if="detail.agent_materially_contributed === false" class="vbadge vbadge--good">agent not at fault</span>
                       <button v-if="detail.recordingId" class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
+                      <button v-if="detail.recordingId" class="btn btn--sm" @click.stop="toggleTranscript">{{ transcriptOpen ? "Hide transcript/comments" : "View transcript/comments" }}</button>
                     </div>
                   </div>
 
@@ -410,6 +491,30 @@ onMounted(loadAll);
                   </div>
 
                   <p v-if="detail.lastError" class="detail-error">{{ detail.lastError }}</p>
+                  </div>
+
+                  <!-- Side-by-side transcript for this record -->
+                  <div v-if="transcriptOpen" class="csat-transcript-pane">
+                    <div class="csat-transcript-head">
+                      <div class="csat-block-title" style="margin: 0">Transcript</div>
+                      <div class="csat-transcript-actions">
+                        <button class="btn btn--sm" @click.stop="openCommentModal">Add comment</button>
+                        <button class="btn btn--ghost btn--sm" @click.stop="transcriptOpen = false">Close transcript</button>
+                      </div>
+                    </div>
+                    <div v-if="transcriptLoading" class="muted">Loading transcript…</div>
+                    <div v-else-if="transcriptError" class="muted">{{ transcriptError }}</div>
+                    <pre v-else class="csat-transcript-text">{{ transcriptText }}</pre>
+
+                    <!-- Reviewer comments saved on this record -->
+                    <div v-if="comments.length" class="csat-comments">
+                      <div class="csat-block-title">Reviewer comments</div>
+                      <div v-for="(c, i) in comments" :key="i" class="csat-comment-item">
+                        <div class="csat-comment-meta"><strong>{{ c.user || "reviewer" }}</strong> · {{ fmtDate(c.at) }}</div>
+                        <div class="csat-comment-body">{{ c.comment }}</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div v-else class="muted">No detail.</div>
               </td>
@@ -422,6 +527,36 @@ onMounted(loadAll);
     </div>
 
     <InteractionDetailDrawer v-if="drawerRecordingId" :recording-id="drawerRecordingId" @close="drawerRecordingId = null" />
+
+    <!-- Add-comment modal -->
+    <Teleport to="body">
+      <div v-if="commentModalOpen" class="csat-modal-backdrop" @click="closeCommentModal" />
+      <div v-if="commentModalOpen" class="csat-modal">
+        <div class="csat-modal-head">
+          <div class="csat-modal-title">Add comment</div>
+          <button class="drawer-close-x" @click="closeCommentModal">&times;</button>
+        </div>
+        <div class="csat-modal-body">
+          <textarea
+            v-model="commentDraft"
+            class="csat-modal-text"
+            rows="4"
+            placeholder="Add a note on this CSAT record / transcript…"
+            @keydown.enter.exact.prevent="saveComment"
+          />
+          <div v-if="commentError" class="detail-error">{{ commentError }}</div>
+          <div class="hint" style="margin-top: 6px">
+            Saved against this record with your name and the current date.
+          </div>
+        </div>
+        <div class="csat-modal-foot">
+          <button class="btn btn--ghost btn--sm" @click="closeCommentModal">Cancel</button>
+          <button class="btn btn--primary btn--sm" :disabled="commentSaving || !commentDraft.trim()" @click="saveComment">
+            {{ commentSaving ? "Saving…" : "Save comment" }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -467,6 +602,110 @@ onMounted(loadAll);
 
 .detail-row td { background: color-mix(in srgb, var(--ink) 3%, transparent); padding: 0; }
 .csat-detail { padding: 14px 16px; }
+
+/* Side-by-side: assessment on the left half, transcript on the right half */
+.csat-detail--split { display: flex; gap: 16px; align-items: flex-start; }
+.csat-detail--split .csat-assessment { flex: 1 1 50%; min-width: 0; }
+.csat-transcript-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+.csat-transcript-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.csat-transcript-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.csat-transcript-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink);
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface-soft, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+/* Reviewer comments list */
+.csat-comments { margin-top: 14px; }
+.csat-comment-item {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand, #6366f1) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand, #6366f1) 15%, transparent);
+}
+.csat-comment-meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.csat-comment-body { font-size: 13px; color: var(--ink); line-height: 1.45; white-space: pre-wrap; }
+
+/* Add-comment modal */
+.csat-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1100;
+}
+.csat-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+}
+.csat-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.csat-modal-title { font-size: 14px; font-weight: 800; color: var(--ink); }
+.drawer-close-x {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+}
+.csat-modal-body { padding: 16px 18px; }
+.csat-modal-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface, #fff);
+}
+.csat-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
 
 /* Verdict banner */
 .verdict {

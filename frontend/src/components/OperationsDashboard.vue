@@ -1055,6 +1055,13 @@ onMounted(async () => {
         </div>
         <div class="tile-body">
           <div v-if="sortedTrajectory.length" class="traj-list">
+            <div class="traj-head-row">
+              <span>Agent</span>
+              <span>12-month trend</span>
+              <span class="th-score">Latest</span>
+              <span class="th-change">Change</span>
+              <span class="th-vol">Volume</span>
+            </div>
             <div
               v-for="a in visibleTrajectory"
               :key="a.agent"
@@ -1063,7 +1070,7 @@ onMounted(async () => {
               title="Filter the dashboard to this agent"
             >
               <div class="traj-name">{{ a.agent }}</div>
-              <Sparkline :points="trajPoints(a)" :color="(a.delta ?? 0) >= 0 ? '#059669' : '#dc2626'" :width="140" :height="28" />
+              <div class="traj-spark"><Sparkline :points="trajPoints(a)" :color="(a.delta ?? 0) >= 0 ? '#059669' : '#dc2626'" :width="140" :height="28" /></div>
               <span class="traj-latest" :class="scoreChip(a.latest)">{{ fmtScore(a.latest) }}</span>
               <span class="traj-delta" :class="deltaClass(a.delta)">{{ deltaLabel(a.delta) }}</span>
               <span class="traj-total">{{ a.total }} · {{ a.scoredMonths }}mo</span>
@@ -2500,30 +2507,67 @@ onMounted(async () => {
 /* ── Agent trajectory ─────────────────────────────────────────────────────── */
 .traj-sort { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 .traj-list { display: flex; flex-direction: column; }
+/* Header and data rows share ONE column template so every cell lines up.
+   Fixed widths on the right-hand cells (not `auto`) so the score, change and
+   volume columns start at the same x on every row regardless of content. */
+.traj-head-row,
 .traj-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.4fr) 160px auto auto 1fr;
+  grid-template-columns: minmax(140px, 1fr) 150px 56px 84px 104px;
   align-items: center;
-  gap: 12px;
-  padding: 8px 6px;
+  column-gap: 16px;
+}
+.traj-head-row {
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.traj-head-row > span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.traj-head-row > .th-score,
+.traj-head-row > .th-change { justify-self: start; }
+.traj-head-row > .th-vol { justify-self: end; }
+.traj-row {
+  padding: 9px 10px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   border-radius: 6px;
+  transition: background 0.12s;
 }
 .traj-row:last-child { border-bottom: none; }
 .traj-row:hover { background: color-mix(in srgb, var(--brand, #6366f1) 7%, transparent); }
-.traj-name { font-size: 13px; font-weight: 600; color: var(--ink); word-break: break-word; }
-.traj-latest { font-size: 11px; justify-self: start; }
-.traj-delta { font-size: 12px; font-weight: 700; justify-self: start; }
+.traj-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.traj-spark { display: flex; align-items: center; height: 28px; }
+.traj-spark .spark-wrap { padding: 0; border: none; background: none !important; }
+.traj-latest { justify-self: start; font-size: 11px; }
+.traj-delta { justify-self: start; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .traj-up { color: #059669; }
 .traj-down { color: #dc2626; }
 .traj-flat { color: var(--muted); }
-.traj-total { font-size: 11px; color: var(--muted); justify-self: end; }
+.traj-total { justify-self: end; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .traj-empty { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 4px 0 0; }
 .traj-empty code { font-family: ui-monospace, "Courier New", monospace; font-size: 11px; }
 @media (max-width: 640px) {
-  .traj-row { grid-template-columns: 1fr auto; row-gap: 4px; }
-  .traj-row .spark-wrap { grid-column: 1 / -1; }
+  .traj-head-row { display: none; }
+  .traj-row {
+    grid-template-columns: 1fr auto auto;
+    column-gap: 10px;
+    row-gap: 6px;
+  }
+  .traj-name { grid-column: 1 / -1; }
+  .traj-spark { grid-column: 1 / -1; }
 }
 
 /* ── Stats strip ───────────────────────────────────────────────────────────── */

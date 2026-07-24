@@ -106,6 +106,13 @@ export class InteractionCsat {
   @Column({ type: 'int', nullable: true })
   attempts!: number | null;
 
+  // ── Reviewer comments ─────────────────────────────────────────────────────
+  // Free-text notes a reviewer adds in the UI while reading the transcript
+  // side-by-side. JSON array of { user, comment, at } — never filtered or
+  // aggregated in SQL, so it stays a single json blob per the column rule.
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  reviewerCommentsJson!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 
