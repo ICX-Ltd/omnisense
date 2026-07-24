@@ -1,7 +1,7 @@
 <template>
   <div class="mr-root">
     <div class="mr-hero">
-      <h2 class="mr-title">Model Registry</h2>
+      <h2 class="mr-title">AI Model Registry</h2>
       <p class="mr-sub">The models offered in the insights/narrative dropdowns and the active transcription model — editable here, no deploy needed. Changes apply within a minute.</p>
     </div>
 
@@ -13,7 +13,7 @@
         <IconChip name="discover" />
         <div class="tile-text">
           <div class="tile-title">
-            Check for new models
+            Check for new AI Models
             <span v-if="discovery" class="chip kpi-chip" :class="discNewTotal ? 'chip--info' : 'chip--secondary'">{{ discNewTotal ? `${discNewTotal} new` : "up to date" }}</span>
           </div>
           <div class="tile-desc">Asks each configured provider what models it currently offers and flags any that aren't in the registry yet — so new releases and upgrades don't get missed.</div>

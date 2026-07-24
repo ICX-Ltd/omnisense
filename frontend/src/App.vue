@@ -42,7 +42,7 @@
                 <template v-if="canSeeAdminTools">
                   <div class="settings-menu-divider" />
                   <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'prompts' }" @click="tab = 'prompts'; setOpen = false">Prompts</button>
-                  <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'models' }" @click="tab = 'models'; setOpen = false">Models</button>
+                  <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'models' }" @click="tab = 'models'; setOpen = false">AI Models</button>
                   <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'health' }" @click="tab = 'health'; setOpen = false">System Health</button>
                 </template>
               </div>
