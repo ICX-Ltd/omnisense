@@ -326,3 +326,38 @@ Updates
   never read; still in raw json). Run sql/drop-insight-dead-columns.sql on prod.
 - Fix (1.57.2): System Health false positive — migration manifest listed table 'insight_summary' but
   the real table is 'insight_summaries' (plural), so drift always reported it missing. Corrected.
+
+2026-07-24
+- UI/UX polish pass (frontend-only, 1.60.x–1.67.x): adopted a Lucide icon system with tinted
+  IconChip, a consistent KPI-tile style (soft card + accent stripe + embedded sparkline plate),
+  unified/collapsible filter panels across the 4 dashboards, aurora header + login accents,
+  chip-family taxonomy, and the "Summary" page reworked into a "Data Overview" DB/data snapshot.
+  Settings gear now groups Prompts / AI Models / System Health; dashboards grouped under a
+  "Dashboards" menu (CSAT relabeled "CSAT Assessment"). Agent Trajectory tile rebuilt as an aligned
+  table (fixed columns + header row).
+- System Health provider probes + schema-drift manifest: on-demand live LLM provider connectivity
+  checks (valid key / invalid / out-of-tokens) and a MIGRATION_MANIFEST that flags any expected
+  table/column/index missing on the server (names the SQL file to run). NOTE: add a manifest row in
+  health.service.ts whenever a migration adds schema the app reads, or the drift guard is blind to it.
+- CSAT drawer + review workflow:
+  * Side-by-side transcript view on a CSAT record ("View transcript/comments" splits 50/50), plus
+    reviewer comments (user + date + text). Migration: backend/sql/add-csat-reviewer-comments.sql.
+  * Supervisor review — a deselectable Accept/Disagree toggle per assessed record. Outcome derived
+    server-side: accepting a CONTEST or disagreeing with a DO NOT CONTEST both mean "raise with
+    client" (the key metric, exported and passed back). New "Raise with client" / "Do not raise" KPI
+    tiles with sparklines; all four decision/review tiles click through to a record modal with CSV
+    export; grid + drill show a "Raise with client" Yes/No column. POST /uiapi/csat/item/:id/review
+    {action: accept|disagree|clear}. Migration: backend/sql/add-csat-review-outcome.sql.
+- Survey feed answers moved OUT of interaction_insights.campaign_answers_json into their own table
+  app.interaction_survey (recordingId link, surveyType, answersJson), populated at load time. This
+  RETIRES the survey backfill entirely (the LLM never touches the new table). Parity still uses
+  campaign_answers_json (untouched); LLM transcript insights stay in campaign_transcript_json. New
+  Data Overview "Survey Output" tile. Migrations (run in order): add-interaction-survey.sql (DDL),
+  migrate-survey-answers-to-interaction-survey.sql (one-time, run BEFORE the next LLM batch),
+  nmgb_survey_load.sql (ongoing load, replaces the deleted nmgb_survey_backfill.sql).
+- Labelling: "Models" → "AI Models" (settings + page title "AI Model Registry" + "Check for new AI
+  Models") to distinguish from vehicle models.
+- Deploy checklist for this batch — run these idempotent scripts on ai_insight, then check System
+  Health (Schema/migrations should go green): add-csat-reviewer-comments.sql, add-csat-review-outcome.sql,
+  add-interaction-survey.sql, migrate-survey-answers-to-interaction-survey.sql, nmgb_survey_load.sql.
+  APP_VERSION → 1.71.1.
