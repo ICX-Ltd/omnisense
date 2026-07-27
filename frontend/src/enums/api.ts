@@ -14,6 +14,8 @@ export const ApiPath = {
   CsatRunBatch: "/uiapi/csat/run-batch",
   CsatRematch: "/uiapi/csat/rematch",
   CsatItem: "/uiapi/csat/item", // + /:id, /:id/assess, /:id/requeue
+  CsatRaise: "/uiapi/csat/raise", // bulk/single "sent to client" marker
+  CsatClientResponse: "/uiapi/csat/client-response", // bulk/single client verdict
   InsightsSummaryClientServices: "/uiapi/insights/summary/client-services",
   InsightsSummaryObjections: "/uiapi/insights/summary/objections",
   InsightsSummaryObjectionAssessments: "/uiapi/insights/summary/objection-assessments",

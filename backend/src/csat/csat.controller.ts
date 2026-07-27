@@ -37,8 +37,8 @@ export class CsatController {
   }
 
   @Get('board')
-  board() {
-    return this.svc.board();
+  board(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.svc.board({ from, to });
   }
 
   @Get('list')
@@ -47,6 +47,10 @@ export class CsatController {
     @Query('decision') decision?: string,
     @Query('campaign') campaign?: string,
     @Query('reviewOutcome') reviewOutcome?: string,
+    @Query('raised') raised?: string,
+    @Query('clientOutcome') clientOutcome?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('limit') limit?: string,
   ) {
     return this.svc.list({
@@ -54,8 +58,39 @@ export class CsatController {
       decision,
       campaign,
       reviewOutcome,
+      raised,
+      clientOutcome,
+      from,
+      to,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  // Mark records as actually sent to the client. Bulk (the export set) or single.
+  @Post('raise')
+  setRaised(
+    @Body() body: { ids: string[]; user?: string; raised?: boolean },
+  ) {
+    return this.svc.setRaised(
+      body?.ids ?? [],
+      body?.user ?? null,
+      body?.raised !== false,
+    );
+  }
+
+  // Record the client's answer on raised records: they accept the contest (no
+  // longer a fail) or reject it (it stands). Comment is required.
+  @Post('client-response')
+  setClientResponse(
+    @Body()
+    body: { ids: string[]; outcome: string; comment?: string; user?: string },
+  ) {
+    return this.svc.setClientResponse(
+      body?.ids ?? [],
+      body?.outcome ?? '',
+      body?.comment ?? '',
+      body?.user ?? null,
+    );
   }
 
   @Post('run-batch')

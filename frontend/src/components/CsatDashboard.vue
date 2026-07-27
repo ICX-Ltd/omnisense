@@ -18,6 +18,87 @@ const rows = ref<any[]>([]);
 const fStatus = ref("");
 const fDecision = ref("");
 const fCampaign = ref("");
+const fRaised = ref("");
+const fClientOutcome = ref("");
+
+// ── Date range ───────────────────────────────────────────────────────────────
+// Reviewing CSATs is a weekly job, so the whole page (tiles included) is scoped
+// to a range. Defaults to the last 7 days — "All time" is one click away.
+const fFrom = ref("");
+const fTo = ref("");
+
+function isoDay(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function shiftDays(base: Date, days: number) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+// Monday-start week containing `base`.
+function startOfWeek(base: Date) {
+  const d = new Date(base);
+  const dow = (d.getDay() + 6) % 7; // Mon = 0
+  return shiftDays(d, -dow);
+}
+
+type RangePreset = "last7" | "last30" | "thisWeek" | "lastWeek" | "thisMonth" | "all";
+const activePreset = ref<RangePreset | "custom">("last7");
+
+function applyPreset(p: RangePreset) {
+  activePreset.value = p;
+  const today = new Date();
+  switch (p) {
+    case "last7":
+      fFrom.value = isoDay(shiftDays(today, -6));
+      fTo.value = isoDay(today);
+      break;
+    case "last30":
+      fFrom.value = isoDay(shiftDays(today, -29));
+      fTo.value = isoDay(today);
+      break;
+    case "thisWeek":
+      fFrom.value = isoDay(startOfWeek(today));
+      fTo.value = isoDay(today);
+      break;
+    case "lastWeek": {
+      const lastMon = shiftDays(startOfWeek(today), -7);
+      fFrom.value = isoDay(lastMon);
+      fTo.value = isoDay(shiftDays(lastMon, 6));
+      break;
+    }
+    case "thisMonth":
+      fFrom.value = isoDay(new Date(today.getFullYear(), today.getMonth(), 1));
+      fTo.value = isoDay(today);
+      break;
+    case "all":
+      fFrom.value = "";
+      fTo.value = "";
+      break;
+  }
+  loadAll();
+}
+
+// Typing in the date inputs directly drops the preset highlight.
+function onDateEdited() {
+  activePreset.value = "custom";
+  loadAll();
+}
+
+// Shared by board + list so the tiles and the table always agree.
+function rangeParams(): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (fFrom.value) p.from = fFrom.value;
+  if (fTo.value) p.to = fTo.value;
+  return p;
+}
+
+const rangeLabel = computed(() => {
+  if (!fFrom.value && !fTo.value) return "all time";
+  if (fFrom.value && fTo.value) return `${fFrom.value} → ${fTo.value}`;
+  return fFrom.value ? `from ${fFrom.value}` : `up to ${fTo.value}`;
+});
 
 // Batch
 const batchLimit = ref(25);
@@ -103,18 +184,23 @@ const campaigns = computed<string[]>(() =>
 
 async function loadBoard() {
   try {
-    board.value = (await axios.get(ApiPath.CsatBoard)).data;
+    board.value = (await axios.get(ApiPath.CsatBoard, { params: rangeParams() })).data;
   } catch {
     board.value = null;
   }
 }
 
 async function loadList() {
-  const params: Record<string, string> = {};
+  const params: Record<string, string> = { ...rangeParams() };
   if (fStatus.value) params.status = fStatus.value;
   if (fDecision.value) params.decision = fDecision.value;
   if (fCampaign.value) params.campaign = fCampaign.value;
+  if (fRaised.value) params.raised = fRaised.value;
+  if (fClientOutcome.value) params.clientOutcome = fClientOutcome.value;
   rows.value = (await axios.get(ApiPath.CsatList, { params })).data ?? [];
+  // Drop selections for rows that fell out of the new result set.
+  const visible = new Set(rows.value.map((r: any) => r.id));
+  selected.value = new Set([...selected.value].filter((id) => visible.has(id)));
 }
 
 async function loadAll() {
@@ -307,6 +393,25 @@ const doNotRaisePoints = computed<number[]>(
   () => (board.value?.reviewTrend ?? []).map((t: any) => Number(t.doNotRaise) || 0),
 );
 
+// Raise pipeline: reviewed as raiseable → actually sent → client answered.
+const notRaisedCount = computed(() => board.value?.reviews?.notRaised ?? 0);
+const raisedCount = computed(() => board.value?.reviews?.raised ?? 0);
+const awaitingClientCount = computed(() => board.value?.reviews?.awaitingClient ?? 0);
+const clientAcceptedCount = computed(() => board.value?.reviews?.clientAccepted ?? 0);
+const clientRejectedCount = computed(() => board.value?.reviews?.clientRejected ?? 0);
+
+function clientOutcomeLabel(o: string | null) {
+  if (o === "accepted") return "Accepted";
+  if (o === "rejected") return "Rejected";
+  return "—";
+}
+// Accepted = the contest stood, the CSAT is no longer a fail (good for us).
+function clientOutcomeChip(o: string | null) {
+  if (o === "accepted") return "chip chip--success";
+  if (o === "rejected") return "chip chip--danger";
+  return "chip chip--secondary";
+}
+
 // ── Supervisor review action (on the expanded record) ────────────────────────
 const reviewSaving = ref(false);
 async function setReview(action: "accept" | "disagree" | "clear") {
@@ -330,19 +435,152 @@ async function setReview(action: "accept" | "disagree" | "clear") {
   }
 }
 
+// ── Row selection + bulk raise / client response ─────────────────────────────
+// The weekly loop is: export the raiseable records → mark them sent → later the
+// client answers on a batch of them, so both actions work on a multi-select.
+const selected = ref<Set<string>>(new Set());
+const bulkSaving = ref(false);
+const bulkMsg = ref("");
+
+function toggleSelect(id: string) {
+  const next = new Set(selected.value);
+  next.has(id) ? next.delete(id) : next.add(id);
+  selected.value = next;
+}
+const allSelected = computed(
+  () => rows.value.length > 0 && selected.value.size === rows.value.length,
+);
+function toggleSelectAll() {
+  selected.value = allSelected.value
+    ? new Set()
+    : new Set(rows.value.map((r: any) => r.id));
+}
+const selectedIds = computed(() => [...selected.value]);
+
+function authorName() {
+  return user.value?.name || user.value?.email || "";
+}
+
+async function markRaised(ids: string[], raised: boolean) {
+  if (!ids.length) return;
+  bulkSaving.value = true;
+  bulkMsg.value = "";
+  try {
+    await axios.post(ApiPath.CsatRaise, { ids, raised, user: authorName() });
+    bulkMsg.value = raised
+      ? `Marked ${ids.length} record${ids.length === 1 ? "" : "s"} as sent to client.`
+      : `Cleared the sent-to-client mark on ${ids.length} record${ids.length === 1 ? "" : "s"}.`;
+    selected.value = new Set();
+    await refreshAfterMutation();
+  } catch (e: any) {
+    bulkMsg.value = e?.response?.data?.message || e?.message || "Could not update records";
+  } finally {
+    bulkSaving.value = false;
+  }
+}
+
+// Client response modal — outcome + mandatory explanation, over N records.
+const clientModalOpen = ref(false);
+const clientModalOutcome = ref<"accepted" | "rejected">("accepted");
+const clientModalIds = ref<string[]>([]);
+const clientModalComment = ref("");
+const clientModalSaving = ref(false);
+const clientModalError = ref("");
+
+function openClientModal(outcome: "accepted" | "rejected", ids: string[]) {
+  if (!ids.length) return;
+  clientModalOutcome.value = outcome;
+  clientModalIds.value = ids;
+  clientModalComment.value = "";
+  clientModalError.value = "";
+  clientModalOpen.value = true;
+}
+
+async function saveClientResponse() {
+  const comment = clientModalComment.value.trim();
+  if (!comment) {
+    clientModalError.value = "Add a comment explaining the client's decision.";
+    return;
+  }
+  clientModalSaving.value = true;
+  clientModalError.value = "";
+  try {
+    await axios.post(ApiPath.CsatClientResponse, {
+      ids: clientModalIds.value,
+      outcome: clientModalOutcome.value,
+      comment,
+      user: authorName(),
+    });
+    const n = clientModalIds.value.length;
+    bulkMsg.value = `Client ${clientModalOutcome.value} on ${n} record${n === 1 ? "" : "s"}.`;
+    clientModalOpen.value = false;
+    selected.value = new Set();
+    await refreshAfterMutation();
+  } catch (e: any) {
+    clientModalError.value =
+      e?.response?.data?.message || e?.message || "Could not save the client response";
+  } finally {
+    clientModalSaving.value = false;
+  }
+}
+
+async function clearClientResponse(ids: string[]) {
+  if (!ids.length) return;
+  bulkSaving.value = true;
+  try {
+    await axios.post(ApiPath.CsatClientResponse, {
+      ids,
+      outcome: "clear",
+      user: authorName(),
+    });
+    bulkMsg.value = `Cleared the client response on ${ids.length} record${ids.length === 1 ? "" : "s"}.`;
+    selected.value = new Set();
+    await refreshAfterMutation();
+  } catch (e: any) {
+    bulkMsg.value = e?.response?.data?.message || e?.message || "Could not clear";
+  } finally {
+    bulkSaving.value = false;
+  }
+}
+
+// Reload the tiles + table, and the open record's detail if one is expanded.
+async function refreshAfterMutation() {
+  await Promise.all([loadBoard(), loadList()]);
+  if (expandedId.value) {
+    try {
+      detail.value = (await axios.get(`${ApiPath.CsatItem}/${expandedId.value}`)).data;
+    } catch { /* ignore */ }
+  }
+}
+
 // ── KPI drill-down modal (record list + CSV export) ──────────────────────────
 const kpiModalOpen = ref(false);
 const kpiModalTitle = ref("");
 const kpiModalRows = ref<any[]>([]);
 const kpiModalLoading = ref(false);
 
+// When true, exporting the "Raise with client" list also stamps every record in
+// it as sent — the normal weekly flow. Off for the other tiles (nothing is being
+// passed to the client), and the per-record toggle stays available regardless.
+const kpiMarkRaised = ref(true);
+const kpiIsRaiseList = ref(false);
+const kpiExporting = ref(false);
+const kpiExportMsg = ref("");
+
 async function openKpiModal(filter: Record<string, string>, title: string) {
   kpiModalOpen.value = true;
   kpiModalTitle.value = title;
   kpiModalRows.value = [];
   kpiModalLoading.value = true;
+  kpiIsRaiseList.value = filter.reviewOutcome === "raise_with_client";
+  kpiMarkRaised.value = kpiIsRaiseList.value;
+  kpiExportMsg.value = "";
   try {
-    kpiModalRows.value = (await axios.get(ApiPath.CsatList, { params: { ...filter, limit: 1000 } })).data ?? [];
+    // Drill-downs respect the page's date range too.
+    kpiModalRows.value =
+      (await axios.get(ApiPath.CsatList, {
+        params: { ...rangeParams(), ...filter, limit: 1000 },
+      })).data ?? [];
   } catch {
     kpiModalRows.value = [];
   } finally {
@@ -350,13 +588,12 @@ async function openKpiModal(filter: Record<string, string>, title: string) {
   }
 }
 
-function exportKpiCsv() {
-  const rows = kpiModalRows.value;
-  if (!rows.length) return;
+function downloadCsv(rows: any[], filename: string) {
   const cols = [
     "interactionId", "interactionTpsId", "agent", "campaign", "score", "scoreMax",
     "status", "decision", "confidence", "reviewAction", "reviewOutcome", "reviewedBy",
-    "reviewedAt", "interactionDateTime",
+    "reviewedAt", "raisedAt", "raisedBy", "clientOutcome", "clientRespondedAt",
+    "clientResponseBy", "clientResponseComment", "interactionDateTime",
   ];
   const esc = (v: any) => {
     const s = v == null ? "" : String(v);
@@ -367,9 +604,45 @@ function exportKpiCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `csat-${kpiModalTitle.value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function exportKpiCsv() {
+  const exportRows = kpiModalRows.value;
+  if (!exportRows.length) return;
+
+  kpiExporting.value = true;
+  kpiExportMsg.value = "";
+  try {
+    downloadCsv(
+      exportRows,
+      `csat-${kpiModalTitle.value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`,
+    );
+
+    // The file has left the building — stamp the records as sent if asked.
+    if (kpiIsRaiseList.value && kpiMarkRaised.value) {
+      const ids = exportRows.map((r: any) => r.id);
+      await axios.post(ApiPath.CsatRaise, { ids, raised: true, user: authorName() });
+      kpiExportMsg.value = `Exported and marked ${ids.length} record${ids.length === 1 ? "" : "s"} as sent to client.`;
+      await refreshAfterMutation();
+      // Reflect the new raisedAt in the open modal without a re-fetch.
+      const stamp = new Date().toISOString();
+      kpiModalRows.value = kpiModalRows.value.map((r: any) => ({
+        ...r,
+        raisedAt: r.raisedAt ?? stamp,
+        raisedBy: r.raisedBy ?? authorName(),
+      }));
+    } else {
+      kpiExportMsg.value = `Exported ${exportRows.length} record${exportRows.length === 1 ? "" : "s"}.`;
+    }
+  } catch (e: any) {
+    kpiExportMsg.value =
+      e?.response?.data?.message || e?.message || "Exported, but could not mark as sent";
+  } finally {
+    kpiExporting.value = false;
+  }
 }
 
 onMounted(loadAll);
@@ -393,42 +666,217 @@ onMounted(loadAll);
 
     <div v-if="error" class="error-banner">{{ error }}</div>
 
-    <!-- Metric tiles -->
-    <div v-if="board" class="stats" style="margin-bottom: 14px; padding-right: 8px">
-      <div class="stat stat--analytics"><div class="stat-label">Total CSATs</div><div class="stat-value">{{ board.total }}</div></div>
-      <div class="stat stat--success"><div class="stat-label">Assessed</div><div class="stat-value">{{ board.assessed }}</div></div>
-      <div class="stat stat--warning"><div class="stat-label">Pending</div><div class="stat-value">{{ board.pending }}</div></div>
-      <div class="stat" :class="board.unmatched > 0 ? 'stat--warning' : 'stat--neutral'"><div class="stat-label">Unmatched</div><div class="stat-value">{{ board.unmatched }}</div></div>
-      <div class="stat stat--neutral"><div class="stat-label" title="Scores of 4-5 are not assessed">Excluded (4-5)</div><div class="stat-value">{{ board.excluded ?? 0 }}</div></div>
-      <div class="stat" :class="board.errors > 0 ? 'stat--risk' : 'stat--neutral'"><div class="stat-label">Errors</div><div class="stat-value">{{ board.errors }}</div></div>
+    <!-- Date range — scopes the tiles, the table and the drill-down exports.
+         Reviewing CSATs is a weekly task, so this defaults to the last 7 days. -->
+    <div class="range-bar">
+      <div class="range-presets">
+        <button
+          v-for="p in ([
+            { k: 'thisWeek', label: 'This week' },
+            { k: 'lastWeek', label: 'Last week' },
+            { k: 'last7', label: 'Last 7 days' },
+            { k: 'last30', label: 'Last 30 days' },
+            { k: 'thisMonth', label: 'This month' },
+            { k: 'all', label: 'All time' },
+          ] as const)"
+          :key="p.k"
+          type="button"
+          class="range-btn"
+          :class="{ 'range-btn--active': activePreset === p.k }"
+          :disabled="loading"
+          @click="applyPreset(p.k)"
+        >{{ p.label }}</button>
+      </div>
+      <div class="range-dates">
+        <label class="range-label">From</label>
+        <input v-model="fFrom" type="date" class="date-input" :disabled="loading" @change="onDateEdited" />
+        <label class="range-label">To</label>
+        <input v-model="fTo" type="date" class="date-input" :disabled="loading" @change="onDateEdited" />
+        <span class="muted" style="font-size: 11px">showing {{ rangeLabel }}</span>
+      </div>
     </div>
 
-    <!-- Decision outcomes + supervisor review, with monthly trend. Click a tile
-         to see the underlying records and export them to CSV. -->
-    <div v-if="board" class="stats" style="margin-bottom: 14px; padding-right: 8px">
-      <div class="stat stat--success" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ decision: 'contest' }, 'Contest')">
-        <div class="stat-label">Contest</div>
-        <div class="stat-value">{{ contestCount }}</div>
-        <div v-if="contestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="contestPoints" color="#059669" :width="150" :height="30" /></div>
-        <div v-if="contestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+    <!-- Volume + exceptions. The three exception counts share one tile — each
+         half/third is its own clickable drill-down, and the outer cells paint the
+         tile's edge stripe in their own tone. -->
+    <div v-if="board" class="kpi-row">
+      <div class="split-stat">
+        <button
+          type="button"
+          class="split-cell split-cell--info"
+          title="Every CSAT in this date range. Click to list & export."
+          @click="openKpiModal({}, 'All CSATs')"
+        >
+          <div class="stat-label">Total CSATs</div>
+          <div class="stat-value">{{ board.total }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--warn"
+          title="Queued, awaiting transcript or mid-assessment. Click to list & export."
+          @click="openKpiModal({ status: 'pending_any' }, 'Pending')"
+        >
+          <div class="stat-label">Pending</div>
+          <div class="stat-value">{{ board.pending }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--good"
+          title="Assessment complete. Click to list & export."
+          @click="openKpiModal({ status: 'assessed' }, 'Assessed')"
+        >
+          <div class="stat-label">Assessed</div>
+          <div class="stat-value">{{ board.assessed }}</div>
+        </button>
       </div>
-      <div class="stat stat--risk" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ decision: 'do_not_contest' }, 'Do Not Contest')">
-        <div class="stat-label">Do Not Contest</div>
-        <div class="stat-value">{{ doNotContestCount }}</div>
-        <div v-if="doNotContestPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="doNotContestPoints" color="#dc2626" :width="150" :height="30" /></div>
-        <div v-if="doNotContestPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      <div class="split-stat">
+        <button
+          type="button"
+          class="split-cell split-cell--warn"
+          title="No matching interaction yet. Click to list & export."
+          @click="openKpiModal({ status: 'unmatched' }, 'Unmatched')"
+        >
+          <div class="stat-label">Unmatched</div>
+          <div class="stat-value">{{ board.unmatched }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--neutral"
+          title="Scores of 4-5 are not assessed. Click to list & export."
+          @click="openKpiModal({ status: 'excluded' }, 'Excluded (4-5)')"
+        >
+          <div class="stat-label">Excluded (4-5)</div>
+          <div class="stat-value">{{ board.excluded ?? 0 }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--bad"
+          title="Assessment failed. Click to list & export."
+          @click="openKpiModal({ status: 'error' }, 'Errors')"
+        >
+          <div class="stat-label">Errors</div>
+          <div class="stat-value">{{ board.errors }}</div>
+        </button>
       </div>
-      <div class="stat stat--warning" style="cursor: pointer" title="Accept a contest, or disagree with a do-not-contest. Click to list & export these records." @click="openKpiModal({ reviewOutcome: 'raise_with_client' }, 'Raise with client')">
-        <div class="stat-label">Raise with client</div>
-        <div class="stat-value">{{ raiseWithClientCount }}</div>
-        <div v-if="raiseWithClientPoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="raiseWithClientPoints" color="#d97706" :width="150" :height="30" /></div>
-        <div v-if="raiseWithClientPoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+    </div>
+
+    <!-- AI decision and the supervisor's review of it — each an opposing pair in
+         one tile: green edge on the left value, red on the right. Every value is
+         its own drill-down. -->
+    <div v-if="board" class="kpi-row">
+      <div class="split-stat split-stat--titled">
+        <div class="split-head">AI Assessment</div>
+        <div class="split-row">
+        <button
+          type="button"
+          class="split-cell split-cell--good"
+          title="AI says contest this CSAT. Click to list & export."
+          @click="openKpiModal({ decision: 'contest' }, 'Contest')"
+        >
+          <div class="stat-label">Contest</div>
+          <div class="stat-value">{{ contestCount }}</div>
+          <div v-if="contestPoints.length > 1" class="split-spark"><Sparkline :points="contestPoints" color="#059669" :width="120" :height="26" /></div>
+          <div v-if="contestPoints.length > 1" class="split-note">monthly trend</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--bad"
+          title="AI says the score stands. Click to list & export."
+          @click="openKpiModal({ decision: 'do_not_contest' }, 'Do Not Contest')"
+        >
+          <div class="stat-label">Do Not Contest</div>
+          <div class="stat-value">{{ doNotContestCount }}</div>
+          <div v-if="doNotContestPoints.length > 1" class="split-spark"><Sparkline :points="doNotContestPoints" color="#dc2626" :width="120" :height="26" /></div>
+          <div v-if="doNotContestPoints.length > 1" class="split-note">monthly trend</div>
+        </button>
+        </div>
       </div>
-      <div class="stat stat--neutral" style="cursor: pointer" title="Click to list & export these records" @click="openKpiModal({ reviewOutcome: 'do_not_raise' }, 'Do not raise')">
-        <div class="stat-label">Do not raise</div>
-        <div class="stat-value">{{ doNotRaiseCount }}</div>
-        <div v-if="doNotRaisePoints.length > 1" style="margin: 10px 0 2px"><Sparkline :points="doNotRaisePoints" color="#64748b" :width="150" :height="30" /></div>
-        <div v-if="doNotRaisePoints.length > 1" class="muted" style="font-size: 11px">monthly trend</div>
+      <div class="split-stat split-stat--titled">
+        <div class="split-head">Internal Assessment</div>
+        <div class="split-row">
+        <button
+          type="button"
+          class="split-cell split-cell--good"
+          title="Supervisor accepted a contest, or disagreed with a do-not-contest. Click to list & export."
+          @click="openKpiModal({ reviewOutcome: 'raise_with_client' }, 'Raise with client')"
+        >
+          <div class="stat-label">Raise with client</div>
+          <div class="stat-value">{{ raiseWithClientCount }}</div>
+          <div v-if="raiseWithClientPoints.length > 1" class="split-spark"><Sparkline :points="raiseWithClientPoints" color="#059669" :width="120" :height="26" /></div>
+          <div v-if="raiseWithClientPoints.length > 1" class="split-note">monthly trend</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--bad"
+          title="Supervisor sided with the score standing. Click to list & export."
+          @click="openKpiModal({ reviewOutcome: 'do_not_raise' }, 'Do not raise')"
+        >
+          <div class="stat-label">Do not raise</div>
+          <div class="stat-value">{{ doNotRaiseCount }}</div>
+          <div v-if="doNotRaisePoints.length > 1" class="split-spark"><Sparkline :points="doNotRaisePoints" color="#dc2626" :width="120" :height="26" /></div>
+          <div v-if="doNotRaisePoints.length > 1" class="split-note">monthly trend</div>
+        </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Raise pipeline: what still has to go to the client vs what has gone, then
+         what the client came back with. Same paired-tile pattern. -->
+    <div v-if="board" class="kpi-row">
+      <div class="split-stat split-stat--titled">
+        <div class="split-head">Client Requests</div>
+        <div class="split-row">
+        <button
+          type="button"
+          class="split-cell split-cell--warn"
+          title="Reviewed as raise-with-client but not yet sent. Click to list & export."
+          @click="openKpiModal({ reviewOutcome: 'raise_with_client', raised: 'no' }, 'To send to client')"
+        >
+          <div class="stat-label">To send to client</div>
+          <div class="stat-value">{{ notRaisedCount }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--info"
+          title="Marked as sent to the client. Click to list & export."
+          @click="openKpiModal({ raised: 'yes' }, 'Sent to client')"
+        >
+          <div class="stat-label">Sent to client</div>
+          <div class="stat-value">{{ raisedCount }}</div>
+        </button>
+        </div>
+      </div>
+      <div class="split-stat split-stat--titled">
+        <div class="split-head">Client Decision</div>
+        <div class="split-row">
+        <button
+          type="button"
+          class="split-cell split-cell--good"
+          title="Client accepted the contest — no longer counted as a fail. Click to list & export."
+          @click="openKpiModal({ clientOutcome: 'accepted' }, 'Client accepted')"
+        >
+          <div class="stat-label">Client accepted</div>
+          <div class="stat-value">{{ clientAcceptedCount }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--neutral"
+          title="Sent, but the client has not come back yet. Click to list & export."
+          @click="openKpiModal({ clientOutcome: 'awaiting' }, 'Awaiting client response')"
+        >
+          <div class="stat-label">Awaiting client</div>
+          <div class="stat-value">{{ awaitingClientCount }}</div>
+        </button>
+        <button
+          type="button"
+          class="split-cell split-cell--bad"
+          title="Client rejected the contest — it stands as a fail. Click to list & export."
+          @click="openKpiModal({ clientOutcome: 'rejected' }, 'Client rejected')"
+        >
+          <div class="stat-label">Client rejected</div>
+          <div class="stat-value">{{ clientRejectedCount }}</div>
+        </button>
+        </div>
       </div>
     </div>
 
@@ -495,7 +943,48 @@ onMounted(loadAll);
           <option v-for="c in campaigns" :key="c" :value="c">{{ c }}</option>
         </select>
       </div>
+      <div class="control-group">
+        <label>Sent to client</label>
+        <select v-model="fRaised" class="sel" @change="loadList">
+          <option value="">All</option>
+          <option value="yes">Sent</option>
+          <option value="no">Not sent</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Client response</label>
+        <select v-model="fClientOutcome" class="sel" @change="loadList">
+          <option value="">All</option>
+          <option value="awaiting">Awaiting response</option>
+          <option value="accepted">Accepted (not a fail)</option>
+          <option value="rejected">Rejected (still a fail)</option>
+        </select>
+      </div>
     </div>
+
+    <!-- Bulk actions on the checked rows. Marking sent and recording the client's
+         answer are both batch jobs in practice, hence the multi-select. -->
+    <div v-if="selected.size" class="bulk-bar">
+      <div class="bulk-count">{{ selected.size }} selected</div>
+      <button class="btn btn--sm" :disabled="bulkSaving" @click="markRaised(selectedIds, true)">
+        Mark as sent to client
+      </button>
+      <button class="btn btn--sm" :disabled="bulkSaving" @click="markRaised(selectedIds, false)">
+        Un-mark as sent
+      </button>
+      <span class="bulk-sep" />
+      <button class="btn btn--sm btn--good" :disabled="bulkSaving" @click="openClientModal('accepted', selectedIds)">
+        Client accepted
+      </button>
+      <button class="btn btn--sm btn--bad" :disabled="bulkSaving" @click="openClientModal('rejected', selectedIds)">
+        Client rejected
+      </button>
+      <button class="btn btn--ghost btn--sm" :disabled="bulkSaving" @click="clearClientResponse(selectedIds)">
+        Clear response
+      </button>
+      <button class="btn btn--ghost btn--sm" @click="selected = new Set()">Clear selection</button>
+    </div>
+    <div v-if="bulkMsg" class="run-msg" style="margin-bottom: 12px">{{ bulkMsg }}</div>
 
     <!-- List -->
     <div class="tile">
@@ -504,13 +993,30 @@ onMounted(loadAll);
       <table class="tbl">
         <thead>
           <tr>
+            <th class="sel-cell">
+              <input
+                type="checkbox"
+                :checked="allSelected"
+                :disabled="!rows.length"
+                title="Select all rows in this list"
+                @change="toggleSelectAll"
+              />
+            </th>
             <th></th><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th>
-            <th>Status</th><th>Decision</th><th>Raise with client</th><th>Conf.</th><th>Date</th><th></th>
+            <th>Status</th><th>Decision</th><th>Raise with client</th><th>Sent</th>
+            <th>Client</th><th>Conf.</th><th>Date</th><th></th>
           </tr>
         </thead>
         <tbody>
           <template v-for="r in rows" :key="r.id">
             <tr class="row" :class="{ 'row--open': expandedId === r.id }" @click="toggleRow(r.id)">
+              <td class="sel-cell" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selected.has(r.id)"
+                  @change="toggleSelect(r.id)"
+                />
+              </td>
               <td class="expander">{{ expandedId === r.id ? "▾" : "▸" }}</td>
               <td>{{ r.interactionId || r.interactionTpsId }}</td>
               <td>{{ r.agent || "—" }}</td>
@@ -533,6 +1039,25 @@ onMounted(loadAll);
                 >No</span>
                 <span v-else class="muted">—</span>
               </td>
+              <td>
+                <span
+                  v-if="r.raisedAt"
+                  class="chip chip--info"
+                  style="font-size: 10px"
+                  :title="'Sent to client ' + fmtDate(r.raisedAt) + (r.raisedBy ? ' by ' + r.raisedBy : '')"
+                >Sent</span>
+                <span v-else class="muted">—</span>
+              </td>
+              <td>
+                <span
+                  v-if="r.clientOutcome"
+                  :class="clientOutcomeChip(r.clientOutcome)"
+                  style="font-size: 10px"
+                  :title="r.clientResponseComment || ''"
+                >{{ clientOutcomeLabel(r.clientOutcome) }}</span>
+                <span v-else-if="r.raisedAt" class="muted" title="Sent, awaiting the client's answer">awaiting</span>
+                <span v-else class="muted">—</span>
+              </td>
               <td>{{ fmtPct(r.confidence) }}</td>
               <td class="muted">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</td>
               <td @click.stop>
@@ -540,7 +1065,7 @@ onMounted(loadAll);
               </td>
             </tr>
             <tr v-if="expandedId === r.id" class="detail-row">
-              <td colspan="11">
+              <td colspan="14">
                 <div v-if="loadingDetail" class="muted">Loading…</div>
                 <div v-else-if="detail" class="csat-detail" :class="{ 'csat-detail--split': transcriptOpen }">
                   <div class="csat-assessment">
@@ -596,6 +1121,42 @@ onMounted(loadAll);
                       style="font-size: 10px"
                       :title="detail.reviewedBy ? 'by ' + detail.reviewedBy : ''"
                     >{{ detail.reviewOutcome === "raise_with_client" ? "Raise with client" : "Do not raise" }}<template v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</template></span>
+                  </div>
+
+                  <!-- Raise + client response for this one record. Same actions as
+                       the bulk bar, for when you're working a single case. -->
+                  <div v-if="detail.reviewOutcome === 'raise_with_client'" class="csat-actions">
+                    <button
+                      class="btn btn--sm"
+                      :disabled="bulkSaving"
+                      @click.stop="markRaised([r.id], !detail.raisedAt)"
+                    >{{ detail.raisedAt ? "Un-mark as sent" : "Mark as sent to client" }}</button>
+                    <span
+                      v-if="detail.raisedAt"
+                      class="chip chip--info"
+                      style="font-size: 10px"
+                      :title="detail.raisedBy ? 'by ' + detail.raisedBy : ''"
+                    >Sent {{ fmtDate(detail.raisedAt) }}<template v-if="detail.raisedBy"> · {{ detail.raisedBy }}</template></span>
+                    <span class="csat-actions-sep" />
+                    <button class="btn btn--sm btn--good" :disabled="bulkSaving" @click.stop="openClientModal('accepted', [r.id])">Client accepted</button>
+                    <button class="btn btn--sm btn--bad" :disabled="bulkSaving" @click.stop="openClientModal('rejected', [r.id])">Client rejected</button>
+                    <button v-if="detail.clientOutcome" class="btn btn--ghost btn--sm" :disabled="bulkSaving" @click.stop="clearClientResponse([r.id])">Clear response</button>
+                  </div>
+
+                  <!-- The client's verdict and their stated reasoning. -->
+                  <div v-if="detail.clientOutcome" class="client-verdict" :class="'client-verdict--' + detail.clientOutcome">
+                    <div class="client-verdict-head">
+                      <span :class="clientOutcomeChip(detail.clientOutcome)" style="font-size: 10px">
+                        Client {{ clientOutcomeLabel(detail.clientOutcome).toLowerCase() }}
+                      </span>
+                      <span class="muted" style="font-size: 11px">
+                        {{ fmtDate(detail.clientRespondedAt) }}<template v-if="detail.clientResponseBy"> · recorded by {{ detail.clientResponseBy }}</template>
+                      </span>
+                    </div>
+                    <div class="csat-block-title" style="margin: 8px 0 4px">
+                      {{ detail.clientOutcome === "accepted" ? "No longer counted as a fail — client's reasoning" : "Stands as a fail — client's reasoning" }}
+                    </div>
+                    <div class="client-verdict-text">{{ detail.clientResponseComment || "—" }}</div>
                   </div>
 
                   <p v-if="detail.parsed?.headline" class="csat-headline">{{ detail.parsed.headline }}</p>
@@ -657,7 +1218,7 @@ onMounted(loadAll);
               </td>
             </tr>
           </template>
-          <tr v-if="!rows.length"><td colspan="11" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
+          <tr v-if="!rows.length"><td colspan="14" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
         </tbody>
       </table>
       </div>
@@ -672,16 +1233,23 @@ onMounted(loadAll);
         <div class="csat-modal-head">
           <div class="csat-modal-title">{{ kpiModalTitle }} · {{ kpiModalRows.length }} record{{ kpiModalRows.length === 1 ? "" : "s" }}</div>
           <div style="display: flex; gap: 8px; align-items: center">
-            <button class="btn btn--sm" :disabled="!kpiModalRows.length" @click="exportKpiCsv">Export CSV</button>
+            <label v-if="kpiIsRaiseList" class="mark-opt" title="Stamps every record in this export as sent to the client">
+              <input v-model="kpiMarkRaised" type="checkbox" />
+              Mark as sent to client
+            </label>
+            <button class="btn btn--sm" :disabled="!kpiModalRows.length || kpiExporting" @click="exportKpiCsv">
+              {{ kpiExporting ? "Exporting…" : "Export CSV" }}
+            </button>
             <button class="drawer-close-x" @click="kpiModalOpen = false">&times;</button>
           </div>
         </div>
         <div class="csat-modal-body" style="max-height: 62vh; overflow: auto">
+          <div v-if="kpiExportMsg" class="run-msg" style="margin-bottom: 8px">{{ kpiExportMsg }}</div>
           <div v-if="kpiModalLoading" class="muted">Loading…</div>
           <div v-else-if="!kpiModalRows.length" class="muted">No records.</div>
           <table v-else class="tbl">
             <thead>
-              <tr><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th><th>Decision</th><th>Raise with client</th><th>Date</th></tr>
+              <tr><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th><th>Decision</th><th>Raise with client</th><th>Sent</th><th>Client</th><th>Date</th></tr>
             </thead>
             <tbody>
               <tr v-for="r in kpiModalRows" :key="r.id">
@@ -695,10 +1263,64 @@ onMounted(loadAll);
                   <span v-else-if="r.reviewOutcome === 'do_not_raise'" class="chip chip--secondary" style="font-size: 10px">No</span>
                   <span v-else class="muted">—</span>
                 </td>
+                <td>
+                  <span v-if="r.raisedAt" class="chip chip--info" style="font-size: 10px" :title="fmtDate(r.raisedAt)">Sent</span>
+                  <span v-else class="muted">—</span>
+                </td>
+                <td>
+                  <span v-if="r.clientOutcome" :class="clientOutcomeChip(r.clientOutcome)" style="font-size: 10px" :title="r.clientResponseComment || ''">{{ clientOutcomeLabel(r.clientOutcome) }}</span>
+                  <span v-else-if="r.raisedAt" class="muted">awaiting</span>
+                  <span v-else class="muted">—</span>
+                </td>
                 <td class="muted">{{ fmtDate(r.interactionDateTime || r.createdAt) }}</td>
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Client response modal — outcome is already chosen; the comment explains
+         the client's reasoning and is required. -->
+    <Teleport to="body">
+      <div v-if="clientModalOpen" class="csat-modal-backdrop" @click="clientModalOpen = false" />
+      <div v-if="clientModalOpen" class="csat-modal">
+        <div class="csat-modal-head">
+          <div class="csat-modal-title">
+            Client {{ clientModalOutcome === "accepted" ? "accepted" : "rejected" }} ·
+            {{ clientModalIds.length }} record{{ clientModalIds.length === 1 ? "" : "s" }}
+          </div>
+          <button class="drawer-close-x" @click="clientModalOpen = false">&times;</button>
+        </div>
+        <div class="csat-modal-body">
+          <div
+            class="client-note"
+            :class="clientModalOutcome === 'accepted' ? 'client-note--good' : 'client-note--bad'"
+          >
+            {{ clientModalOutcome === "accepted"
+              ? "The client accepts the contest — these CSATs no longer stand as fails."
+              : "The client rejects the contest — these CSATs stand as fails." }}
+          </div>
+          <textarea
+            v-model="clientModalComment"
+            class="csat-modal-text"
+            rows="4"
+            placeholder="Why did the client decide this? (required)"
+          />
+          <div v-if="clientModalError" class="detail-error">{{ clientModalError }}</div>
+          <div class="hint" style="margin-top: 6px">
+            Saved against
+            {{ clientModalIds.length === 1 ? "this record" : "all " + clientModalIds.length + " records" }}
+            with your name and the current date.
+          </div>
+        </div>
+        <div class="csat-modal-foot">
+          <button class="btn btn--ghost btn--sm" @click="clientModalOpen = false">Cancel</button>
+          <button
+            class="btn btn--primary btn--sm"
+            :disabled="clientModalSaving || !clientModalComment.trim()"
+            @click="saveClientResponse"
+          >{{ clientModalSaving ? "Saving…" : "Save response" }}</button>
         </div>
       </div>
     </Teleport>
@@ -762,6 +1384,139 @@ onMounted(loadAll);
 
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; }
 .tile-title { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 10px; }
+
+/* ── KPI rows ──────────────────────────────────────────────────────────────
+   Plain .stat tiles keep the shared dashboard look; grouped counts go in a
+   .split-stat, which is one card divided into clickable cells. Each cell owns
+   its tone, and the OUTER cells paint the card's edge stripe — so an opposing
+   pair reads as green on the left, red on the right, and a three-way group
+   colours whichever ends it has. Cells are <button> so they're keyboard
+   reachable, hence the font/colour resets. */
+.kpi-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-right: 8px;
+}
+.kpi-row > .stat { flex: 1 1 150px; }
+.kpi-row > .split-stat { flex: 2 1 320px; }
+
+.split-stat {
+  display: flex;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.25);
+}
+.split-cell {
+  --cell-accent: #64748b;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--cell-accent) 5%, transparent);
+  border: none;
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+/* Titled variant — a header band names the workflow stage, cells sit beneath it
+   in their own row so first/last-child edge stripes still land on the ends. */
+.split-stat--titled { flex-direction: column; }
+.split-head {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.split-row { display: flex; flex: 1 1 auto; min-width: 0; }
+
+.split-cell + .split-cell { border-left: 1px solid var(--border); }
+/* Edge stripe via inset shadow — a real border would fight the card's radius. */
+.split-cell:first-child { box-shadow: inset 4px 0 0 0 var(--cell-accent); }
+.split-cell:last-child { box-shadow: inset -4px 0 0 0 var(--cell-accent); }
+.split-cell:hover { background: color-mix(in srgb, var(--cell-accent) 14%, transparent); }
+.split-cell:focus-visible { outline: 2px solid var(--cell-accent); outline-offset: -3px; }
+
+.split-cell--good { --cell-accent: #059669; }
+.split-cell--bad { --cell-accent: #dc2626; }
+.split-cell--warn { --cell-accent: #d97706; }
+.split-cell--info { --cell-accent: #2b6cb0; }
+.split-cell--neutral { --cell-accent: #64748b; }
+
+.split-spark { margin: 10px 0 2px; }
+.split-note { font-size: 11px; color: var(--muted); }
+
+/* Date range bar */
+.range-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 14px;
+  padding: 10px 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.range-presets { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.range-btn {
+  background: transparent; border: none; padding: 5px 11px;
+  font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.range-btn:not(:last-child) { border-right: 1px solid var(--border); }
+.range-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--brand, #6366f1) 8%, transparent); }
+.range-btn--active { background: var(--brand, #6366f1); color: #fff; }
+.range-btn--active:hover:not(:disabled) { background: var(--brand, #6366f1); }
+.range-btn:disabled { opacity: 0.6; cursor: default; }
+.range-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.range-label { font-size: 11px; color: var(--muted); font-weight: 600; }
+.date-input {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--ink); font-size: 12px; font-family: inherit;
+}
+
+/* Bulk action bar (shown once rows are checked) */
+.bulk-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--brand, #6366f1) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand, #6366f1) 25%, transparent);
+}
+.bulk-count { font-size: 12px; font-weight: 700; color: var(--ink); }
+.bulk-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+.btn--good { border-color: color-mix(in srgb, #059669 45%, transparent); color: #047857; }
+.btn--good:hover:not(:disabled) { background: color-mix(in srgb, #059669 10%, transparent); }
+.btn--bad { border-color: color-mix(in srgb, #dc2626 45%, transparent); color: #b91c1c; }
+.btn--bad:hover:not(:disabled) { background: color-mix(in srgb, #dc2626 10%, transparent); }
+
+/* Client verdict block in the expanded record */
+.client-verdict {
+  margin-bottom: 14px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); border-left-width: 4px;
+}
+.client-verdict--accepted { border-left-color: #059669; background: color-mix(in srgb, #059669 7%, transparent); }
+.client-verdict--rejected { border-left-color: #dc2626; background: color-mix(in srgb, #dc2626 7%, transparent); }
+.client-verdict-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.client-verdict-text { font-size: 12px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; }
+
+/* Client response modal banner */
+.client-note {
+  font-size: 12px; line-height: 1.5; padding: 9px 11px; border-radius: 8px;
+  margin-bottom: 10px; border: 1px solid var(--border);
+}
+.client-note--good { color: #047857; background: color-mix(in srgb, #059669 10%, transparent); border-color: color-mix(in srgb, #059669 35%, transparent); }
+.client-note--bad { color: #b91c1c; background: color-mix(in srgb, #dc2626 10%, transparent); border-color: color-mix(in srgb, #dc2626 35%, transparent); }
+
+/* "Mark as sent" checkbox in the export header */
+.mark-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+
+.sel-cell { width: 26px; }
+.sel-cell input { cursor: pointer; }
 
 .tbl-scroll { overflow-x: auto; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }

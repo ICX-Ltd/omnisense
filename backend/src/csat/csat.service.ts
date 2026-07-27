@@ -138,25 +138,48 @@ export class CsatService {
     return { rematched: matched };
   }
 
+  // ─── Date range ────────────────────────────────────────────────────────────
+  // The page is a weekly task, so board + list are both scoped to a date range.
+  // We anchor on COALESCE(respondedAt, createdAt) — the same expression the
+  // monthly decision trend already groups by — so a record's date never changes
+  // meaning between the tiles and the table. `to` is treated as inclusive of the
+  // whole day when a bare date (yyyy-MM-dd) is supplied.
+  private applyDateRange(
+    qb: { andWhere: (w: string, p?: any) => any },
+    alias: string,
+    from?: string,
+    to?: string,
+  ) {
+    const fromDate = parseDate(from, false);
+    const toDate = parseDate(to, true);
+    const col = `COALESCE(${alias}.respondedAt, ${alias}.createdAt)`;
+    if (fromDate) qb.andWhere(`${col} >= :dtFrom`, { dtFrom: fromDate });
+    if (toDate) qb.andWhere(`${col} <= :dtTo`, { dtTo: toDate });
+  }
+
   // ─── Board metrics ─────────────────────────────────────────────────────────
-  async board() {
-    const byStatus = await this.csatRepo
-      .createQueryBuilder('c')
+  async board(range: { from?: string; to?: string } = {}) {
+    // Every aggregate below is scoped to the same range.
+    const scoped = () => {
+      const qb = this.csatRepo.createQueryBuilder('c');
+      this.applyDateRange(qb, 'c', range.from, range.to);
+      return qb;
+    };
+
+    const byStatus = await scoped()
       .select('c.status', 'status')
       .addSelect('COUNT(1)', 'count')
       .groupBy('c.status')
       .getRawMany<{ status: string; count: string }>();
 
-    const byDecision = await this.csatRepo
-      .createQueryBuilder('c')
+    const byDecision = await scoped()
       .select("COALESCE(c.decision, 'unassessed')", 'decision')
       .addSelect('COUNT(1)', 'count')
-      .where('c.status = :s', { s: 'assessed' })
+      .andWhere('c.status = :s', { s: 'assessed' })
       .groupBy("COALESCE(c.decision, 'unassessed')")
       .getRawMany<{ decision: string; count: string }>();
 
-    const byCampaign = await this.csatRepo
-      .createQueryBuilder('c')
+    const byCampaign = await scoped()
       .select("COALESCE(c.campaign, 'unknown')", 'campaign')
       .addSelect('COUNT(1)', 'total')
       .addSelect("SUM(CASE WHEN c.decision = 'contest' THEN 1 ELSE 0 END)", 'contest')
@@ -167,33 +190,36 @@ export class CsatService {
       .getRawMany<{ campaign: string; total: string; contest: string; do_not_contest: string; assessed: string }>();
 
     // Monthly contest / do-not-contest counts for the headline sparklines.
-    const decisionTrend = await this.csatRepo
-      .createQueryBuilder('c')
+    const decisionTrend = await scoped()
       .select("FORMAT(COALESCE(c.respondedAt, c.createdAt), 'yyyy-MM')", 'ym')
       .addSelect("SUM(CASE WHEN c.decision = 'contest' THEN 1 ELSE 0 END)", 'contest')
       .addSelect("SUM(CASE WHEN c.decision = 'do_not_contest' THEN 1 ELSE 0 END)", 'do_not_contest')
-      .where("c.status = 'assessed'")
+      .andWhere("c.status = 'assessed'")
       .groupBy("FORMAT(COALESCE(c.respondedAt, c.createdAt), 'yyyy-MM')")
       .orderBy('ym', 'ASC')
       .getRawMany<{ ym: string; contest: string; do_not_contest: string }>();
 
     // Supervisor review outcomes. "Raise with client" (accept a contest OR
-    // disagree with a do-not-contest) is the key exported metric.
-    const byReview = await this.csatRepo
-      .createQueryBuilder('c')
+    // disagree with a do-not-contest) is the key exported metric. It then splits
+    // into sent-to-client-or-not, and for the sent ones, the client's answer.
+    const byReview = await scoped()
       .select("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' THEN 1 ELSE 0 END)", 'raise_with_client')
       .addSelect("SUM(CASE WHEN c.reviewOutcome = 'do_not_raise' THEN 1 ELSE 0 END)", 'do_not_raise')
       .addSelect("SUM(CASE WHEN c.status = 'assessed' AND c.reviewOutcome IS NULL THEN 1 ELSE 0 END)", 'pending_review')
-      .getRawOne<{ raise_with_client: string; do_not_raise: string; pending_review: string }>();
+      .addSelect("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' AND c.raisedAt IS NOT NULL THEN 1 ELSE 0 END)", 'raised')
+      .addSelect("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' AND c.raisedAt IS NULL THEN 1 ELSE 0 END)", 'not_raised')
+      .addSelect("SUM(CASE WHEN c.raisedAt IS NOT NULL AND c.clientOutcome IS NULL THEN 1 ELSE 0 END)", 'awaiting_client')
+      .addSelect("SUM(CASE WHEN c.clientOutcome = 'accepted' THEN 1 ELSE 0 END)", 'client_accepted')
+      .addSelect("SUM(CASE WHEN c.clientOutcome = 'rejected' THEN 1 ELSE 0 END)", 'client_rejected')
+      .getRawOne<Record<string, string>>();
 
     // Monthly raise-with-client / do-not-raise counts (by review date) for the
     // headline sparklines.
-    const reviewTrend = await this.csatRepo
-      .createQueryBuilder('c')
+    const reviewTrend = await scoped()
       .select("FORMAT(c.reviewedAt, 'yyyy-MM')", 'ym')
       .addSelect("SUM(CASE WHEN c.reviewOutcome = 'raise_with_client' THEN 1 ELSE 0 END)", 'raise_with_client')
       .addSelect("SUM(CASE WHEN c.reviewOutcome = 'do_not_raise' THEN 1 ELSE 0 END)", 'do_not_raise')
-      .where('c.reviewOutcome IS NOT NULL AND c.reviewedAt IS NOT NULL')
+      .andWhere('c.reviewOutcome IS NOT NULL AND c.reviewedAt IS NOT NULL')
       .groupBy("FORMAT(c.reviewedAt, 'yyyy-MM')")
       .orderBy('ym', 'ASC')
       .getRawMany<{ ym: string; raise_with_client: string; do_not_raise: string }>();
@@ -220,6 +246,11 @@ export class CsatService {
         raiseWithClient: num(byReview?.raise_with_client),
         doNotRaise: num(byReview?.do_not_raise),
         pendingReview: num(byReview?.pending_review),
+        raised: num(byReview?.raised),
+        notRaised: num(byReview?.not_raised),
+        awaitingClient: num(byReview?.awaiting_client),
+        clientAccepted: num(byReview?.client_accepted),
+        clientRejected: num(byReview?.client_rejected),
       },
       reviewTrend: reviewTrend.map((r) => ({
         ym: r.ym,
@@ -237,7 +268,17 @@ export class CsatService {
   }
 
   // ─── List (board table) ────────────────────────────────────────────────────
-  async list(opts: { status?: string; decision?: string; campaign?: string; reviewOutcome?: string; limit?: number }) {
+  async list(opts: {
+    status?: string;
+    decision?: string;
+    campaign?: string;
+    reviewOutcome?: string;
+    raised?: string;
+    clientOutcome?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }) {
     const qb = this.csatRepo
       .createQueryBuilder('c')
       .leftJoin(Interaction, 'ia', 'ia.id = c.recordingId')
@@ -258,6 +299,12 @@ export class CsatService {
         'c.reviewAction AS reviewAction',
         'c.reviewedBy AS reviewedBy',
         'c.reviewedAt AS reviewedAt',
+        'c.raisedAt AS raisedAt',
+        'c.raisedBy AS raisedBy',
+        'c.clientOutcome AS clientOutcome',
+        'c.clientRespondedAt AS clientRespondedAt',
+        'c.clientResponseBy AS clientResponseBy',
+        'c.clientResponseComment AS clientResponseComment',
         'c.assessedAt AS assessedAt',
         'c.createdAt AS createdAt',
         'ia.agent AS agent',
@@ -267,12 +314,109 @@ export class CsatService {
       .orderBy('c.createdAt', 'DESC')
       .limit(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
 
-    if (opts.status) qb.andWhere('c.status = :st', { st: opts.status });
+    // 'pending_any' is the union the Pending tile counts — a single status can't
+    // express it, so it gets a pseudo-value (same trick as clientOutcome=awaiting).
+    if (opts.status === 'pending_any') {
+      qb.andWhere('c.status IN (:...pendingStatuses)', {
+        pendingStatuses: ['pending', 'awaiting_transcript', 'assessing'],
+      });
+    } else if (opts.status) {
+      qb.andWhere('c.status = :st', { st: opts.status });
+    }
     if (opts.decision) qb.andWhere('c.decision = :dc', { dc: opts.decision });
     if (opts.campaign) qb.andWhere('c.campaign = :cp', { cp: opts.campaign });
     if (opts.reviewOutcome) qb.andWhere('c.reviewOutcome = :ro', { ro: opts.reviewOutcome });
 
+    // raised=yes|no — has the record actually been sent to the client yet.
+    if (opts.raised === 'yes') qb.andWhere('c.raisedAt IS NOT NULL');
+    else if (opts.raised === 'no') qb.andWhere('c.raisedAt IS NULL');
+
+    // clientOutcome=awaiting means raised but no answer back yet.
+    if (opts.clientOutcome === 'awaiting') {
+      qb.andWhere('c.raisedAt IS NOT NULL AND c.clientOutcome IS NULL');
+    } else if (opts.clientOutcome) {
+      qb.andWhere('c.clientOutcome = :co', { co: opts.clientOutcome });
+    }
+
+    this.applyDateRange(qb, 'c', opts.from, opts.to);
+
     return qb.getRawMany();
+  }
+
+  // ─── Raised with client (bulk or single) ───────────────────────────────────
+  // Marks records as actually sent to the client. Called with the whole export
+  // set from the "Raise with client" drill-down, or with a single id from the
+  // record's own toolbar. raised=false un-marks (a mistaken export).
+  async setRaised(ids: string[], user: string | null, raised = true) {
+    const clean = (ids ?? []).map((s) => String(s ?? '').trim()).filter(Boolean);
+    if (!clean.length) throw new BadRequestException('ids is required');
+
+    await this.csatRepo
+      .createQueryBuilder()
+      .update(InteractionCsat)
+      .set(
+        raised
+          ? { raisedAt: new Date(), raisedBy: (user ?? '').trim() || null }
+          : { raisedAt: null, raisedBy: null },
+      )
+      .whereInIds(clean)
+      .execute();
+
+    return { updated: clean.length, raised };
+  }
+
+  // ─── Client response (bulk or single) ─────────────────────────────────────
+  // The client either ACCEPTS the contest (the CSAT no longer stands as a fail)
+  // or REJECTS it (it stands). The explanatory comment is required so the reason
+  // for their decision is always on record. 'clear' wipes the response.
+  async setClientResponse(
+    ids: string[],
+    outcome: string,
+    comment: string,
+    user: string | null,
+  ) {
+    const clean = (ids ?? []).map((s) => String(s ?? '').trim()).filter(Boolean);
+    if (!clean.length) throw new BadRequestException('ids is required');
+
+    const out = (outcome ?? '').trim().toLowerCase();
+    if (out !== 'accepted' && out !== 'rejected' && out !== 'clear') {
+      throw new BadRequestException(
+        "outcome must be 'accepted', 'rejected' or 'clear'",
+      );
+    }
+
+    const text = (comment ?? '').trim();
+    if (out !== 'clear' && !text) {
+      throw new BadRequestException(
+        'comment is required — record the client’s reasoning',
+      );
+    }
+
+    await this.csatRepo
+      .createQueryBuilder()
+      .update(InteractionCsat)
+      .set(
+        out === 'clear'
+          ? {
+              clientOutcome: null,
+              clientRespondedAt: null,
+              clientResponseBy: null,
+              clientResponseComment: null,
+            }
+          : {
+              clientOutcome: out,
+              clientRespondedAt: new Date(),
+              clientResponseBy: (user ?? '').trim() || null,
+              clientResponseComment: text,
+              // A response implies it went out, even if the raise was never
+              // explicitly marked (e.g. sent outside the app).
+              raisedAt: () => 'COALESCE(raisedAt, SYSDATETIME())',
+            },
+      )
+      .whereInIds(clean)
+      .execute();
+
+    return { updated: clean.length, clientOutcome: out === 'clear' ? null : out };
   }
 
   async getDetail(id: string) {
@@ -477,6 +621,22 @@ export class CsatService {
     await this.csatRepo.update(id, { status, lastError: null });
     return { ok: true };
   }
+}
+
+// Parse a filter date. A bare yyyy-MM-dd is taken as local midnight; when it is
+// the range END, it stretches to 23:59:59.999 so the day is inclusive. Anything
+// unparseable is ignored (no filter) rather than throwing — a half-typed date in
+// the UI shouldn't error the page.
+function parseDate(value: string | undefined, endOfDay: boolean): Date | null {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+
+  const bareDate = /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const d = new Date(bareDate ? `${s}T00:00:00` : s);
+  if (isNaN(d.getTime())) return null;
+
+  if (endOfDay && bareDate) d.setHours(23, 59, 59, 999);
+  return d;
 }
 
 function safeParse(text: string): any {

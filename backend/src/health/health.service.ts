@@ -176,6 +176,21 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     indexes: ['IX_interaction_csat_review'],
   },
   {
+    file: 'add-csat-client-response.sql',
+    columns: [
+      ['interaction_csat', 'raisedAt'],
+      ['interaction_csat', 'raisedBy'],
+      ['interaction_csat', 'clientOutcome'],
+      ['interaction_csat', 'clientRespondedAt'],
+      ['interaction_csat', 'clientResponseBy'],
+      ['interaction_csat', 'clientResponseComment'],
+    ],
+    indexes: [
+      'IX_interaction_csat_raised',
+      'IX_interaction_csat_client_outcome',
+    ],
+  },
+  {
     file: 'add-interaction-survey.sql',
     tables: ['interaction_survey'],
     indexes: [

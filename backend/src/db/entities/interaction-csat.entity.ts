@@ -126,6 +126,35 @@ export class InteractionCsat {
   @Column({ type: 'datetime2', nullable: true })
   reviewedAt!: Date | null;
 
+  // ── Raised with client ────────────────────────────────────────────────────
+  // reviewOutcome = 'raise_with_client' says the record SHOULD go to the client;
+  // raisedAt says it actually HAS been sent. Set in bulk from the export, or per
+  // record by hand. Indexed — the board splits raiseable records into
+  // sent / not-yet-sent.
+  @Index('IX_interaction_csat_raised')
+  @Column({ type: 'datetime2', nullable: true })
+  raisedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  raisedBy!: string | null;
+
+  // ── Client response to a raised record ───────────────────────────────────
+  // 'accepted' = client accepts the contest, the CSAT is no longer counted as a
+  // fail. 'rejected' = client insists it stands as a fail. The comment records
+  // why they decided that (the UI requires it).
+  @Index('IX_interaction_csat_client_outcome')
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  clientOutcome!: string | null;
+
+  @Column({ type: 'datetime2', nullable: true })
+  clientRespondedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  clientResponseBy!: string | null;
+
+  @Column({ type: 'nvarchar', length: 'MAX', nullable: true })
+  clientResponseComment!: string | null;
+
   // ── Reviewer comments ─────────────────────────────────────────────────────
   // Free-text notes a reviewer adds in the UI while reading the transcript
   // side-by-side. JSON array of { user, comment, at } — never filtered or
