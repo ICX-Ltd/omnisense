@@ -2,20 +2,50 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
 import { UserAccount } from '../../db/entities/user-account.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectRepository(UserAccount)
     private readonly accountRepo: Repository<UserAccount>,
+    private readonly jwt: JwtService,
   ) {}
+
+  // Mirrors HealthService.requireRole — same Bearer/roleId shape, but also hands
+  // back the caller's id so we can stamp modified_by_id on the reset.
+  requireRole(authHeader: string | undefined, allowed: string[]) {
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Missing token');
+    }
+
+    let payload: any;
+    try {
+      payload = this.jwt.verify(authHeader.slice('Bearer '.length));
+    } catch {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    const roleId = String(payload.roleId ?? '')
+      .trim()
+      .toLowerCase();
+
+    if (!allowed.includes(roleId)) {
+      throw new ForbiddenException('Insufficient role');
+    }
+
+    return { userId: payload.sub as string, roleId };
+  }
 
   private toUserDto(user: UserAccount) {
     const name =
@@ -95,6 +125,35 @@ export class UserService {
 
     const saved = await this.accountRepo.save(user);
     return this.toUserDto(saved);
+  }
+
+  // Admin reset of *another* user's password. No current-password check (that is
+  // what makes it a reset) — the gate is the caller's role, enforced in the
+  // controller. Any live session for the target is torn down so the old password
+  // and refresh token stop working immediately.
+  async adminResetPassword(
+    id: string,
+    dto: AdminResetPasswordDto,
+    actorId: string,
+  ) {
+    const user = await this.accountRepo.findOne({ where: { id } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    user.refreshTokenHash = null;
+    user.sessionExpiresAt = null;
+    user.lastSeenAt = null;
+    user.modifiedById = actorId;
+
+    const saved = await this.accountRepo.save(user);
+
+    return {
+      ok: true,
+      user: this.toUserDto(saved),
+    };
   }
 
   async deactivate(id: string) {

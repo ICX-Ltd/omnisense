@@ -361,3 +361,16 @@ Updates
   Health (Schema/migrations should go green): add-csat-reviewer-comments.sql, add-csat-review-outcome.sql,
   add-interaction-survey.sql, migrate-survey-answers-to-interaction-survey.sql, nmgb_survey_load.sql.
   APP_VERSION → 1.71.1.
+
+2026-07-27
+- Admin password reset for another user. Backend: PATCH /uiapi/users/:id/password, gated dev/admin
+  only (RESET_ROLES in user.controller.ts — deliberately narrower than canSeeAdminTools, which also
+  admits supervisors). Rehashes with bcrypt cost 10 and clears refresh_token_hash / session_expires_at
+  so the target's old password and live session both die; modified_by_id records who did it.
+- New "Reset User Password" tile in User Set Up (ResetUserPasswordAdmin.vue) — user picker from
+  GET /uiapi/users, new + confirm fields, confirmation prompt before it fires.
+- backend/sql/reset-user-password.sql for doing it by hand on dev/prod: generate the hash with
+  node -e "require('bcrypt').hash(process.argv[1],10).then(console.log)" 'NewPassword' from /backend,
+  paste it plus the email into the DECLAREs. No DDL — nothing to migrate. APP_VERSION → 1.72.0.
+- Known gap, not addressed: POST /uiapi/users/create and PATCH /uiapi/users/:id/deactivate still have
+  no server-side role check; only the UI hides them.

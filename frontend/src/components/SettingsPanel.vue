@@ -18,6 +18,7 @@
       <TwoFactorSetup />
       <ResetPassword />
       <CreateUserAdmin v-if="canSeeDevTools || canSeeAdminTools" />
+      <ResetUserPasswordAdmin v-if="canSeeDevTools || isAdmin" />
     </div>
   </div>
 </template>
@@ -26,7 +27,10 @@
 import TwoFactorSetup from "./TwoFactorSetUp.vue";
 import ResetPassword from "./ResetPassword.vue";
 import CreateUserAdmin from "./CreateUserAdmin.vue";
+import ResetUserPasswordAdmin from "./ResetUserPasswordAdmin.vue";
 import { useAccess } from "../composables/useAccess";
 
-const { canSeeDevTools, canSeeAdminTools } = useAccess();
+// Reset-another-user's-password is dev/admin only — narrower than canSeeAdminTools,
+// which also lets supervisors in. Matches RESET_ROLES on the backend.
+const { canSeeDevTools, canSeeAdminTools, isAdmin } = useAccess();
 </script>
