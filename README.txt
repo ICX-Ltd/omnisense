@@ -374,3 +374,24 @@ Updates
   paste it plus the email into the DECLAREs. No DDL — nothing to migrate. APP_VERSION → 1.72.0.
 - Known gap, not addressed: POST /uiapi/users/create and PATCH /uiapi/users/:id/deactivate still have
   no server-side role check; only the UI hides them.
+
+2026-07-28
+- CSAT: closed the loop after a supervisor marks a record "raise with client". reviewOutcome still
+  means it SHOULD go to the client; new raisedAt/raisedBy mean it HAS gone. Set in bulk when
+  exporting the "Raise with client" drill-down (checkbox in the export header, ticked by default) or
+  per record from its own toolbar. Row checkboxes + a bulk action bar drive both.
+- CSAT client response: clientOutcome 'accepted' (contest upheld, no longer a fail) or 'rejected'
+  (stands as a fail), with clientRespondedAt / clientResponseBy / clientResponseComment. The comment
+  is REQUIRED in the UI so the client's reasoning is always on record. Works over a multi-select;
+  recording a response back-fills raisedAt for anything sent outside the app.
+- CSAT date filter — the page is a weekly task, so board + list + drill-down exports are all scoped
+  to one range (presets + From/To, defaults to last 7 days). Records are dated by
+  COALESCE(respondedAt, createdAt), the same expression the monthly trend already grouped by, so a
+  record can't drift between the tiles and the table.
+- CSAT tiles: 15 down to 8 cards, every value clickable (12 drill-downs, was 9). Grouped counts share
+  a card as clickable cells, the outer cells painting the card's edge stripe so opposing pairs read
+  green-left / red-right. Titled by stage: AI Assessment, Internal Assessment, Client Requests,
+  Client Decision. status=pending_any is a pseudo-filter for the Pending tile (a single status can't
+  express pending + awaiting_transcript + assessing).
+- Deploy: run add-csat-client-response.sql on ai_insight (idempotent, no data migration) — registered
+  in the schema-drift manifest, so System Health flags it until applied. APP_VERSION → 1.73.0.
