@@ -21,6 +21,22 @@ const fCampaign = ref("");
 const fRaised = ref("");
 const fClientOutcome = ref("");
 
+// ── Find by ID (client-side) ─────────────────────────────────────────────────
+// Reviewers get handed an id from all sorts of places — the CSAT record's own
+// GUID, the TPS survey id, the interaction reference or the recording id — so
+// this matches a substring against any of them, over the rows already loaded.
+const fId = ref("");
+
+const ID_FIELDS = ["id", "interactionId", "interactionTpsId", "recordingId"] as const;
+
+const visibleRows = computed(() => {
+  const q = fId.value.trim().toLowerCase();
+  if (!q) return rows.value;
+  return rows.value.filter((r: any) =>
+    ID_FIELDS.some((f) => String(r[f] ?? "").toLowerCase().includes(q)),
+  );
+});
+
 // ── Date range ───────────────────────────────────────────────────────────────
 // Reviewing CSATs is a weekly job, so the whole page (tiles included) is scoped
 // to a range. Defaults to the last 7 days — "All time" is one click away.
@@ -322,6 +338,17 @@ function ruleLabel(ru: unknown) {
   return /^\d+$/.test(s) ? `Rule ${s}` : s;
 }
 
+// Every id the row carries — the grid only has room for one, but a reviewer
+// searching by CSAT/recording id needs to see which id actually matched.
+function idTooltip(r: any) {
+  return [
+    `CSAT id: ${r.id ?? "—"}`,
+    `TPS survey id: ${r.interactionTpsId ?? "—"}`,
+    `Interaction ref: ${r.interactionId ?? "—"}`,
+    `Recording id: ${r.recordingId ?? "—"}`,
+  ].join("\n");
+}
+
 function prettySource(s: string) {
   return String(s).replace(/_/g, " ");
 }
@@ -447,13 +474,20 @@ function toggleSelect(id: string) {
   next.has(id) ? next.delete(id) : next.add(id);
   selected.value = next;
 }
+// Select-all works on what's on screen, so it respects the ID filter and leaves
+// any selection made outside the current filter alone.
 const allSelected = computed(
-  () => rows.value.length > 0 && selected.value.size === rows.value.length,
+  () =>
+    visibleRows.value.length > 0 &&
+    visibleRows.value.every((r: any) => selected.value.has(r.id)),
 );
 function toggleSelectAll() {
-  selected.value = allSelected.value
-    ? new Set()
-    : new Set(rows.value.map((r: any) => r.id));
+  const next = new Set(selected.value);
+  const wasAll = allSelected.value;
+  for (const r of visibleRows.value) {
+    wasAll ? next.delete(r.id) : next.add(r.id);
+  }
+  selected.value = next;
 }
 const selectedIds = computed(() => [...selected.value]);
 
@@ -960,6 +994,20 @@ onMounted(loadAll);
           <option value="rejected">Rejected (still a fail)</option>
         </select>
       </div>
+      <!-- Filters the loaded rows only — no re-fetch. Matches any id on the
+           record (CSAT id, TPS survey id, interaction ref, recording id). -->
+      <div class="control-group">
+        <label>Find by ID</label>
+        <input
+          v-model="fId"
+          type="search"
+          class="txt-input"
+          placeholder="CSAT / TPS / interaction / recording id"
+          title="Partial match against the CSAT record id, TPS survey id, interaction reference or recording id"
+        />
+        <button v-if="fId" class="btn btn--ghost btn--sm" @click="fId = ''">Clear</button>
+        <span v-if="fId" class="run-msg">{{ visibleRows.length }} of {{ rows.length }}</span>
+      </div>
     </div>
 
     <!-- Bulk actions on the checked rows. Marking sent and recording the client's
@@ -988,7 +1036,13 @@ onMounted(loadAll);
 
     <!-- List -->
     <div class="tile">
-      <div class="tile-title">CSAT Records <span class="chip chip--secondary" style="font-size: 10px">{{ rows.length }}</span></div>
+      <div class="tile-title">
+        CSAT Records
+        <span class="chip chip--secondary" style="font-size: 10px">{{ visibleRows.length }}</span>
+        <span v-if="fId" class="muted" style="font-weight: 400; font-size: 11px">
+          filtered by id “{{ fId }}” · {{ rows.length }} loaded
+        </span>
+      </div>
       <div class="tbl-scroll">
       <table class="tbl">
         <thead>
@@ -997,7 +1051,7 @@ onMounted(loadAll);
               <input
                 type="checkbox"
                 :checked="allSelected"
-                :disabled="!rows.length"
+                :disabled="!visibleRows.length"
                 title="Select all rows in this list"
                 @change="toggleSelectAll"
               />
@@ -1008,7 +1062,7 @@ onMounted(loadAll);
           </tr>
         </thead>
         <tbody>
-          <template v-for="r in rows" :key="r.id">
+          <template v-for="r in visibleRows" :key="r.id">
             <tr class="row" :class="{ 'row--open': expandedId === r.id }" @click="toggleRow(r.id)">
               <td class="sel-cell" @click.stop>
                 <input
@@ -1018,7 +1072,7 @@ onMounted(loadAll);
                 />
               </td>
               <td class="expander">{{ expandedId === r.id ? "▾" : "▸" }}</td>
-              <td>{{ r.interactionId || r.interactionTpsId }}</td>
+              <td :title="idTooltip(r)">{{ r.interactionId || r.interactionTpsId }}</td>
               <td>{{ r.agent || "—" }}</td>
               <td>{{ r.campaign || "—" }}</td>
               <td>{{ r.score ?? "—" }}<span v-if="r.scoreMax">/{{ r.scoreMax }}</span></td>
@@ -1218,7 +1272,15 @@ onMounted(loadAll);
               </td>
             </tr>
           </template>
-          <tr v-if="!rows.length"><td colspan="14" class="muted" style="text-align: center; padding: 20px">No CSAT records for these filters.</td></tr>
+          <tr v-if="!visibleRows.length">
+            <td colspan="14" class="muted" style="text-align: center; padding: 20px">
+              <template v-if="fId && rows.length">
+                No loaded record matches “{{ fId }}”. The search covers the {{ rows.length }} row{{ rows.length === 1 ? "" : "s" }}
+                in the current date range and filters — try “All time” or clearing the filters above.
+              </template>
+              <template v-else>No CSAT records for these filters.</template>
+            </td>
+          </tr>
         </tbody>
       </table>
       </div>
@@ -1380,6 +1442,8 @@ onMounted(loadAll);
 .control-group { flex-direction: row; align-items: center; }
 .num-input { width: 70px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
 .sel { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.txt-input { width: 260px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; }
+.txt-input::placeholder { color: var(--muted); }
 .run-msg { font-size: 12px; color: var(--muted); }
 
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; }
