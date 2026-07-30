@@ -53,17 +53,32 @@ export const LIVEPERSON_MAPPING: SourceMapping = {
     // (isRacCampaign in insights/prompt/build-insights-prompt.ts). It is also
     // only varchar(50) and is grouped on by every dashboard, so it is aliased
     // to a short canonical value rather than truncated.
+    // Everything on this LivePerson account is RAC business, so any campaign that
+    // does not already say so is prefixed rather than left to lose its QA scoring.
+    //
+    // Measured on a real 9,742-row export (13-29 Jul 2026): 30 distinct values,
+    // 28 already containing "RAC" (e.g. "Web - RAC Sales - Breakdown Journey
+    // (Mobile)"), and 2 not — "prmsg tWQVPTpxg" (904 rows) and "NA" (350 rows),
+    // 1,254 rows / 12.9% in total. Those become "RAC - prmsg tWQVPTpxg" and
+    // "RAC - NA".
+    //
+    // A prefix rather than an alias list because "prmsg tWQVPTpxg" carries a
+    // generated suffix — next month's export will have a different one, which a
+    // literal alias could not anticipate.
+    //
+    // WIDTH WARNING: the longest real value, "Web - RAC Sales - NonCashback
+    // Affiliates (Desktop)", is EXACTLY 50 characters. There is no headroom, so a
+    // slightly longer campaign in a future export will be truncated (with a
+    // warning) and would fragment dashboard grouping. Widening
+    // interactions.campaign is a migration on an indexed column.
     {
       target: 'campaign',
       column: ['campaignName', 'goalName'],
       transform: 'trim',
       maxLength: 50,
       fallback: 'RAC',
-      aliases: {
-        // Populate from the real file's campaignName distribution in phase 3.
-        // Every value must contain "RAC".
-      },
       mustMatch: 'rac',
+      prefixWhenUnmatched: 'RAC - ',
       mustMatchHint:
         'campaign must contain "RAC" or the chat insights prompt skips the RAC ' +
         'QA assessment and objection-handling sections',

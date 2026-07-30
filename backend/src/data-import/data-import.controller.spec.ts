@@ -195,7 +195,12 @@ describe('preview over the server inbox', () => {
     expect(result.statusCounts.error).toBe(5);
     expect(result.issueCounts.E_KEY_TOO_LONG).toBe(1);
     expect(result.issueCounts.W_TRUNC_campaign).toBe(1);
-    expect(result.issueCounts.W_VALUE_campaign).toBe(1);
+    // A non-RAC campaign is now auto-prefixed rather than warned about, so
+    // W_VALUE_campaign should never appear for this source.
+    expect(result.issueCounts.W_VALUE_campaign).toBeUndefined();
+    expect(
+      result.sampleRows.every((r) => !r.campaign || /rac/i.test(r.campaign)),
+    ).toBe(true);
     expect(result.transcriptStatusCounts.parsed).toBeGreaterThan(0);
     expect(result.duplicateKeysInSample).toEqual(['conv-0001']);
     expect(result.skipped).toEqual([]);

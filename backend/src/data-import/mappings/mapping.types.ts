@@ -98,6 +98,20 @@ export interface FieldMap {
   /** Explanation surfaced with a mustMatch warning. */
   mustMatchHint?: string;
   /**
+   * When set, a value that fails `mustMatch` is PREFIXED with this instead of
+   * merely warned about — the repair is applied rather than reported.
+   *
+   * Preferred over `aliases` for this job because it catches values that cannot
+   * be enumerated: LivePerson emits campaigns like "prmsg tWQVPTpxg" where the
+   * suffix is a generated id, so next month's export carries a different one and
+   * a literal alias list would miss it.
+   *
+   * The prefix always survives truncation — the value is shortened to fit around
+   * it, never the other way round, since losing the prefix would defeat the
+   * point.
+   */
+  prefixWhenUnmatched?: string;
+  /**
    * Only populate this field when the named column parses to a number > 0.
    * Used for csatRate, which LivePerson leaves as 0/blank unless csatCount > 0.
    */

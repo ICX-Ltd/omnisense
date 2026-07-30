@@ -444,6 +444,32 @@ Updates
   supervisors are excluded. New useAccess.canImportData gates the menu item AND the render (a
   ?tab=dataimport deep link would otherwise reach a page that 403s on every call). Keep it in step
   with READ_ROLES/WRITE_ROLES in data-import.controller.ts.
+- Mapping finalised against a REAL 9,742-row export (Conversation-info, 13-29 Jul 2026, 53 MB).
+  Everything the mapping expected was present and nothing needed changing except campaign:
+  * COMMA separated with a UTF-8 BOM — not tab, which the header we were first shown implied. The
+    sniffer got it right without being told, which is the whole reason it sniffs.
+  * 329 columns, conversationId is column 1, max id length 36 (GUIDs) — comfortably inside
+    interactionId varchar(50), so no migration needed there.
+  * All 200 previewed transcripts parsed, 0 malformed records across all 9,742 rows, 0 blank start
+    times, 0 rows needing any of the E_* error codes.
+  * csatRate range is exactly 1-5 on 883 scored rows, confirming scoreMax=5. With
+    CSAT_ASSESS_MAX_SCORE=3 that means ~408 contest-assessed (scores 1-3) and ~475 excluded (4-5).
+  * 152 rows are flagged isPartial by the source, so expect ~152 W_PARTIAL_CONVERSATION warnings.
+  * 40% of rows sit on skill SITE-RAC-web-sales-bot-en. Under the RAC handover rule those produce no
+    measurable human response pairs — correct behaviour, not a fault.
+- Campaign auto-prefixing: 28 of 30 distinct campaignName values already contain "RAC"; two did not —
+  "prmsg tWQVPTpxg" (904 rows) and "NA" (350 rows), 1,254 rows / 12.9%. Since everything on this
+  LivePerson account is RAC business, a value failing mustMatch is now PREFIXED ("RAC - prmsg
+  tWQVPTpxg", "RAC - NA") rather than merely warned about, so those rows keep their RAC QA scoring.
+  A prefix rather than an alias list because the "prmsg" suffix is a generated id that will differ
+  next month. The prefix survives truncation — the value is shortened around it, never the reverse.
+  No per-row warning is raised for a repaired value: flagging 13% of a real export for a configured,
+  expected transformation would just train people to ignore the status. Real-file preview went from
+  167 valid / 33 warning to 197 valid / 3 warning, the 3 being genuine isPartial rows.
+  WIDTH WARNING: the longest real campaign, "Web - RAC Sales - NonCashback Affiliates (Desktop)", is
+  EXACTLY 50 characters — zero headroom. A slightly longer value in a future export gets truncated
+  (with a warning) and would fragment dashboard grouping; widening interactions.campaign is a
+  migration on an indexed column.
 - Phase 2 DONE: promote + rollback, built together so there is never a state where data can be
   promoted but not undone. Promote is set-based and chunked (one transaction per chunk — a 200k-row
   transaction would blow the log), idempotent at three layers, and writes app.interactions ->

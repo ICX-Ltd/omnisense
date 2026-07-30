@@ -192,6 +192,38 @@ function applyField(
     return;
   }
 
+  // Repair a mustMatch miss BEFORE truncation, so the prefix is accounted for in
+  // the width budget rather than pushing the value over it.
+  let prefixApplied = false;
+  if (
+    field.mustMatch &&
+    field.prefixWhenUnmatched &&
+    !new RegExp(field.mustMatch, 'i').test(text)
+  ) {
+    text = `${field.prefixWhenUnmatched}${text}`;
+    prefixApplied = true;
+  }
+
+  if (field.maxLength && text.length > field.maxLength && prefixApplied) {
+    // Shorten the VALUE, never the prefix — dropping the prefix would undo the
+    // repair and silently reintroduce the behaviour it exists to guarantee.
+    const prefix = field.prefixWhenUnmatched!;
+    const room = Math.max(field.maxLength - prefix.length, 0);
+    issues.push({
+      level: 'warning',
+      code: `W_TRUNC_${field.target}`,
+      field: field.target,
+      message:
+        `${field.target} truncated to ${field.maxLength} characters after the ` +
+        `"${prefix}" prefix was applied.`,
+      original: text,
+      truncatedTo: field.maxLength,
+    });
+    text = prefix + text.slice(prefix.length, prefix.length + room);
+    out[field.target] = text;
+    return;
+  }
+
   if (field.maxLength && text.length > field.maxLength) {
     if (field.hardKey) {
       issues.push({
@@ -219,7 +251,15 @@ function applyField(
     text = text.slice(0, field.maxLength);
   }
 
-  if (field.mustMatch && !new RegExp(field.mustMatch, 'i').test(text)) {
+  // Only warn when the mismatch was NOT repaired. Warning on a configured,
+  // expected transformation would flag ~13% of a real LivePerson export as
+  // "warning" and teach operators to ignore the status — the prefixed value is
+  // self-evident in the grid, so it needs no separate flag.
+  if (
+    field.mustMatch &&
+    !field.prefixWhenUnmatched &&
+    !new RegExp(field.mustMatch, 'i').test(text)
+  ) {
     issues.push({
       level: 'warning',
       code: `W_VALUE_${field.target}`,

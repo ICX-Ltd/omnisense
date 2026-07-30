@@ -189,13 +189,63 @@ describe('stageRow — warnings', () => {
     expect(r.excluded).toBe(false);
   });
 
-  it('W_VALUE_campaign when the campaign would not match /rac/i', () => {
-    // The silent failure this guards: no "RAC" means the chat insights prompt
-    // skips the RAC QA assessment entirely.
-    const r = stage(makeRow({ campaignName: 'Generic Breakdown' }));
-    const issue = r.issues.find((i) => i.code === 'W_VALUE_campaign')!;
-    expect(issue).toBeDefined();
-    expect(issue.message).toMatch(/RAC QA assessment/);
+  describe('campaign auto-prefixing', () => {
+    // Everything on this LivePerson account is RAC business, so a campaign that
+    // does not say "RAC" is repaired rather than reported — otherwise it would
+    // silently lose the RAC QA assessment in the chat insights prompt.
+    it('prefixes a campaign that would not match /rac/i', () => {
+      const r = stage(makeRow({ campaignName: 'Generic Breakdown' }));
+      expect(r.projected.campaign).toBe('RAC - Generic Breakdown');
+    });
+
+    it.each([
+      ['prmsg tWQVPTpxg', 'RAC - prmsg tWQVPTpxg'],
+      ['NA', 'RAC - NA'],
+    ])('repairs the real value %p -> %p', (input, expected) => {
+      // Both observed in a real 9,742-row export, 1,254 rows between them.
+      expect(stage(makeRow({ campaignName: input })).projected.campaign).toBe(
+        expected,
+      );
+    });
+
+    it('leaves an already-RAC campaign untouched', () => {
+      const real = 'Web - RAC Sales - Breakdown Journey (Mobile)';
+      expect(stage(makeRow({ campaignName: real })).projected.campaign).toBe(real);
+    });
+
+    it('matches RAC case-insensitively, without prefixing', () => {
+      expect(stage(makeRow({ campaignName: 'rac sales' })).projected.campaign).toBe(
+        'rac sales',
+      );
+    });
+
+    it('does NOT warn for a repaired value', () => {
+      // Warning on a configured, expected transformation would mark ~13% of a
+      // real export "warning" and train operators to ignore the status.
+      const r = stage(makeRow({ campaignName: 'NA' }));
+      expect(codes(r)).not.toContain('W_VALUE_campaign');
+      expect(r.validationStatus).toBe('valid');
+    });
+
+    it('keeps the prefix when the result must be truncated', () => {
+      // Truncation must eat the value, never the prefix — losing "RAC" would undo
+      // the repair and silently reintroduce the bug it exists to prevent.
+      const long = 'x'.repeat(80);
+      const r = stage(makeRow({ campaignName: long }));
+      expect(r.projected.campaign!.startsWith('RAC - ')).toBe(true);
+      expect(r.projected.campaign!.length).toBe(50);
+      expect(/rac/i.test(r.projected.campaign!)).toBe(true);
+      expect(codes(r)).toContain('W_TRUNC_campaign');
+    });
+
+    it('accepts the longest real campaign value at exactly the column width', () => {
+      // Measured: this is 50 characters, the full width, with zero headroom.
+      const longest = 'Web - RAC Sales - NonCashback Affiliates (Desktop)';
+      expect(longest.length).toBe(50);
+      const r = stage(makeRow({ campaignName: longest }));
+      expect(r.projected.campaign).toBe(longest);
+      expect(codes(r)).not.toContain('W_TRUNC_campaign');
+    });
   });
 
   it('falls back to RAC when campaignName is blank', () => {

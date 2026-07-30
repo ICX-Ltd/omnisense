@@ -356,10 +356,13 @@ describe('staging the fixture end to end', () => {
     expect(r.excluded).toBe(false);
   });
 
-  it('warns when the campaign would not trigger the RAC QA assessment', () => {
+  it('repairs a campaign that would not trigger the RAC QA assessment', () => {
+    // Everything on this feed is RAC business, so a non-RAC campaign is prefixed
+    // rather than flagged — the row stays promotable AND keeps its QA scoring.
     const r = byId(staged.rows, 'conv-0016');
-    expect(codes(r)).toContain('W_VALUE_campaign');
-    expect(r.projected.campaign).toBe('Generic Breakdown Enquiry');
+    expect(r.projected.campaign).toBe('RAC - Generic Breakdown Enquiry');
+    expect(/rac/i.test(r.projected.campaign!)).toBe(true);
+    expect(codes(r)).not.toContain('W_VALUE_campaign');
   });
 
   it('warns on a missing agent and an unscored answered survey', () => {
