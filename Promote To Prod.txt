@@ -58,6 +58,27 @@ https://www.iis.net/downloads/microsoft/application-request-routing
   <env name="DATABASE_PORT" value="57943" />
   <env name="DATABASE_USER" value="ai_insight_app" />
   <env name="DATABASE_PASSWORD" value="ZFgaNnEPJ=" />
+
+!! REQUIRED FROM v1.76.0 — THE APP WILL NOT START WITHOUT THIS !!
+  <env name="JWT_SECRET" value="<generate one: openssl rand -base64 48>" />
+
+  Until v1.76.0 this variable was read at module-decorator time, which runs BEFORE
+  .env is loaded, so it was always undefined and every token was signed with the
+  hardcoded fallback 'dev-secret-change-me' — a value committed to this repo.
+  That is why prod has never needed the variable and why it is not listed above.
+  It is now read correctly, and jwt.config.ts REFUSES TO START when NODE_ENV is
+  production and the secret is missing, is that placeholder, or is under 16 chars.
+  Starting with a publicly known signing key is worse than not starting.
+
+  Set it BEFORE deploying. Any value is fine as long as it is long and random; it
+  does not need to match dev. Changing it invalidates every existing session, so
+  all users are signed out once on the deploy after this.
+
+Optional import directories (only needed for the Data Import page; the server
+inbox is the intended path for the real monthly LivePerson export, and both must
+live OUTSIDE the repo because an export contains customer PII):
+  <env name="IMPORT_INBOX_DIR" value="D:\ImportInbox" />
+  <env name="IMPORT_UPLOAD_DIR" value="D:\ImportUploads" />
 we have a redirect or something on icx.co.uk???
  > icxsolutions?
 
