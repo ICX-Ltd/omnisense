@@ -29,6 +29,10 @@ import { InsightCorrection } from './db/entities/insight-correction.entity';
 import { CorrectionsModule } from './corrections/corrections.module';
 import { InteractionCsat } from './db/entities/interaction-csat.entity';
 import { CsatModule } from './csat/csat.module';
+import { DataImportModule } from './data-import/data-import.module';
+import { ImportRun } from './db/entities/import-run.entity';
+import { ImportConversation } from './db/entities/import-conversation.entity';
+import { ImportMessage } from './db/entities/import-message.entity';
 
 @Module({
   imports: [
@@ -60,6 +64,9 @@ import { CsatModule } from './csat/csat.module';
             ModelOption,
             InsightCorrection,
             InteractionCsat,
+            ImportRun,
+            ImportConversation,
+            ImportMessage,
           ],
           synchronize: false,
           logging: false,
@@ -82,6 +89,7 @@ import { CsatModule } from './csat/csat.module';
     ModelsModule,
     CorrectionsModule,
     CsatModule,
+    DataImportModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,

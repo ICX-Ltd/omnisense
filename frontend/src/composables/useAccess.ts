@@ -30,6 +30,12 @@ export function useAccess(userOverride?: Ref<any> | { value: any }) {
   const canSeeAdminTools = computed(
     () => isDev.value || isAdmin.value || isSupervisor.value
   );
+  // Narrower than canSeeAdminTools ON PURPOSE. The data importer loads raw
+  // customer conversations into the live interaction tables, so it excludes
+  // supervisors. Must stay in step with READ_ROLES/WRITE_ROLES in
+  // backend/src/data-import/data-import.controller.ts, or the page appears in
+  // the menu and then 403s on every call.
+  const canImportData = computed(() => isDev.value || isAdmin.value);
   const canSeeAnything = computed(
     () => isDev.value || isAdmin.value || isSupervisor.value
   );
@@ -61,6 +67,7 @@ export function useAccess(userOverride?: Ref<any> | { value: any }) {
     isUser,
     canSeeDevTools,
     canSeeAdminTools,
+    canImportData,
     canSeeAnything,
     allowedAdminTables,
     hasRole,

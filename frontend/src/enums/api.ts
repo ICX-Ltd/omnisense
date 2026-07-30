@@ -75,6 +75,16 @@ export const ApiPath = {
   SurveyRecordDetail: "/uiapi/survey/record",
 
   Recordings: "/uiapi/recordings",
+
+  // Data importer (third-party feeds -> staging -> promote).
+  DataImportSources: "/uiapi/data-import/sources",
+  DataImportServerFiles: "/uiapi/data-import/server-files",
+  DataImportPreview: "/uiapi/data-import/runs/preview", // POST multipart
+  DataImportPreviewServer: "/uiapi/data-import/runs/preview-server",
+  DataImportStageUpload: "/uiapi/data-import/runs/upload", // POST multipart
+  DataImportStageServer: "/uiapi/data-import/runs/server",
+  DataImportRuns: "/uiapi/data-import/runs", // + /:id, /:id/rows, /:id/rekey, /:id/promote, ...
+  DataImportDedupeReport: "/uiapi/data-import/dedupe-report",
 } as const;
 
 export const TranscriptionProvider = {

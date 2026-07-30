@@ -728,36 +728,14 @@
                     </div>
                   </div>
 
-                  <div v-if="isChat && chatMessages.length && chatView === 'bubbles'" class="chat-thread">
-                    <div
-                      v-for="msg in chatMessages"
-                      :key="msg.id"
-                      class="chat-msg"
-                      :class="msg.source === 'Agent' ? 'chat-msg--agent' : 'chat-msg--customer'"
-                    >
-                      <div class="chat-bubble" :class="msg.source === 'Agent' ? 'chat-bubble--agent' : 'chat-bubble--customer'">
-                        <div class="chat-sender">{{ msg.sender }}</div>
-                        <div class="chat-content">{{ msg.content }}</div>
-                        <div class="chat-time">{{ fmtTime(msg.timestamp) }}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-else-if="!isChat && callTurns.length && chatView === 'bubbles'" class="chat-thread">
-                    <div
-                      v-for="(t, i) in callTurns"
-                      :key="i"
-                      class="chat-msg"
-                      :class="t.speaker % 2 === 0 ? 'chat-msg--agent' : 'chat-msg--customer'"
-                    >
-                      <div class="chat-bubble" :class="t.speaker % 2 === 0 ? 'chat-bubble--agent' : 'chat-bubble--customer'">
-                        <div class="chat-sender">{{ t.label }}</div>
-                        <div class="chat-content">{{ t.text }}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <pre v-else class="drawer-transcript">{{ detailData.transcript.text }}</pre>
+                  <!-- Shared renderer (also used by the CSAT page). The toggle
+                       stays in the section title above, so show-toggle is off. -->
+                  <ChatTranscript
+                    :text="detailData.transcript.text"
+                    :is-chat="isChat"
+                    :view="chatView"
+                    :show-toggle="false"
+                  />
                 </div>
               </div>
             </div>
@@ -841,7 +819,14 @@ import {
 } from "@/services/interaction-search.service";
 import { ApiPath } from "@/enums/api";
 import LowConfidenceHelp from "@/components/LowConfidenceHelp.vue";
+import ChatTranscript from "@/components/ChatTranscript.vue";
 import { useAuth } from "@/composables/useAuth";
+import {
+  parseCallTurns,
+  parseChatMessages,
+  type CallTurn,
+  type ChatMessage,
+} from "@/composables/useChatTranscript";
 
 const props = defineProps<{ recordingId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -1019,12 +1004,8 @@ function fmtDate(iso: string | null) {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function fmtTime(ts: string) {
-  if (/^\d{2}:\d{2}:\d{2}$/.test(ts)) return ts.slice(0, 5);
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
+// fmtTime moved to composables/useChatTranscript.ts (fmtTranscriptTime) — the
+// shared ChatTranscript component now renders message times.
 
 function dimensionTooltip(key: string, dim: any): string {
   const label = key.replace(/_/g, " ");
@@ -1215,81 +1196,21 @@ function responseTimeChip(v: number | null | undefined, threshold: number) {
   return "chip bucket-chip--9plus";
 }
 
-interface ChatMessage {
-  id: number;
-  source: string;
-  sender: string;
-  timestamp: string;
-  content: string;
-}
-
-function parseLineChatFormat(text: string): ChatMessage[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return [];
-  const re = /^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–]\s*([^:]+):\s*(.*)$/i;
-  const msgs: ChatMessage[] = [];
-  for (const line of lines) {
-    const m = re.exec(line);
-    if (m) {
-      const role = m[2]!.trim().toLowerCase();
-      const source = role === "agent" ? "Agent" : "Customer";
-      const sender = role === "agent" ? "Agent" : m[2]!.trim();
-      msgs.push({ id: msgs.length, source, sender, timestamp: m[1]!, content: m[3] ?? "" });
-    } else if (msgs.length) {
-      msgs[msgs.length - 1]!.content += " " + line;
-    } else {
-      return [];
-    }
-  }
-  return msgs;
-}
-
-const chatMessages = computed<ChatMessage[]>(() => {
-  if (!isChat.value || !detailData.value?.transcript?.text) return [];
-  let raw: string = detailData.value.transcript.text;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length) {
-      return [...parsed].sort(
-        (a: ChatMessage, b: ChatMessage) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-    }
-    if (typeof parsed === "string") raw = parsed;
-  } catch {
-    /* not JSON */
-  }
-  const lineParsed = parseLineChatFormat(raw);
-  if (lineParsed.length) return lineParsed;
-  return [];
-});
+// Transcript parsing lives in composables/useChatTranscript.ts so this and the
+// CSAT page cannot drift apart — the CSAT viewer previously had no parser at
+// all and dumped raw text, which showed imported chats as a wall of JSON.
+const chatMessages = computed<ChatMessage[]>(() =>
+  isChat.value ? parseChatMessages(detailData.value?.transcript?.text) : [],
+);
 
 // ─── call transcript (diarized "Speaker N:" → conversation turns) ────────────
 // Deepgram call transcripts are stored one turn per line as "Speaker N: text".
 // Parse them into turns so calls render as a conversation, like chats. When no
 // speaker labels are present (e.g. OpenAI prose transcripts) we return [] and
 // the raw text is shown instead.
-interface CallTurn { speaker: number; label: string; text: string }
-const callTurns = computed<CallTurn[]>(() => {
-  if (isChat.value) return [];
-  const raw: string = detailData.value?.transcript?.text ?? "";
-  if (!raw.trim()) return [];
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const re = /^Speaker\s+(\d+)\s*:\s*(.*)$/i;
-  const turns: CallTurn[] = [];
-  for (const line of lines) {
-    const m = re.exec(line);
-    if (m) {
-      const speaker = Number(m[1]);
-      turns.push({ speaker, label: `Speaker ${speaker + 1}`, text: m[2] ?? "" });
-    } else if (turns.length) {
-      turns[turns.length - 1]!.text += " " + line;
-    } else {
-      return [];
-    }
-  }
-  return turns;
-});
+const callTurns = computed<CallTurn[]>(() =>
+  isChat.value ? [] : parseCallTurns(detailData.value?.transcript?.text),
+);
 
 // ─── transcription clarity (Deepgram acoustic confidence) ───────────────────
 // "% uncertain words" spreads calls out far better than the overall confidence

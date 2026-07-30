@@ -1,15 +1,13 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
+import { JwtSharedModule } from '../modules/auth/jwt-shared.module';
 
 @Module({
   imports: [
     // DataSource is available from the global TypeORM connection (app.module).
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-change-me',
-    }),
+    JwtSharedModule,
   ],
   controllers: [HealthController],
   providers: [HealthService],

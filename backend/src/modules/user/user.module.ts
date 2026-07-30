@@ -1,18 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { JwtModule } from '@nestjs/jwt';
 
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { UserAccount } from '../../db/entities/user-account.entity';
+import { JwtSharedModule } from '../auth/jwt-shared.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([UserAccount]),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-change-me',
-    }),
-  ],
+  imports: [TypeOrmModule.forFeature([UserAccount]), JwtSharedModule],
   controllers: [UserController],
   providers: [UserService],
   exports: [UserService],

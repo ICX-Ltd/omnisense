@@ -13,3 +13,17 @@ build/
 prompts/
 CLAUDE.md
 .claude/
+
+# Third-party data extracts. These contain real customer conversations and
+# personal data and must never be committed — put them in IMPORT_INBOX_DIR
+# (outside the repo) and load them through the Data Import page instead.
+*.csv
+*.tsv
+*.xlsx
+*.xls
+!backend/test/**/*.csv
+!backend/test/**/*.tsv
+
+# local logs
+debug.log
+*.log

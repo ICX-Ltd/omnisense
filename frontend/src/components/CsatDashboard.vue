@@ -3,6 +3,7 @@ import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
+import ChatTranscript from "./ChatTranscript.vue";
 import Sparkline from "./Sparkline.vue";
 import { getInteractionDetail } from "@/services/interaction-search.service";
 import { useAuth } from "@/composables/useAuth";
@@ -135,6 +136,9 @@ const transcriptOpen = ref(false);
 const transcriptText = ref("");
 const transcriptLoading = ref(false);
 const transcriptError = ref("");
+// Drives which structured view ChatTranscript offers: chat bubbles vs diarized
+// call turns. Captured from the interaction, not guessed from the text.
+const transcriptIsChat = ref(false);
 
 async function toggleTranscript() {
   if (transcriptOpen.value) {
@@ -150,6 +154,7 @@ async function toggleTranscript() {
   try {
     const d = await getInteractionDetail(rid);
     transcriptText.value = d?.transcript?.text || "";
+    transcriptIsChat.value = d?.interaction?.interactionType === "chat";
     if (!transcriptText.value) transcriptError.value = "No transcript available for this interaction.";
   } catch {
     transcriptError.value = "Could not load transcript.";
@@ -263,6 +268,7 @@ function resetTranscript() {
   transcriptOpen.value = false;
   transcriptText.value = "";
   transcriptError.value = "";
+  transcriptIsChat.value = false;
   comments.value = [];
   commentModalOpen.value = false;
 }
@@ -1256,7 +1262,14 @@ onMounted(loadAll);
                     </div>
                     <div v-if="transcriptLoading" class="muted">Loading transcript…</div>
                     <div v-else-if="transcriptError" class="muted">{{ transcriptError }}</div>
-                    <pre v-else class="csat-transcript-text">{{ transcriptText }}</pre>
+                    <!-- Shared renderer, so a transcript looks the same here as in
+                         the interaction drawer. Was a raw <pre>, which showed
+                         imported chats as a wall of JSON. -->
+                    <ChatTranscript
+                      v-else
+                      :text="transcriptText"
+                      :is-chat="transcriptIsChat"
+                    />
 
                     <!-- Reviewer comments saved on this record -->
                     <div v-if="comments.length" class="csat-comments">

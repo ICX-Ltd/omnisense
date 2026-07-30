@@ -5,7 +5,15 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-export type BatchJobType = 'transcribe' | 'insights_calls' | 'insights_chats';
+export type BatchJobType =
+  | 'transcribe'
+  | 'insights_calls'
+  | 'insights_chats'
+  // Data importer. import_parse streams a file into staging (its `total` is
+  // unknown until the stream ends, so progress is a row counter, not a
+  // percentage); import_promote has a real total up front.
+  | 'import_parse'
+  | 'import_promote';
 export type BatchJobStatus = 'running' | 'completed' | 'failed';
 
 @Entity({ name: 'batch_jobs', schema: 'app' })

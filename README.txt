@@ -395,3 +395,168 @@ Updates
   express pending + awaiting_transcript + assessing).
 - Deploy: run add-csat-client-response.sql on ai_insight (idempotent, no data migration) — registered
   in the schema-drift manifest, so System Health flags it until applied. APP_VERSION → 1.73.0.
+
+2026-07-30
+- Data Import (phases 0-1): a UI-driven importer for third-party interaction feeds, replacing the
+  hand-run "SSMS wizard into temp.* then INSERT...SELECT" process. File -> staging -> eyeball ->
+  (phase 2) promote. New admin page under the gear menu, dev/admin only.
+- Mapping-driven, LivePerson first. Everything provider-specific lives in one file
+  (backend/src/data-import/mappings/source-mappings.ts): column mapping, date order, natural-key
+  candidates, CSAT columns, survey Q&A pairs, PII drop list. A second provider is a new mapping, not
+  a schema change — staging columns are named after their app.* promote targets, not the feed's
+  headers, so promote is a 1:1 INSERT...SELECT.
+- Three load-bearing constants, each guarding a silent failure: status='transcribed' (anything else
+  and startBatchInsightsChats never picks the rows up), campaign must match /rac/i (or the chat
+  insights prompt skips the RAC QA + objection-handling sections — W_VALUE_campaign warns on a miss),
+  and provider='openai' with interactionSource='liveperson' (provider is the LLM provider and
+  normalizeProvider only accepts openai|anthropic|grok|gemini).
+- Transcripts are normalised into the JSON message array the app already reads
+  ([{id,source,sender,timestamp,content}] — parseChatTranscript + InteractionDetailDrawer), not the
+  plain "HH:MM-agent:" line format, which does its arithmetic in seconds-from-midnight and so
+  computes NEGATIVE response times for any overnight chat. A day-offset walk anchors each message on
+  the conversation start date; timestamps are naive-local so bubbles show the agent's wall-clock.
+  Unrecognised speakers are staged and visible but excluded from the promoted transcript rather than
+  mis-attributed into the response-time metrics.
+- Intake: browser upload (streams to disk via IMPORT_UPLOAD_DIR — never memory) and a server inbox
+  (IMPORT_INBOX_DIR), which is the intended path for the real monthly export. Both converge on one
+  parse path. Delimiter and encoding are SNIFFED, not assumed: the LivePerson export is named .csv
+  but is tab-separated, and an Excel re-save can make it UTF-16LE. Consumer PII (contact details,
+  customerInfo-*, IP) is dropped before rawJson is built, so it never reaches the database.
+- POST /uiapi/data-import/runs/preview parses the first 200 rows and reports delimiter, encoding,
+  resolved key column, column mapping and issue counts while writing NOTHING — usable against a
+  sample before any table exists.
+- Upload storage: multer's destination is resolved PER REQUEST (helpers/upload-storage.ts,
+  lazyImportDiskStorage) and passed to FileInterceptor at the call site, NOT via
+  MulterModule.register in the module. Module decorators evaluate as soon as the file is imported,
+  which happens BEFORE ConfigModule.forRoot() loads .env into process.env — so reading
+  IMPORT_UPLOAD_DIR there always saw it unset and silently fell back to in-memory buffering, which is
+  the one thing this must never do. Env vars read lazily at request time (IMPORT_INBOX_DIR) were
+  unaffected. multer is now a declared dependency rather than a transitive one, since diskStorage is
+  imported directly.
+- Deploy: run backend/sql/add-data-import.sql on ai_insight (idempotent; 3 tables, 9 indexes) —
+  registered in the schema-drift manifest, so System Health flags it until applied. New dependencies
+  csv-parse, multer (declared). Optional env: IMPORT_INBOX_DIR, IMPORT_UPLOAD_DIR,
+  IMPORT_MAX_UPLOAD_BYTES, IMPORT_STAGE_CHUNK_ROWS, IMPORT_PROMOTE_BATCH_ROWS. Both directories must
+  live OUTSIDE the repo — a real export contains customer PII. Also fixed "csat" missing from VALID_TABS in
+  App.vue (?tab=csat silently fell back). APP_VERSION → 1.75.0.
+- Access: dev/admin ONLY, deliberately narrower than the canSeeAdminTools gating every other admin
+  surface uses — the importer loads raw customer conversations into the live interaction tables, so
+  supervisors are excluded. New useAccess.canImportData gates the menu item AND the render (a
+  ?tab=dataimport deep link would otherwise reach a page that 403s on every call). Keep it in step
+  with READ_ROLES/WRITE_ROLES in data-import.controller.ts.
+- Phase 2 DONE: promote + rollback, built together so there is never a state where data can be
+  promoted but not undone. Promote is set-based and chunked (one transaction per chunk — a 200k-row
+  transaction would blow the log), idempotent at three layers, and writes app.interactions ->
+  interaction_transcripts -> interaction_csat -> interaction_survey in that order.
+  Rollback deletes interaction_survey and import-created CSAT explicitly (neither has an FK to
+  interactions), UNLINKS pre-existing CSAT back to 'unmatched' rather than destroying feed data,
+  then deletes the interactions so transcripts and insights go by cascade, and returns the run to
+  'staged' so it can be corrected and promoted again.
+- Verified against the live database, promote -> rollback -> promote -> rollback: 15 promotable of 21
+  staged, 15 interactions / 15 transcripts / 1 CSAT / 1 survey created each time, and the 75
+  pre-existing liveperson rows (from the old manual import) untouched throughout. Contract checks all
+  pass: status='transcribed', interactionType='chat', provider='openai',
+  interactionSource='liveperson', effectiveDate populated by the computed column,
+  daysToMaturityAtInteraction NULL, hasCsat set only where a CSAT exists, transcript model
+  'liveperson-import' holding a JSON array with id+sender, midnight chat rolled to the next day in
+  the live transcript, CSAT status 'pending' at score 2, _importRunId stamped for rollback, and
+  surveyType 'liveperson_post_chat'. Re-promote is refused; re-importing the same file returns 15
+  'existing' + 1 duplicate + 5 error and 0 promotable.
+- Two more bugs found by running it rather than reading it:
+  * interaction_csat.comment was the RAW multi-value survey cell ("Waited far too long for
+    recovery;No") — every answer glued together, which would then be read as the customer's verbatim
+    by the contest assessment. Now split on the multi-value delimiter, taking the first non-empty
+    answer; the full Q&A set was already preserved in interaction_survey.answersJson.
+  * Rollback reported 0 rows deleted after successfully deleting everything. TypeORM's query()
+    exposes only the first recordset, and for `DELETE <alias> FROM ...; SELECT @@ROWCOUNT` that is
+    not the SELECT (INSERT ... SELECT happens to behave differently, which is why promote's counts
+    were right). Counts are now taken with a SELECT before the deletes, inside the same transaction
+    and using the same predicates. The same latent problem in promote's `skipped` count was fixed
+    too — it read 0 and happened to be correct.
+- Schema-drift manifest: add-data-import.sql is registered and was confirmed working — it reported
+  "3 table/columns and 9 indexes missing. Run: add-data-import.sql" before the migration was applied,
+  and the check is green afterwards. MigrationDef gained an `optional` flag for opt-in migrations:
+  missing items are still LISTED so dev/prod divergence stays visible, but they do not affect the
+  status, because leaving System Health permanently amber over a deliberate choice just trains people
+  to ignore it. The status detail now says "All N required ... present. 1 optional item not applied"
+  rather than claiming everything is present while listing something missing.
+  Also registered add-csat-reviewer-comments.sql (interaction_csat.reviewerCommentsJson), which was
+  missing from the manifest — the CSAT page reads that column, so its absence would have been a
+  runtime failure the drift guard could not see. It is present on this database, so no new alarm.
+  STILL UNREGISTERED (pre-existing, not from this work): create-indexes.sql provides 21 indexes
+  (IX_interactions_effectiveDate_type, IX_interactions_type_campaign, IX_insights_recordingId,
+  IX_transcripts_recordingId, IX_summaries_* ...) and none are in the manifest, so an environment
+  that never ran it would look green while every dashboard query table-scanned.
+- New opt-in migration backend/sql/add-interactions-source-key-unique.sql: a filtered UNIQUE index on
+  (interactionSource, interactionId), which turns the NOT EXISTS check-then-act race into a catchable
+  2601/2627. It THROWS with a count if duplicates exist rather than failing obscurely. Not part of
+  add-data-import.sql because historic maxcontact loads ran with no de-dupe guard, so pre-existing
+  data may legitimately violate it. GET /uiapi/data-import/dedupe-report currently returns 0 groups
+  on this database, so it would apply cleanly.
+- Rollback is dev-only (DANGER_ROLES) and needs "ROLLBACK <first 8 of the run id>" typed back, since
+  it destroys promoted interactions and cascades away any insights generated from them — real LLM
+  spend, which the confirm modal states explicitly before you commit.
+- End-to-end through the existing pipeline, verified on live data: the chat-insights batch selected
+  the imported rows (proving the status='transcribed' + interactionType='chat' contract), completed
+  with 0 errors, moved them to insights_done, and populated qa_scores_json with the RAC QA block
+  (proving the /rac/i campaign contract). Response-time metrics needed a second look: on transcripts
+  with no "you are now connected to" marker every gap is null and every agent line reads as auto —
+  that is CORRECT, because chat-response-time.ts sets pastHandover = !rac, so RAC chats only count
+  agent replies after the handover. On a transcript that has the marker the metrics are exactly right:
+  three pre-handover lines treated as bot, then one human pair, customer 09:15:20 -> agent 09:15:40,
+  gap 20s, measured=1, avg=20. Speaker classification and the handover marker both survive promote.
+
+- CSAT page transcript viewer: was a raw <pre> dump, so an imported chat rendered as a wall of JSON.
+  It now uses the same bubble rendering as the interaction drawer.
+- Transcript parsing extracted to composables/useChatTranscript.ts and rendering to
+  components/ChatTranscript.vue, used by BOTH the drawer and the CSAT page — previously the drawer
+  held the only parser and the CSAT pane had none at all, which is exactly how they drifted. The
+  drawer keeps its own Chat/Raw toggle in the section title (show-toggle="false"), so its layout is
+  unchanged; its duplicate parse code and now-unused fmtTime are gone.
+  Side benefit: the CSAT page now renders the OLD manually-imported liveperson chats
+  ("HH:MM:SS-consumer: ...") as bubbles too, which it never did.
+  Also fixed a latent gap the extraction exposed — a DOUBLE-ENCODED transcript (a JSON string
+  wrapping a JSON array) fell back to raw text in the UI even though the backend unwraps it and reads
+  it fine, so the metrics and the display disagreed. Now unwrapped once and retried as both shapes.
+  Verified against real database rows: live imported JSON transcripts, an old line-format transcript,
+  a real diarized "Speaker N:" call transcript (24 turns, call view unchanged), plus prose/null/empty
+  fallbacks. NOTE: the frontend has no test runner, so this is covered by that verification rather
+  than by unit tests. APP_VERSION -> 1.77.0.
+
+- SECURITY: JWT_SECRET was configured but completely ignored, app-wide. All five modules did
+  `JwtModule.register({ secret: process.env.JWT_SECRET || 'dev-secret-change-me' })`, and a module
+  decorator evaluates as soon as its file is imported — BEFORE ConfigModule.forRoot() loads .env into
+  process.env. So the expression always took the fallback branch and every token was signed and
+  verified with the literal 'dev-secret-change-me', a value committed to this repository. Anyone who
+  could read the repo could forge a valid admin token. Verified before the fix: a token signed with
+  the committed fallback was accepted (200) while one signed with the real .env secret was rejected
+  (401); after the fix, exactly inverted.
+- Fixed with one shared modules/auth/jwt-shared.module.ts using JwtModule.registerAsync, so the
+  secret is resolved by a FACTORY at module-init time (after .env is loaded) and lives in exactly one
+  place instead of five copies of the same broken expression. AuthModule's signOptions.expiresIn was
+  dropped as dead configuration — every sign() call in AuthService already passes ACCESS_TTL /
+  REFRESH_TTL explicitly.
+- modules/auth/jwt.config.ts now REFUSES TO START when NODE_ENV=production and JWT_SECRET is unset,
+  is the dev placeholder, or is under 16 chars. An app that will not boot is safer than one issuing
+  forgeable admin tokens. JWT_SECRET + NODE_ENV added to env.validation.ts; note an EMPTY
+  JWT_SECRET now fails Joi validation and blocks boot in every environment, which is deliberate.
+- Staging smoke-tested against real tables (21-row fixture): 21 staged, 75 messages, 10 valid /
+  5 warning / 5 error / 1 duplicate, all four set-based validation passes firing, midnight rollover
+  producing 2025-02-19T23:59:30 -> 2025-02-20T00:01:15, PII accounting reconciling exactly
+  (55 dropped + 243 empty + 31 populated = 329), and discard cascading 21 conversations + 75 messages
+  to zero. Three bugs found and fixed in the process:
+  * Insert chunk size was a hardcoded guess of 46 columns; import_conversations has 52, so 43-row
+    chunks would have emitted ~2150 parameters and blown MSSQL's 2100 cap on the very first insert.
+    Now derived from live entity metadata, so adding a column cannot reintroduce it.
+  * Row detail reported ~298 "columns dropped by the PII policy" because it inferred drops from
+    absence in rawJson — which also omits empty cells. It now computes drops from the policy itself
+    and reports empty columns separately.
+  * Re-keying was a ONE-WAY DOOR: it appended E_NO_KEY to validationJson by string concatenation, so
+    pointing at a blank column errored every row and pointing back left the injected error behind
+    permanently — not even revalidate could recover the run. Re-key now re-projects each row through
+    stageRow() (issues recomputed, never accumulated) and round-trips exactly; a regression test
+    pins that invariant.
+- IMPACT ON DEPLOY: the signing secret genuinely changes, so every existing session is invalidated —
+  all users are logged out once and must sign in again. Nothing else to run. BEFORE DEPLOYING TO
+  PROD, confirm JWT_SECRET is actually set there (web.config <env>), or the app will refuse to start
+  by design. APP_VERSION → 1.76.0 so the login screen confirms the deploy landed.

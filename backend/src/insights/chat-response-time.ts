@@ -27,9 +27,16 @@ export const AUTO_MESSAGE_PATTERNS: RegExp[] = [
 
 // Marker that delimits the bot/handover boundary in RAC chats. Every agent
 // line BEFORE this marker (inclusive) is a bot, not the human colleague.
-const HANDOVER_MARKER_REGEX = /you are now connected to/i;
+// Exported so the data importer flags the same boundary at staging time rather
+// than keeping a second copy of the pattern.
+export const HANDOVER_MARKER_REGEX = /you are now connected to/i;
 
-const CUSTOMER_LABELS = new Set(['consumer', 'customer', 'user', 'visitor']);
+export const CUSTOMER_LABELS = new Set([
+  'consumer',
+  'customer',
+  'user',
+  'visitor',
+]);
 
 type Source = 'agent' | 'consumer';
 

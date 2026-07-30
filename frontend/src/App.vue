@@ -44,6 +44,7 @@
                   <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'prompts' }" @click="tab = 'prompts'; setOpen = false">Prompts</button>
                   <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'models' }" @click="tab = 'models'; setOpen = false">AI Models</button>
                   <button class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'health' }" @click="tab = 'health'; setOpen = false">System Health</button>
+                  <button v-if="canImportData" class="tab-dropdown-item" :class="{ 'tab-dropdown-item--active': tab === 'dataimport' }" @click="tab = 'dataimport'; setOpen = false">Data Import</button>
                 </template>
               </div>
             </div>
@@ -108,6 +109,9 @@
           <PromptsAdmin v-else-if="tab === 'prompts'" />
           <SystemHealthPanel v-else-if="tab === 'health'" />
           <ModelRegistryPage v-else-if="tab === 'models'" />
+          <!-- Role-guarded on the render too, not just the menu item: ?tab=dataimport
+               would otherwise let a supervisor reach a page that 403s. -->
+          <DataImportPage v-else-if="tab === 'dataimport' && canImportData" />
           <SettingsPanel v-else />
         </keep-alive>
       </div>
@@ -130,6 +134,7 @@ import NarrativesPage from "./components/NarrativesPage.vue";
 import PromptsAdmin from "./components/PromptsAdmin.vue";
 import SystemHealthPanel from "./components/SystemHealthPanel.vue";
 import ModelRegistryPage from "./components/ModelRegistryPage.vue";
+import DataImportPage from "./components/DataImportPage.vue";
 import GlobalRecordSearch from "./components/GlobalRecordSearch.vue";
 import LoginPanel from "./components/auth/LoginPanel.vue";
 import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
@@ -138,10 +143,10 @@ import { useAuth, type User } from "./composables/useAuth";
 import { useAccess } from "./composables/useAccess";
 import logoUrl from "./assets/ai-icon.png";
 
-const { canSeeAdminTools, canSeeDevTools } = useAccess();
+const { canSeeAdminTools, canSeeDevTools, canImportData } = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
 
-const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "csat" | "narratives" | "prompts" | "health" | "models" | "settings">("ops");
+const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "csat" | "narratives" | "prompts" | "health" | "models" | "dataimport" | "settings">("ops");
 const dpOpen = ref(false);
 const dpRef = ref<HTMLElement | null>(null);
 const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcription"].includes(tab.value));
@@ -150,7 +155,7 @@ const isDataProcessingTab = computed(() => ["test", "data", "batch", "transcript
 // Prompts, Models, System Health.
 const setOpen = ref(false);
 const setRef = ref<HTMLElement | null>(null);
-const isSettingsMenuTab = computed(() => ["settings", "prompts", "models", "health"].includes(tab.value));
+const isSettingsMenuTab = computed(() => ["settings", "prompts", "models", "health", "dataimport"].includes(tab.value));
 
 // Dashboards menu — the analytics dashboards (Operations, Campaign Insights, Survey).
 const dashOpen = ref(false);
@@ -159,7 +164,9 @@ const isDashboardTab = computed(() => ["ops", "clientservices", "survey", "csat"
 
 // Deep-linkable active tab — read from ?tab= on load, keep the URL in sync so a
 // view can be shared/pasted (dashboards sync their own filters into the query).
-const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "narratives", "prompts", "health", "models", "settings"] as const;
+// Every member of `tab` must be listed here or ?tab=<name> silently falls back
+// ("csat" was missing until the data-import work added it).
+const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "csat", "narratives", "prompts", "health", "models", "dataimport", "settings"] as const;
 function initialTab(): typeof tab.value {
   const p = new URLSearchParams(window.location.search).get("tab");
   if (p && (VALID_TABS as readonly string[]).includes(p)) return p as typeof tab.value;

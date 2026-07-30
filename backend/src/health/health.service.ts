@@ -34,6 +34,13 @@ interface MigrationDef {
   tables?: string[];
   columns?: Array<[table: string, column: string]>;
   indexes?: string[];
+  /**
+   * Opt-in migration: applying it is a deliberate decision, not a requirement.
+   * Missing items are still LISTED (so dev/prod divergence is visible) but do not
+   * affect the check status — otherwise choosing not to apply one would leave
+   * System Health permanently amber and train people to ignore it.
+   */
+  optional?: boolean;
 }
 
 const MIGRATION_MANIFEST: MigrationDef[] = [
@@ -208,6 +215,37 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     file: 'add-transcription-usage-log.sql',
     tables: ['transcription_usage_log'],
     indexes: ['IX_transcription_usage_log_createdAt'],
+  },
+  {
+    file: 'add-data-import.sql',
+    tables: ['import_runs', 'import_conversations', 'import_messages'],
+    indexes: [
+      'IX_import_runs_status_created',
+      'IX_import_runs_sha',
+      'IX_import_conv_run_row',
+      'IX_import_conv_run_status',
+      'IX_import_conv_srckey',
+      'IX_import_conv_promote',
+      'IX_import_conv_interactionId',
+      'IX_import_msg_conv',
+      'IX_import_msg_run',
+    ],
+  },
+  {
+    // Opt-in: turns the importer's NOT EXISTS check-then-act race into a
+    // catchable 2601/2627. Cannot be applied while duplicate source keys exist
+    // (see GET /uiapi/data-import/dedupe-report), so not applying it is a valid
+    // choice — hence optional, and listed rather than counted.
+    file: 'add-interactions-source-key-unique.sql',
+    optional: true,
+    indexes: ['IX_interactions_source_interactionId'],
+  },
+  {
+    // Was missing from this manifest: reviewerCommentsJson is read by the CSAT
+    // page, so its absence would be a runtime failure the drift guard could not
+    // see.
+    file: 'add-csat-reviewer-comments.sql',
+    columns: [['interaction_csat', 'reviewerCommentsJson']],
   },
 ];
 
@@ -396,12 +434,21 @@ export class HealthService {
       let total = 0;
       let missingCritical = 0; // tables/columns → error
       let missingIndex = 0; // indexes → warn
+      let missingOptional = 0; // opt-in migrations → reported, never counted
       const filesToRun = new Set<string>();
 
       for (const m of MIGRATION_MANIFEST) {
+        // An optional migration is reported but never counted, so it cannot turn
+        // the check amber or red.
+        const optionalNote = `${m.file} (optional — not applied)`;
         for (const tbl of m.tables ?? []) {
           total++;
           if (!tableSet.has(tbl.toLowerCase())) {
+            if (m.optional) {
+              missingOptional++;
+              items.push({ name: `table ${tbl}`, ok: false, note: optionalNote });
+              continue;
+            }
             missingCritical++;
             filesToRun.add(m.file);
             items.push({ name: `table ${tbl}`, ok: false, note: m.file });
@@ -410,6 +457,11 @@ export class HealthService {
         for (const [t, c] of m.columns ?? []) {
           total++;
           if (!colSet.has(`${t}.${c}`.toLowerCase())) {
+            if (m.optional) {
+              missingOptional++;
+              items.push({ name: `${t}.${c}`, ok: false, note: optionalNote });
+              continue;
+            }
             missingCritical++;
             filesToRun.add(m.file);
             items.push({ name: `${t}.${c}`, ok: false, note: m.file });
@@ -418,6 +470,11 @@ export class HealthService {
         for (const idx of m.indexes ?? []) {
           total++;
           if (!idxSet.has(idx.toLowerCase())) {
+            if (m.optional) {
+              missingOptional++;
+              items.push({ name: `index ${idx}`, ok: false, note: optionalNote });
+              continue;
+            }
             missingIndex++;
             filesToRun.add(m.file);
             items.push({ name: `index ${idx}`, ok: false, note: `${m.file} (perf only)` });
@@ -426,10 +483,15 @@ export class HealthService {
       }
 
       const status: CheckStatus = missingCritical ? 'error' : missingIndex ? 'warn' : 'ok';
+      // Optional items are mentioned separately: saying "all N present" while the
+      // item list shows one missing reads as a contradiction.
+      const optionalNote_ = missingOptional
+        ? ` ${missingOptional} optional item${missingOptional === 1 ? '' : 's'} not applied (listed below, not a problem).`
+        : '';
       const detail =
         status === 'ok'
-          ? `All ${total} expected tables, columns and indexes present.`
-          : `${missingCritical} table/column${missingCritical === 1 ? '' : 's'} and ${missingIndex} index${missingIndex === 1 ? '' : 'es'} missing. Run: ${[...filesToRun].join(', ')}`;
+          ? `All ${total - missingOptional} required tables, columns and indexes present.${optionalNote_}`
+          : `${missingCritical} table/column${missingCritical === 1 ? '' : 's'} and ${missingIndex} index${missingIndex === 1 ? '' : 'es'} missing. Run: ${[...filesToRun].join(', ')}${optionalNote_}`;
       return { key: 'schema', label: 'Schema / migrations', status, detail, items };
     } catch (e) {
       return { key: 'schema', label: 'Schema / migrations', status: 'error', detail: describeError(e) };
