@@ -65,6 +65,41 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     indexes: ['IX_prompt_templates_type_kind', 'IX_prompt_template_history_template'],
   },
   {
+    // Every index the dashboards rely on. Was absent from this manifest, so an
+    // environment that never ran create-indexes.sql reported green while each
+    // dashboard query table-scanned interactions and interaction_insights.
+    // Verified present on the dev database when registered, so this adds no
+    // pre-existing warning — it only catches a genuinely unindexed environment.
+    file: 'create-indexes.sql',
+    indexes: [
+      // app.interactions
+      'IX_interactions_effectiveDate_type',
+      'IX_interactions_type_campaign',
+      'IX_interactions_type_agent',
+      'IX_interactions_type_outcome',
+      'IX_interactions_agent_date',
+      // app.interaction_insights
+      'IX_insights_recordingId',
+      'IX_insights_overall_score',
+      'IX_insights_sentiment',
+      'IX_insights_campaign_detected',
+      'IX_insights_disposition_covering',
+      'IX_insights_interest_covering',
+      'IX_insights_has_ops_scores',
+      'IX_insights_has_coaching',
+      'IX_insights_has_objections',
+      'IX_insights_has_compliance',
+      'IX_insights_purchased_elsewhere',
+      'IX_insights_lead_generated',
+      'IX_insights_lost_sale',
+      // app.interaction_transcripts
+      'IX_transcripts_recordingId',
+      // app.insight_summaries
+      'IX_summaries_filterKey_created',
+      'IX_summaries_createdAt',
+    ],
+  },
+  {
     file: 'add-vehicle-make-model.sql',
     columns: [['interactions', 'vehicleMake'], ['interactions', 'vehicleModel']],
     indexes: ['IX_interactions_vehicleMake_vehicleModel'],

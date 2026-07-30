@@ -483,10 +483,12 @@ Updates
   Also registered add-csat-reviewer-comments.sql (interaction_csat.reviewerCommentsJson), which was
   missing from the manifest — the CSAT page reads that column, so its absence would have been a
   runtime failure the drift guard could not see. It is present on this database, so no new alarm.
-  STILL UNREGISTERED (pre-existing, not from this work): create-indexes.sql provides 21 indexes
-  (IX_interactions_effectiveDate_type, IX_interactions_type_campaign, IX_insights_recordingId,
-  IX_transcripts_recordingId, IX_summaries_* ...) and none are in the manifest, so an environment
-  that never ran it would look green while every dashboard query table-scanned.
+  Registered create-indexes.sql too — its 21 indexes (IX_interactions_effectiveDate_type,
+  IX_interactions_type_campaign, IX_insights_*, IX_transcripts_recordingId, IX_summaries_* ...) were
+  all absent from the manifest, so an environment that never ran that script reported green while
+  every dashboard query table-scanned interactions and interaction_insights. All 21 were verified
+  present on dev before registering, so it raises no pre-existing warning; the drift check now covers
+  116 required items, up from 95.
 - New opt-in migration backend/sql/add-interactions-source-key-unique.sql: a filtered UNIQUE index on
   (interactionSource, interactionId), which turns the NOT EXISTS check-then-act race into a catchable
   2601/2627. It THROWS with a count if duplicates exist rather than failing obscurely. Not part of
