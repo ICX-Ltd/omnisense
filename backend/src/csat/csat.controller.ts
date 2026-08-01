@@ -53,9 +53,11 @@ export class CsatController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
     @Query('undecidedOnly') undecidedOnly?: string,
+    @Query('reviewAction') reviewAction?: string,
   ) {
     return this.svc.list({
       undecidedOnly: undecidedOnly === 'true' || undecidedOnly === '1',
+      reviewAction,
       status,
       decision,
       campaign,

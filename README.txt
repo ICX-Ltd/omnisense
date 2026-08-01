@@ -629,3 +629,24 @@ Updates
     access, so it is not a supervisor-level action. Changing your OWN role is refused: a demotion is
     the one change you could not undo through the UI.
 - APP_VERSION -> 1.81.0.
+- CSAT: bot-handled conversations are now auto-excluded from assessment, the same way 4-5 scores are.
+  There is no colleague whose conduct could be defended, so the LLM call is wasted. Matched on
+  interactions.agent LIKE '%BOT%' (catches PROD_RAC_SVSC_BOT), overridable via CSAT_BOT_AGENT_PATTERN.
+  Applied both as a sweep — so rows queued before the rule get excluded — and as a guard in the
+  candidate select. To clear an existing backlog manually:
+      UPDATE cs SET cs.status='excluded' FROM app.interaction_csat cs
+        JOIN app.interactions i ON i.id=cs.recordingId
+       WHERE i.agent LIKE '%BOT%' AND cs.status IN ('pending','awaiting_transcript','assessed');
+- CSAT: runBatch (sync) now delegates to the SAME findAssessCandidates the background path uses. It
+  had its own duplicate copy, so the new bot rule would have applied to one path and not the other —
+  the sync route would have kept burning LLM calls on records the async route correctly skipped.
+  (The 1.80.0 note claiming the two already shared selection was wrong.)
+- CSAT grid: a Disagreed column, marked ONLY where the supervisor overruled the model, whichever way
+  the model called it. A chip on every row would be noise; an override should stand out.
+- CSAT filters: a Supervisor filter (disagreed / accepted / any) on top of the existing ones.
+- CSAT export: an Export button on the records section exports exactly what is currently filtered,
+  and crucially collapses EVERY reviewer comment into one column so a record stays a single row —
+  each entry prefixed with its author and timestamp, newlines flattened. Also adds the customer's own
+  survey verbatim as csatComment, and a UTF-8 BOM so Excel reads accents correctly. This needed
+  reviewerCommentsJson adding to the list projection; it was previously only on the detail endpoint.
+- APP_VERSION -> 1.82.0.

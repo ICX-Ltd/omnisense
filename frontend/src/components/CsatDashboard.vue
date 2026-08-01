@@ -21,6 +21,9 @@ const fDecision = ref("");
 const fCampaign = ref("");
 const fRaised = ref("");
 const fClientOutcome = ref("");
+// Supervisor verdict — 'disagree' surfaces every override, whichever way the
+// model called it.
+const fReviewAction = ref("");
 
 // ── Find by ID (client-side) ─────────────────────────────────────────────────
 // Reviewers get handed an id from all sorts of places — the CSAT record's own
@@ -240,6 +243,7 @@ async function loadList() {
   const params: Record<string, string> = { ...rangeParams() };
   params.limit = String(listLimit.value);
   if (undecidedOnly.value) params.undecidedOnly = "true";
+  if (fReviewAction.value) params.reviewAction = fReviewAction.value;
   if (fStatus.value) params.status = fStatus.value;
   if (fDecision.value) params.decision = fDecision.value;
   if (fCampaign.value) params.campaign = fCampaign.value;
@@ -710,25 +714,72 @@ async function openKpiModal(filter: Record<string, string>, title: string) {
   }
 }
 
+/**
+ * Flattens every reviewer comment on a record into ONE cell, so a record stays a
+ * single CSV row rather than fanning out into one row per comment.
+ *
+ * Newlines are replaced rather than quoted: Excel handles quoted newlines, but
+ * they make the file miserable to read, filter and paste elsewhere.
+ */
+function flattenComments(row: any): string {
+  let list: any[] = [];
+  try {
+    const parsed = row?.reviewerCommentsJson
+      ? JSON.parse(row.reviewerCommentsJson)
+      : [];
+    if (Array.isArray(parsed)) list = parsed;
+  } catch {
+    /* malformed json — fall through to the CSAT verbatim below */
+  }
+  const parts = list.map((c) => {
+    const who = c?.user || "reviewer";
+    const when = c?.at ? new Date(c.at).toLocaleString() : "";
+    const text = String(c?.comment ?? "").replace(/\s*[\r\n]+\s*/g, " ");
+    return `[${who}${when ? " " + when : ""}] ${text}`;
+  });
+  return parts.join(" | ");
+}
+
 function downloadCsv(rows: any[], filename: string) {
   const cols = [
     "interactionId", "interactionTpsId", "agent", "campaign", "score", "scoreMax",
     "status", "decision", "confidence", "reviewAction", "reviewOutcome", "reviewedBy",
     "reviewedAt", "raisedAt", "raisedBy", "clientOutcome", "clientRespondedAt",
     "clientResponseBy", "clientResponseComment", "interactionDateTime",
+    // The customer's own verbatim from the survey, plus every reviewer comment
+    // collapsed into a single cell.
+    "csatComment", "reviewerComments",
   ];
   const esc = (v: any) => {
     const s = v == null ? "" : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const csv = [cols.join(","), ...rows.map((r: any) => cols.map((c) => esc(r[c])).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const value = (r: any, c: string) => {
+    if (c === "reviewerComments") return flattenComments(r);
+    // `comment` is the customer's survey verbatim; name it clearly in the export
+    // so it is not confused with a reviewer's note.
+    if (c === "csatComment") return String(r.comment ?? "").replace(/\s*[\r\n]+\s*/g, " ");
+    return r[c];
+  };
+  const csv = [
+    cols.join(","),
+    ...rows.map((r: any) => cols.map((c) => esc(value(r, c))).join(",")),
+  ].join("\n");
+  // BOM so Excel reads UTF-8 correctly (£ signs, accented names).
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Exports exactly what the grid is currently showing, filters and all. */
+function exportVisibleCsv() {
+  if (!visibleRows.value.length) return;
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadCsv(visibleRows.value, `csat-records-${stamp}.csv`);
 }
 
 async function exportKpiCsv() {
@@ -1114,6 +1165,14 @@ onMounted(loadAll);
         </select>
       </div>
       <div class="control-group">
+        <label>Supervisor</label>
+        <select v-model="fReviewAction" class="sel" @change="loadList">
+          <option value="">Any</option>
+          <option value="disagree">Disagreed with the model</option>
+          <option value="accept">Accepted the model</option>
+        </select>
+      </div>
+      <div class="control-group">
         <label>Max rows</label>
         <select v-model.number="listLimit" class="sel" @change="loadList">
           <option :value="200">200</option>
@@ -1164,12 +1223,22 @@ onMounted(loadAll);
 
     <!-- List -->
     <div class="tile">
-      <div class="tile-title">
-        CSAT Records
-        <span class="chip chip--secondary" style="font-size: 10px">{{ visibleRows.length }}</span>
-        <span v-if="fId" class="muted" style="font-weight: 400; font-size: 11px">
-          filtered by id “{{ fId }}” · {{ rows.length }} loaded
+      <div class="tile-title records-head">
+        <span>
+          CSAT Records
+          <span class="chip chip--secondary" style="font-size: 10px">{{ visibleRows.length }}</span>
+          <span v-if="fId" class="muted" style="font-weight: 400; font-size: 11px">
+            filtered by id “{{ fId }}” · {{ rows.length }} loaded
+          </span>
         </span>
+        <button
+          class="btn btn--ghost btn--sm"
+          :disabled="!visibleRows.length"
+          title="Export the records currently shown, including every reviewer comment in one column"
+          @click="exportVisibleCsv"
+        >
+          Export {{ visibleRows.length }} to CSV
+        </button>
       </div>
       <div class="tbl-scroll">
       <table class="tbl">
@@ -1185,7 +1254,9 @@ onMounted(loadAll);
               />
             </th>
             <th></th><th>Interaction</th><th>Agent</th><th>Campaign</th><th>Score</th>
-            <th>Status</th><th>Decision</th><th>Raise with client</th><th>Sent</th>
+            <th>Status</th><th>Decision</th>
+            <th title="Marked only where the supervisor overruled the model">Disagreed</th>
+            <th>Raise with client</th><th>Sent</th>
             <th>Client</th><th>Conf.</th><th>Date</th><th></th>
           </tr>
         </thead>
@@ -1206,6 +1277,18 @@ onMounted(loadAll);
               <td>{{ r.score ?? "—" }}<span v-if="r.scoreMax">/{{ r.scoreMax }}</span></td>
               <td><span :class="statusChip(r.status)" style="font-size: 10px">{{ r.status }}</span></td>
               <td><span :class="decisionChip(r.decision)" style="font-size: 10px">{{ decisionLabel(r.decision) }}</span></td>
+              <!-- Marked ONLY on disagreement. A chip on every row would be
+                   noise; the whole point is that an override stands out. -->
+              <td class="disagree-cell">
+                <span
+                  v-if="r.reviewAction === 'disagree'"
+                  class="disagree-flag"
+                  :title="
+                    'Supervisor disagreed with the model' +
+                    (r.reviewedBy ? ' — ' + r.reviewedBy : '')
+                  "
+                >⚠ Disagreed</span>
+              </td>
               <td>
                 <span
                   v-if="r.reviewOutcome === 'raise_with_client'"
@@ -1247,7 +1330,7 @@ onMounted(loadAll);
               </td>
             </tr>
             <tr v-if="expandedId === r.id" class="detail-row">
-              <td colspan="14">
+              <td colspan="15">
                 <div v-if="loadingDetail" class="muted">Loading…</div>
                 <div v-else-if="detail" class="csat-detail" :class="{ 'csat-detail--split': transcriptOpen }">
                   <div class="csat-assessment">
@@ -1428,7 +1511,7 @@ onMounted(loadAll);
             </tr>
           </template>
           <tr v-if="!visibleRows.length">
-            <td colspan="14" class="muted" style="text-align: center; padding: 20px">
+            <td colspan="15" class="muted" style="text-align: center; padding: 20px">
               <template v-if="fId && rows.length">
                 No loaded record matches “{{ fId }}”. The search covers the {{ rows.length }} row{{ rows.length === 1 ? "" : "s" }}
                 in the current date range and filters — try “All time” or clearing the filters above.
@@ -1792,6 +1875,25 @@ onMounted(loadAll);
 /* Side-by-side: assessment on the left half, transcript on the right half */
 .csat-detail--split { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .csat-detail--split .csat-assessment { flex: 1 1 50%; min-width: 0; }
+
+/* ── records header with export ───────────────────────────────────────────── */
+.records-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+
+/* ── disagreement marker ──────────────────────────────────────────────────────
+   Shown only where a supervisor overruled the model, so it reads as an exception
+   rather than yet another status chip on every row. */
+.disagree-cell { white-space: nowrap; }
+.disagree-flag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--danger, #e11d48);
+}
 
 /* ── collapsible section header ───────────────────────────────────────────── */
 .collapse-head {

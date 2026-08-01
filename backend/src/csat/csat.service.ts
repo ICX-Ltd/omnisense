@@ -20,6 +20,12 @@ import { InsightsProviderName } from '../insights/types/insights-provider.type';
 // (the framework is about contesting negative scores). Env-overridable.
 const CSAT_MAX_SCORE = Number(process.env.CSAT_ASSESS_MAX_SCORE) || 3;
 
+// Conversations handled by a bot are not worth contest-assessing — there is no
+// colleague whose conduct could be defended. Matched against interactions.agent
+// with a SQL LIKE, so '%BOT%' catches PROD_RAC_SVSC_BOT and friends. Override
+// with CSAT_BOT_AGENT_PATTERN if a real colleague's name ever collides.
+const CSAT_BOT_AGENT_PATTERN = process.env.CSAT_BOT_AGENT_PATTERN || '%BOT%';
+
 // A reviewer comment stored on a CSAT record (reviewerCommentsJson array).
 export interface CsatReviewerComment {
   user: string | null;
@@ -283,6 +289,8 @@ export class CsatService {
     limit?: number;
     /** Hide records a supervisor has already accepted or disagreed with. */
     undecidedOnly?: boolean;
+    /** accept | disagree — filter to one supervisor verdict. */
+    reviewAction?: string;
   }) {
     const qb = this.csatRepo
       .createQueryBuilder('c')
@@ -304,6 +312,9 @@ export class CsatService {
         'c.reviewAction AS reviewAction',
         'c.reviewedBy AS reviewedBy',
         'c.reviewedAt AS reviewedAt',
+        // Needed by the CSV export so every reviewer comment can be collapsed
+        // into one column and the record stays a single row.
+        'c.reviewerCommentsJson AS reviewerCommentsJson',
         'c.raisedAt AS raisedAt',
         'c.raisedBy AS raisedBy',
         'c.clientOutcome AS clientOutcome',
@@ -347,6 +358,12 @@ export class CsatService {
     // so a long list stays focused on what still needs a decision.
     if (opts.undecidedOnly) {
       qb.andWhere('c.reviewAction IS NULL');
+    }
+
+    // Where the supervisor overruled the model — the interesting set, whichever
+    // way the model called it.
+    if (opts.reviewAction) {
+      qb.andWhere('c.reviewAction = :ra', { ra: opts.reviewAction });
     }
 
     this.applyDateRange(qb, 'c', opts.from, opts.to);
@@ -502,26 +519,14 @@ export class CsatService {
   // Process up to `limit` pending CSAT rows that have a matched interaction with
   // a transcript. Sequential — CSAT volumes are low relative to insights.
   async runBatch(limit: number, provider?: InsightsProviderName, model?: string) {
-    // Reclassify any queued 4-5 scores that predate the exclusion rule.
-    await this.csatRepo
-      .createQueryBuilder()
-      .update(InteractionCsat)
-      .set({ status: 'excluded' })
-      .where('status IN (:...s) AND score IS NOT NULL AND score > :max', {
-        s: ['pending', 'awaiting_transcript'],
-        max: CSAT_MAX_SCORE,
-      })
-      .execute();
-
-    const candidates = await this.csatRepo.find({
-      where: {
-        status: In(['pending', 'awaiting_transcript']),
-        recordingId: Not(IsNull()),
-        score: LessThanOrEqual(CSAT_MAX_SCORE),
-      },
-      order: { createdAt: 'ASC' },
-      take: Math.min(Math.max(limit, 1), 500),
-    });
+    // Delegates to the SAME selection the background path uses. This previously
+    // had its own copy, which meant a new exclusion rule (bot agents) would have
+    // applied to one path and not the other — the sync route would still have
+    // burned LLM calls on records the async route correctly skipped.
+    // Kept at the lower 500 cap: this path blocks the HTTP request.
+    const candidates = await this.findAssessCandidates(
+      Math.min(Math.max(limit, 1), 500),
+    );
 
     let assessed = 0;
     let awaiting = 0;
@@ -611,13 +616,32 @@ export class CsatService {
       })
       .execute();
 
+    // Same treatment for bot-handled conversations: park them rather than spend
+    // an LLM call deciding whether to defend a colleague who was never involved.
+    // Done as a sweep so rows queued before this rule existed are caught too.
+    await this.csatRepo.query(
+      `UPDATE cs SET status = 'excluded'
+         FROM app.interaction_csat cs
+         JOIN app.interactions i ON i.id = cs.recordingId
+        WHERE cs.status IN ('pending','awaiting_transcript')
+          AND i.agent LIKE @0`,
+      [CSAT_BOT_AGENT_PATTERN],
+    );
+
     const qb = this.csatRepo
       .createQueryBuilder('c')
       .where('c.status IN (:...statuses)', {
         statuses: ['pending', 'awaiting_transcript'],
       })
       .andWhere('c.recordingId IS NOT NULL')
-      .andWhere('c.score <= :max', { max: CSAT_MAX_SCORE });
+      .andWhere('c.score <= :max', { max: CSAT_MAX_SCORE })
+      // Belt and braces alongside the sweep above: never pick up a bot record
+      // even if one slipped in between the sweep and this select.
+      .andWhere(
+        `NOT EXISTS (SELECT 1 FROM app.interactions bi
+                      WHERE bi.id = c.recordingId AND bi.agent LIKE :botPattern)`,
+        { botPattern: CSAT_BOT_AGENT_PATTERN },
+      );
 
     // Honour the page's date range so an assessor can work through one slice at
     // a time. Uses the SAME applyDateRange helper as the board and list — rolling
