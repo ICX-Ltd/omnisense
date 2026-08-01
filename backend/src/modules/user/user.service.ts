@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import * as bcrypt from 'bcrypt';
 import { UserAccount } from '../../db/entities/user-account.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
+import { ROLE_IDS, normaliseRole } from './roles';
 
 @Injectable()
 export class UserService {
@@ -92,6 +94,35 @@ export class UserService {
     }
 
     return this.toUserDto(user);
+  }
+
+  /**
+   * Changes a user's role.
+   *
+   * Refuses to change your OWN role: demoting yourself is the one change that
+   * cannot be undone through the UI, because you would immediately lose the
+   * access needed to reverse it. Someone else with dev/admin has to do it.
+   */
+  async updateRole(id: string, roleId: string, actingUserId: string) {
+    const user = await this.accountRepo.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const next = normaliseRole(roleId);
+    if (!next) {
+      throw new BadRequestException(
+        `Unknown role "${roleId}". Known roles: ${ROLE_IDS.join(', ')}.`,
+      );
+    }
+
+    if (id === actingUserId && user.roleId !== next) {
+      throw new BadRequestException(
+        'You cannot change your own role — ask another admin, otherwise a ' +
+          'demotion would lock you out of reversing it.',
+      );
+    }
+
+    await this.accountRepo.update(id, { roleId: next });
+    return this.findOne(id);
   }
 
   async create(dto: CreateUserDto) {

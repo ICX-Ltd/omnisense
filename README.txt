@@ -613,3 +613,19 @@ Updates
   wrongly implies an insight row exists. Added to the DataQueue filter and chip styling. Set back to
   'transcribed' to release. No migration needed: status is varchar(50) with no CHECK constraint.
 - APP_VERSION -> 1.80.0.
+- User roles are now settable from the UI. role_id could ONLY be changed with direct database access:
+  UserService.create already read `(dto as any).roleId`, but CreateUserDto never declared it and
+  main.ts runs ValidationPipe with forbidNonWhitelisted, so sending a role produced a 400 and every
+  account was created with a null role. Nothing could update one afterwards either.
+  * CreateUserDto.roleId is now declared and validated (@IsIn), and the create form has a required
+    role dropdown.
+  * New PATCH /uiapi/users/:id/role plus a User Roles panel in Settings for changing an existing
+    user's role.
+  * There is no roles table — role_id is a free nvarchar(50) — so backend/src/modules/user/roles.ts
+    IS the definition, served via GET /uiapi/users/meta/roles. The dropdown and the server-side
+    validation therefore cannot drift. Keep the ids in step with the Role union in useAccess.ts,
+    which decides what each role can actually see.
+  * Gated to dev/admin, the same as an admin password reset — granting a role can hand someone full
+    access, so it is not a supervisor-level action. Changing your OWN role is refused: a demotion is
+    the one change you could not undo through the UI.
+- APP_VERSION -> 1.81.0.

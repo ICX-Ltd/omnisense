@@ -1,28 +1,47 @@
 <script setup lang="ts">
 import IconChip from "./IconChip.vue";
-import { computed, ref } from "vue";
-import { createUser } from "@/services/user.service";
+import { computed, onMounted, ref } from "vue";
+import { createUser, listRoles, type RoleDef } from "@/services/user.service";
 
 const loading = ref(false);
 const error = ref("");
 const successMsg = ref("");
 
+const roles = ref<RoleDef[]>([]);
+
 const form = ref({
   email: "",
   displayName: "",
   password: "",
+  // Role was previously unsettable here: the service read it but the DTO
+  // rejected it, so every account was created with a null role that needed
+  // direct database access to fix.
+  roleId: "",
 });
+
+onMounted(async () => {
+  try {
+    roles.value = await listRoles();
+  } catch {
+    // Non-fatal: the form still works, the role just has to be set afterwards.
+  }
+});
+
+const selectedRole = computed(
+  () => roles.value.find((r) => r.id === form.value.roleId) ?? null,
+);
 
 const canSubmit = computed(() => {
   return (
     form.value.email.trim().length > 0 &&
     form.value.displayName.trim().length > 0 &&
-    form.value.password.trim().length > 0
+    form.value.password.trim().length > 0 &&
+    form.value.roleId.trim().length > 0
   );
 });
 
 function resetForm() {
-  form.value = { email: "", displayName: "", password: "" };
+  form.value = { email: "", displayName: "", password: "", roleId: "" };
   error.value = "";
 }
 
@@ -41,6 +60,7 @@ async function submit() {
       email: form.value.email.trim(),
       displayName: form.value.displayName.trim(),
       password: form.value.password,
+      roleId: form.value.roleId,
     });
 
     showSuccess("User created");
@@ -85,6 +105,19 @@ async function submit() {
             autocomplete="off"
             :disabled="loading"
           />
+        </div>
+
+        <div class="field-row">
+          <label class="field-label">Role</label>
+          <div class="input-wrap">
+            <select v-model="form.roleId" class="input" :disabled="loading">
+              <option value="">Select a role…</option>
+              <option v-for="r in roles" :key="r.id" :value="r.id">
+                {{ r.label }} ({{ r.id }})
+              </option>
+            </select>
+            <div v-if="selectedRole" class="hint">{{ selectedRole.description }}</div>
+          </div>
         </div>
 
         <div class="field-row">
