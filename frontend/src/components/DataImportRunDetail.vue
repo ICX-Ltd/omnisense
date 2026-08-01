@@ -28,7 +28,10 @@
     <div v-if="statusMsg" class="run-msg">{{ statusMsg }}</div>
 
     <div v-if="run?.status === 'parsing'" class="run-msg">
-      Still reading the file — {{ run.counts.staged }} rows staged so far.
+      <strong>Reading the file…</strong>
+      {{ (jobProgress || run.counts.staged).toLocaleString() }} rows staged so
+      far. This updates every few seconds — a large export can take a while, and
+      the counters below fill in as it goes.
     </div>
     <div v-if="run?.lastError" class="error-tile">
       <div class="error-title">Run failed</div>
@@ -835,13 +838,19 @@ async function doPurgeStaging() {
 }
 
 /**
- * Polls the promote job while one is running. Unlike a streaming parse, promote
- * knows its total up front, so this is a real progress figure.
+ * Polls while EITHER a parse or a promote is running.
+ *
+ * Parsing was originally left out, so a long import rendered a zeroed page that
+ * never updated — a 9,742-row file takes about an hour, and the operator had no
+ * way to tell it was alive without hitting Refresh.
  */
 function syncJobPolling() {
-  const active = run.value?.status === "promoting" && run.value.promoteJobId;
+  const status = run.value?.status;
+  const active =
+    (status === "promoting" && !!run.value?.promoteJobId) ||
+    (status === "parsing" && !!run.value?.parseJobId);
   if (active && !jobPoll) {
-    jobPoll = setInterval(() => void pollJob(), 2000);
+    jobPoll = setInterval(() => void pollJob(), 3000);
   } else if (!active && jobPoll) {
     clearInterval(jobPoll);
     jobPoll = null;
@@ -849,15 +858,24 @@ function syncJobPolling() {
 }
 
 async function pollJob() {
-  const jobId = run.value?.promoteJobId;
+  const parsing = run.value?.status === "parsing";
+  const jobId = parsing ? run.value?.parseJobId : run.value?.promoteJobId;
   if (!jobId) return;
   try {
     const job = await getJob(jobId);
     jobProgress.value = job.progress;
+    // A streaming parse does not know its total until the stream ends, so this
+    // stays 0 and the template shows a row counter rather than a percentage.
     jobTotal.value = job.total;
+
+    // Refresh the run itself so the staged/valid/warning counters climb live
+    // instead of sitting at zero until the job finishes.
+    run.value = await getRun(props.runId);
     if (job.status !== "running") {
       await load();
       emit("changed");
+    } else {
+      syncJobPolling();
     }
   } catch {
     await load();
