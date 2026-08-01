@@ -267,6 +267,14 @@ const MIGRATION_MANIFEST: MigrationDef[] = [
     ],
   },
   {
+    // Required by the importer: promote's NOT EXISTS guard correlates on these
+    // two columns for every staged row inside a transaction. Without the index
+    // that is a scan per row, which held locks long enough to take production
+    // down on a real 9,742-row import.
+    file: 'add-interactions-source-key-index.sql',
+    indexes: ['IX_interactions_source_key'],
+  },
+  {
     // Opt-in: turns the importer's NOT EXISTS check-then-act race into a
     // catchable 2601/2627. Cannot be applied while duplicate source keys exist
     // (see GET /uiapi/data-import/dedupe-report), so not applying it is a valid

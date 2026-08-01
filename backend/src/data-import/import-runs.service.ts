@@ -73,8 +73,42 @@ export class ImportRunsService {
     );
     const offset = Math.max(query.offset ?? 0, 0);
 
+    // Select ONLY what serializeRowSummary returns. Without this TypeORM
+    // hydrates every column, including seven nvarchar(MAX) fields — rawJson,
+    // transcriptRaw and transcriptJson are multi-KB each, so a 200-row page
+    // pulled tens of megabytes to render a grid that displays none of it. That
+    // was a 500 on a real 9,742-row run and invisible on a small fixture.
+    // validationJson is kept because the row summary derives its issue counts
+    // from it, and it is small by comparison.
     const qb = this.convRepo
       .createQueryBuilder('c')
+      .select([
+        'c.rowNumber',
+        'c.validationStatus',
+        'c.excluded',
+        'c.excludedReason',
+        'c.excludedBy',
+        'c.promoteStatus',
+        'c.promotedInteractionId',
+        'c.promoteError',
+        'c.srcConversationId',
+        'c.srcSessionId',
+        'c.interactionId',
+        'c.interactionDateTime',
+        'c.campaign',
+        'c.agent',
+        'c.skill',
+        'c.outcome',
+        'c.durationSeconds',
+        'c.csatScore',
+        'c.csatScoreMax',
+        'c.mcs',
+        'c.transcriptParseStatus',
+        'c.transcriptMessageCount',
+        'c.isPartial',
+        'c.isTruncated',
+        'c.validationJson',
+      ])
       .where('c.importRunId = :runId', { runId });
 
     if (query.status) {

@@ -25,9 +25,18 @@ function csatAssessMaxScore(): number {
   return Number(process.env.CSAT_ASSESS_MAX_SCORE) || 3;
 }
 
+/**
+ * Rows promoted per transaction.
+ *
+ * Lowered from 2000 to 500 after a real import: each chunk inserts that many
+ * interactions plus transcripts carrying multi-KB nvarchar(MAX) payloads, and at
+ * 2000 the transaction stayed open long enough to block other traffic against
+ * app.interactions. Shorter transactions release locks sooner; the extra
+ * round trips cost far less than the contention did.
+ */
 function promoteBatchRows(): number {
   const raw = Number(process.env.IMPORT_PROMOTE_BATCH_ROWS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 2000;
+  return Number.isFinite(raw) && raw > 0 ? raw : 500;
 }
 
 /** Statuses from which a promote may be started or resumed. */
