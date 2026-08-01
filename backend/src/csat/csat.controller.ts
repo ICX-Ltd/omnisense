@@ -52,8 +52,10 @@ export class CsatController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('limit') limit?: string,
+    @Query('undecidedOnly') undecidedOnly?: string,
   ) {
     return this.svc.list({
+      undecidedOnly: undecidedOnly === 'true' || undecidedOnly === '1',
       status,
       decision,
       campaign,
@@ -93,11 +95,37 @@ export class CsatController {
     );
   }
 
+  /**
+   * Synchronous assessment — kept for small ad-hoc runs. Bounded by the proxy
+   * timeout, so roughly 25 records. Prefer run-batch-async for anything larger.
+   */
   @Post('run-batch')
   runBatch(
     @Body() body: { limit?: number; provider?: InsightsProviderName; model?: string },
   ) {
     return this.svc.runBatch(body?.limit ?? 25, body?.provider, body?.model);
+  }
+
+  /**
+   * Background assessment. Returns { jobId, total } immediately; poll progress
+   * via GET /uiapi/recordings/jobs/:jobId. Honours the page's date range so an
+   * assessor can work through one slice at a time.
+   */
+  @Post('run-batch-async')
+  runBatchAsync(
+    @Body()
+    body: {
+      limit?: number;
+      provider?: InsightsProviderName;
+      model?: string;
+      from?: string;
+      to?: string;
+    },
+  ) {
+    return this.svc.startBatchAssess(body?.limit ?? 500, body?.provider, body?.model, {
+      from: body?.from,
+      to: body?.to,
+    });
   }
 
   @Post('item/:id/requeue')

@@ -588,3 +588,28 @@ Updates
   all users are logged out once and must sign in again. Nothing else to run. BEFORE DEPLOYING TO
   PROD, confirm JWT_SECRET is actually set there (web.config <env>), or the app will refuse to start
   by design. APP_VERSION → 1.76.0 so the login screen confirms the deploy landed.
+
+2026-08-01
+- CSAT assessment now runs as a BACKGROUND JOB (POST /uiapi/csat/run-batch-async, batch_jobs type
+  'csat_assess'). The existing run-batch looped inside the HTTP request, so a run was capped by the
+  proxy timeout at roughly 25 records — after the LivePerson import produced ~400 pending that meant
+  17 manual rounds. The new endpoint returns {jobId,total} immediately and the page polls the
+  existing recordings jobs endpoint for a progress bar. Scoped to the page's date range via the SAME
+  applyDateRange helper the board and list use, so a record can never be visible in one view and
+  unassessable in the other. run-batch is kept for small ad-hoc runs.
+- CSAT page, three assessor-workflow changes:
+  * By Campaign is collapsible and collapsed by default (remembered in localStorage). It sat between
+    the tiles and the records grid and pushed the actual work below the fold on every load.
+  * Accept/Disagree now has its own full-width decision bar with large buttons, stating the question
+    and turning green/red once actioned. It was previously small buttons mixed in with Open
+    interaction / View transcript. flex-basis:100% keeps it on its own row and identically placed
+    whether or not the transcript pane has split the layout — it moved and narrowed before.
+  * Records list gained a selectable row limit (200/500/1000/2000, server cap raised 1000 -> 5000)
+    and a "Needs a decision" filter (undecidedOnly) hiding anything a supervisor has already
+    accepted or disagreed with, so a post-import queue shows only outstanding work.
+- interactions.status gained 'insights_blocked' — a deliberate park for rows that have a transcript
+  and could be analysed but are being held back from the insights batch (e.g. a bulk import where
+  only a subset is worth the LLM spend). Previously 'insights_done' was misused for this, which
+  wrongly implies an insight row exists. Added to the DataQueue filter and chip styling. Set back to
+  'transcribed' to release. No migration needed: status is varchar(50) with no CHECK constraint.
+- APP_VERSION -> 1.80.0.

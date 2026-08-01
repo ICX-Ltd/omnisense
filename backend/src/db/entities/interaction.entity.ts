@@ -14,6 +14,12 @@ export type RecordingStatus =
   | 'transcribed'
   | 'insights_pending'
   | 'insights_done'
+  // Deliberately parked: has a transcript and COULD be analysed, but has been
+  // held back from the insights batch on purpose — e.g. a bulk import where only
+  // a subset is worth the LLM spend. Distinct from 'insights_done', which was
+  // previously misused for this and wrongly implies an insight row exists.
+  // Set it back to 'transcribed' to release it.
+  | 'insights_blocked'
   | 'error';
 
 @Entity({ name: 'interactions', schema: 'app' })

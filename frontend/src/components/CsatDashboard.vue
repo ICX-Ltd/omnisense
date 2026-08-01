@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 import InteractionDetailDrawer from "./InteractionDetailDrawer.vue";
 import ChatTranscript from "./ChatTranscript.vue";
@@ -119,6 +119,31 @@ const rangeLabel = computed(() => {
 
 // Batch
 const batchLimit = ref(25);
+
+// ─── By Campaign collapse ───────────────────────────────────────────────────
+// Collapsed by default so the records grid — the actual work — is near the top.
+const CAMPAIGNS_KEY = "aii_csat_campaigns_open";
+const campaignsOpen = ref(localStorage.getItem(CAMPAIGNS_KEY) === "1");
+function toggleCampaigns() {
+  campaignsOpen.value = !campaignsOpen.value;
+  localStorage.setItem(CAMPAIGNS_KEY, campaignsOpen.value ? "1" : "0");
+}
+
+// ─── list size / focus ──────────────────────────────────────────────────────
+// 200 is not always enough after a bulk import, and once a supervisor has
+// actioned a record it is just noise in the queue.
+const listLimit = ref(200);
+const undecidedOnly = ref(false);
+
+// ─── background assessment ──────────────────────────────────────────────────
+// The synchronous endpoint is bounded by the proxy timeout (~25 records), which
+// is unworkable for the hundreds a bulk import produces. This kicks off a
+// background job and polls it, so a whole range can be assessed in one go.
+const assessJobId = ref<string | null>(null);
+const assessProgress = ref(0);
+const assessTotal = ref(0);
+const assessErrors = ref(0);
+let assessPoll: ReturnType<typeof setInterval> | null = null;
 const running = ref(false);
 const runMsg = ref("");
 const rematching = ref(false);
@@ -213,6 +238,8 @@ async function loadBoard() {
 
 async function loadList() {
   const params: Record<string, string> = { ...rangeParams() };
+  params.limit = String(listLimit.value);
+  if (undecidedOnly.value) params.undecidedOnly = "true";
   if (fStatus.value) params.status = fStatus.value;
   if (fDecision.value) params.decision = fDecision.value;
   if (fCampaign.value) params.campaign = fCampaign.value;
@@ -236,20 +263,75 @@ async function loadAll() {
   }
 }
 
+/**
+ * Starts a BACKGROUND assessment run and polls it.
+ *
+ * The old synchronous endpoint held the HTTP request open for the whole run, so
+ * it was capped by the proxy timeout at roughly 25 records — meaning ~17 manual
+ * rounds for the 400 a bulk import produces. This returns immediately and
+ * reports progress instead, and is scoped to the page's date range so an
+ * assessor can work through one slice at a time.
+ */
 async function runBatch() {
   running.value = true;
   runMsg.value = "";
   try {
-    const res = await axios.post(ApiPath.CsatRunBatch, { limit: batchLimit.value });
-    const d = res.data;
-    runMsg.value = `Processed ${d.processed}: ${d.assessed} assessed, ${d.awaiting_transcript} awaiting transcript, ${d.errored} errored.`;
-    await loadAll();
+    const res = await axios.post(ApiPath.CsatRunBatchAsync, {
+      limit: batchLimit.value,
+      ...rangeParams(),
+    });
+    assessJobId.value = res.data?.jobId ?? null;
+    assessTotal.value = res.data?.total ?? 0;
+    assessProgress.value = 0;
+    assessErrors.value = 0;
+    if (!assessTotal.value) {
+      runMsg.value = "Nothing to assess in this date range.";
+      running.value = false;
+      return;
+    }
+    runMsg.value = `Assessing ${assessTotal.value} record(s) in the background…`;
+    startAssessPolling();
   } catch (e: any) {
     runMsg.value = e?.response?.data?.message || e?.message || "Batch failed";
-  } finally {
     running.value = false;
   }
 }
+
+function startAssessPolling() {
+  if (assessPoll) clearInterval(assessPoll);
+  assessPoll = setInterval(async () => {
+    if (!assessJobId.value) return;
+    try {
+      const { data: job } = await axios.get(
+        `${ApiPath.Recordings}/jobs/${assessJobId.value}`,
+      );
+      assessProgress.value = job.progress ?? 0;
+      assessTotal.value = job.total ?? assessTotal.value;
+      assessErrors.value = job.errorCount ?? 0;
+      if (job.status !== "running") {
+        stopAssessPolling();
+        runMsg.value =
+          `Assessed ${assessProgress.value} of ${assessTotal.value}` +
+          (assessErrors.value ? ` — ${assessErrors.value} errored.` : ".");
+        await loadAll();
+      }
+    } catch {
+      // Job row gone or unreachable — stop rather than poll forever.
+      stopAssessPolling();
+      runMsg.value = "Lost track of the assessment job; refresh to see results.";
+      await loadAll();
+    }
+  }, 3000);
+}
+
+function stopAssessPolling() {
+  if (assessPoll) clearInterval(assessPoll);
+  assessPoll = null;
+  assessJobId.value = null;
+  running.value = false;
+}
+
+onUnmounted(stopAssessPolling);
 
 async function rematch() {
   rematching.value = true;
@@ -924,21 +1006,43 @@ onMounted(loadAll);
     <div class="controls">
       <div class="control-group">
         <label>Run assessment on next</label>
-        <input v-model.number="batchLimit" type="number" min="1" max="500" class="num-input" />
+        <input v-model.number="batchLimit" type="number" min="1" max="2000" class="num-input" />
         <button class="btn btn--primary btn--sm" :disabled="running" @click="runBatch">
           {{ running ? "Assessing…" : "Assess pending" }}
         </button>
+        <span class="hint">runs in the background, within the date range above</span>
       </div>
       <button class="btn btn--sm" :disabled="rematching" @click="rematch">
         {{ rematching ? "Rematching…" : "Rematch unmatched" }}
       </button>
       <span v-if="runMsg" class="run-msg">{{ runMsg }}</span>
+
+      <!-- Live progress. The run continues server-side even if this page is
+           closed, so this is a view of the job rather than the work itself. -->
+      <div v-if="running && assessTotal" class="assess-progress">
+        <div class="assess-bar">
+          <div
+            class="assess-bar-fill"
+            :style="{ width: Math.round((assessProgress / assessTotal) * 100) + '%' }"
+          />
+        </div>
+        <span class="hint">
+          {{ assessProgress }} / {{ assessTotal }}
+          <template v-if="assessErrors"> · {{ assessErrors }} errored</template>
+        </span>
+      </div>
     </div>
 
-    <!-- By campaign -->
+    <!-- By campaign — collapsed by default. It sits between the tiles and the
+         records grid, so leaving it open pushes an assessor's actual work below
+         the fold on every page load. Preference is remembered. -->
     <div v-if="board?.byCampaign?.length" class="tile">
-      <div class="tile-title">By Campaign</div>
-      <table class="tbl">
+      <button type="button" class="collapse-head" @click="toggleCampaigns">
+        <span class="collapse-caret" :class="{ 'collapse-caret--open': campaignsOpen }">▸</span>
+        <span class="tile-title" style="margin: 0">By Campaign</span>
+        <span class="hint">{{ board.byCampaign.length }} campaigns</span>
+      </button>
+      <table v-if="campaignsOpen" class="tbl">
         <thead><tr><th>Campaign</th><th>Total</th><th>Assessed</th><th>Contest</th><th>Do Not Contest</th><th>Contest rate</th></tr></thead>
         <tbody>
           <tr v-for="c in board.byCampaign" :key="c.campaign">
@@ -998,6 +1102,24 @@ onMounted(loadAll);
           <option value="awaiting">Awaiting response</option>
           <option value="accepted">Accepted (not a fail)</option>
           <option value="rejected">Rejected (still a fail)</option>
+        </select>
+      </div>
+      <!-- Outstanding work only. After a bulk import the list is mostly records
+           already actioned, which buries the ones still needing a decision. -->
+      <div class="control-group">
+        <label>Show</label>
+        <select v-model="undecidedOnly" class="sel" @change="loadList">
+          <option :value="false">All records</option>
+          <option :value="true">Needs a decision</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Max rows</label>
+        <select v-model.number="listLimit" class="sel" @change="loadList">
+          <option :value="200">200</option>
+          <option :value="500">500</option>
+          <option :value="1000">1000</option>
+          <option :value="2000">2000</option>
         </select>
       </div>
       <!-- Filters the loaded rows only — no re-fetch. Matches any id on the
@@ -1153,34 +1275,54 @@ onMounted(loadAll);
                     <button v-if="detail.recordingId" class="btn btn--sm" @click="drawerRecordingId = detail.recordingId">Open interaction</button>
                     <button v-if="detail.recordingId && !transcriptOpen" class="btn btn--sm" @click.stop="toggleTranscript">View transcript/comments</button>
                     <button v-if="detail.status === 'assessed'" class="btn btn--sm" @click.stop="requeueRow(r.id)">Re-assess</button>
-                    <span class="csat-actions-sep" />
-                    <template v-if="detail.status === 'assessed'">
-                      <div class="csat-toggle" role="group" aria-label="Supervisor review">
-                        <button
-                          type="button"
-                          class="csat-toggle-btn"
-                          :class="{ 'csat-toggle-btn--active': detail.reviewAction === 'accept' }"
-                          :disabled="reviewSaving"
-                          :title="detail.reviewAction === 'accept' ? 'Click to clear' : 'Accept the AI recommendation'"
-                          @click.stop="setReview(detail.reviewAction === 'accept' ? 'clear' : 'accept')"
-                        >Accept recommendation</button>
-                        <button
-                          type="button"
-                          class="csat-toggle-btn"
-                          :class="{ 'csat-toggle-btn--active': detail.reviewAction === 'disagree' }"
-                          :disabled="reviewSaving"
-                          :title="detail.reviewAction === 'disagree' ? 'Click to clear' : 'Disagree with the AI recommendation'"
-                          @click.stop="setReview(detail.reviewAction === 'disagree' ? 'clear' : 'disagree')"
-                        >Disagree</button>
-                      </div>
-                    </template>
-                    <span
-                      v-if="detail.reviewOutcome"
-                      class="chip"
-                      :class="detail.reviewOutcome === 'raise_with_client' ? 'chip--warning' : 'chip--secondary'"
-                      style="font-size: 10px"
-                      :title="detail.reviewedBy ? 'by ' + detail.reviewedBy : ''"
-                    >{{ detail.reviewOutcome === "raise_with_client" ? "Raise with client" : "Do not raise" }}<template v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</template></span>
+                  </div>
+
+                  <!-- THE DECISION. This is the point of the page, so it gets its
+                       own full-width bar rather than sitting among the secondary
+                       actions above. flex-basis:100% keeps it on its own row and
+                       identically placed whether or not the transcript pane has
+                       turned this container into a two-column split. -->
+                  <div
+                    v-if="detail.status === 'assessed'"
+                    class="csat-decision-bar"
+                    :class="{ 'csat-decision-bar--done': !!detail.reviewAction }"
+                  >
+                    <div class="csat-decision-ask">
+                      <template v-if="detail.reviewAction === 'accept'">
+                        You <strong>accepted</strong> the recommendation.
+                      </template>
+                      <template v-else-if="detail.reviewAction === 'disagree'">
+                        You <strong>disagreed</strong> with the recommendation.
+                      </template>
+                      <template v-else>
+                        Do you agree with
+                        <strong>{{ detail.decision === "contest" ? "Contest" : detail.decision === "do_not_contest" ? "Do Not Contest" : "this assessment" }}</strong>?
+                      </template>
+                      <span
+                        v-if="detail.reviewOutcome"
+                        class="chip"
+                        :class="detail.reviewOutcome === 'raise_with_client' ? 'chip--warning' : 'chip--secondary'"
+                        :title="detail.reviewedBy ? 'by ' + detail.reviewedBy : ''"
+                      >{{ detail.reviewOutcome === "raise_with_client" ? "Raise with client" : "Do not raise" }}<template v-if="detail.reviewedBy"> · {{ detail.reviewedBy }}</template></span>
+                    </div>
+                    <div class="csat-decision-actions" role="group" aria-label="Supervisor review">
+                      <button
+                        type="button"
+                        class="csat-decision-btn csat-decision-btn--accept"
+                        :class="{ 'csat-decision-btn--active': detail.reviewAction === 'accept' }"
+                        :disabled="reviewSaving"
+                        :title="detail.reviewAction === 'accept' ? 'Click to clear' : 'Accept the AI recommendation'"
+                        @click.stop="setReview(detail.reviewAction === 'accept' ? 'clear' : 'accept')"
+                      >{{ detail.reviewAction === "accept" ? "✓ Accepted" : "Accept recommendation" }}</button>
+                      <button
+                        type="button"
+                        class="csat-decision-btn csat-decision-btn--disagree"
+                        :class="{ 'csat-decision-btn--active': detail.reviewAction === 'disagree' }"
+                        :disabled="reviewSaving"
+                        :title="detail.reviewAction === 'disagree' ? 'Click to clear' : 'Disagree with the AI recommendation'"
+                        @click.stop="setReview(detail.reviewAction === 'disagree' ? 'clear' : 'disagree')"
+                      >{{ detail.reviewAction === "disagree" ? "✓ Disagreed" : "Disagree" }}</button>
+                    </div>
                   </div>
 
                   <!-- Raise + client response for this one record. Same actions as
@@ -1648,8 +1790,62 @@ onMounted(loadAll);
 .csat-toggle-btn:disabled { opacity: 0.6; cursor: default; }
 
 /* Side-by-side: assessment on the left half, transcript on the right half */
-.csat-detail--split { display: flex; gap: 16px; align-items: flex-start; }
+.csat-detail--split { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .csat-detail--split .csat-assessment { flex: 1 1 50%; min-width: 0; }
+
+/* ── collapsible section header ───────────────────────────────────────────── */
+.collapse-head {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; background: none; border: none; padding: 0 0 6px;
+  cursor: pointer; text-align: left; color: inherit;
+}
+.collapse-caret { font-size: 11px; color: var(--muted); transition: transform 0.15s; }
+.collapse-caret--open { transform: rotate(90deg); }
+
+/* ── background assessment progress ───────────────────────────────────────── */
+.assess-progress { display: flex; align-items: center; gap: 10px; flex: 1 1 100%; margin-top: 6px; }
+.assess-bar {
+  flex: 1; height: 8px; max-width: 320px;
+  background: var(--surface-soft, #eef2f7); border-radius: 999px; overflow: hidden;
+}
+.assess-bar-fill { height: 100%; background: var(--brand, #2b6cb0); transition: width 0.3s; }
+
+/* ── the decision bar ─────────────────────────────────────────────────────────
+   Deliberately the loudest thing in the expanded record: getting a decision is
+   the entire purpose of this page. flex-basis:100% forces it onto its own full
+   row even when the transcript pane makes the parent a two-column flex layout,
+   so it never moves or narrows depending on whether the transcript is open. */
+.csat-decision-bar {
+  flex: 1 1 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  margin: 12px 0 4px; padding: 12px 16px;
+  border: 2px solid var(--brand, #2b6cb0);
+  border-radius: var(--radius-lg, 10px);
+  background: rgba(43, 108, 176, 0.06);
+}
+/* Decided: step the emphasis down so attention moves to the next record. */
+.csat-decision-bar--done {
+  border-color: var(--border);
+  background: var(--surface-soft, #f8fafc);
+}
+.csat-decision-ask { font-size: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.csat-decision-actions { display: flex; gap: 10px; }
+.csat-decision-btn {
+  padding: 10px 20px; font-size: 14px; font-weight: 700;
+  border-radius: var(--radius-lg, 8px); border: 2px solid var(--border);
+  background: #fff; color: var(--ink); cursor: pointer; transition: all 0.12s;
+}
+.csat-decision-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.csat-decision-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.csat-decision-btn--accept:hover:not(:disabled) { border-color: var(--success, #059669); }
+.csat-decision-btn--disagree:hover:not(:disabled) { border-color: var(--danger, #e11d48); }
+.csat-decision-btn--accept.csat-decision-btn--active {
+  background: var(--success, #059669); border-color: var(--success, #059669); color: #fff;
+}
+.csat-decision-btn--disagree.csat-decision-btn--active {
+  background: var(--danger, #e11d48); border-color: var(--danger, #e11d48); color: #fff;
+}
 .csat-transcript-pane {
   flex: 1 1 50%;
   min-width: 0;

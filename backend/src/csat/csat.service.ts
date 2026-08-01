@@ -10,6 +10,7 @@ import { In, IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { InteractionCsat } from '../db/entities/interaction-csat.entity';
 import { Interaction } from '../db/entities/interaction.entity';
 import { InteractionTranscript } from '../db/entities/interaction-transcript.entity';
+import { BatchJob } from '../db/entities/batch-job.entity';
 import { PromptsService } from '../modules/prompts/prompts.service';
 import { createProvider } from '../insights/providers/provider.factory';
 import { cleanJsonText } from '../insights/insights.service';
@@ -47,6 +48,8 @@ export class CsatService {
     private readonly interactionsRepo: Repository<Interaction>,
     @InjectRepository(InteractionTranscript)
     private readonly transcriptsRepo: Repository<InteractionTranscript>,
+    @InjectRepository(BatchJob)
+    private readonly batchJobRepo: Repository<BatchJob>,
     private readonly prompts: PromptsService,
   ) {}
 
@@ -278,6 +281,8 @@ export class CsatService {
     from?: string;
     to?: string;
     limit?: number;
+    /** Hide records a supervisor has already accepted or disagreed with. */
+    undecidedOnly?: boolean;
   }) {
     const qb = this.csatRepo
       .createQueryBuilder('c')
@@ -312,7 +317,7 @@ export class CsatService {
         'ia.interactionDateTime AS interactionDateTime',
       ])
       .orderBy('c.createdAt', 'DESC')
-      .limit(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
+      .limit(Math.min(Math.max(opts.limit ?? 200, 1), 5000));
 
     // 'pending_any' is the union the Pending tile counts — a single status can't
     // express it, so it gets a pseudo-value (same trick as clientOutcome=awaiting).
@@ -336,6 +341,12 @@ export class CsatService {
       qb.andWhere('c.raisedAt IS NOT NULL AND c.clientOutcome IS NULL');
     } else if (opts.clientOutcome) {
       qb.andWhere('c.clientOutcome = :co', { co: opts.clientOutcome });
+    }
+
+    // Outstanding work only: drop anything a supervisor has already actioned,
+    // so a long list stays focused on what still needs a decision.
+    if (opts.undecidedOnly) {
+      qb.andWhere('c.reviewAction IS NULL');
     }
 
     this.applyDateRange(qb, 'c', opts.from, opts.to);
@@ -529,6 +540,129 @@ export class CsatService {
     }
 
     return { processed: candidates.length, assessed, awaiting_transcript: awaiting, errored };
+  }
+
+  /**
+   * Background variant of runBatch.
+   *
+   * runBatch loops inside the HTTP request, so a run is bounded by the proxy
+   * timeout — about 25 records in practice. A bulk import produces hundreds of
+   * CSATs at once, which made that a real ceiling: 400 records meant ~17 manual
+   * rounds. This hands off the same work to a batch_jobs row, mirroring
+   * RecordingsService.startBatchInsights, and returns immediately so the caller
+   * can poll for progress.
+   *
+   * Still sequential per record — assessment is LLM-bound and CSAT volumes are
+   * modest, so there is no need for a worker pool here.
+   */
+  async startBatchAssess(
+    limit: number,
+    provider?: InsightsProviderName,
+    model?: string,
+    range?: { from?: string; to?: string },
+  ): Promise<{ jobId: string; total: number }> {
+    const candidates = await this.findAssessCandidates(limit, range);
+
+    const job = await this.batchJobRepo.save(
+      this.batchJobRepo.create({
+        type: 'csat_assess',
+        status: 'running',
+        total: candidates.length,
+        progress: 0,
+        errorCount: 0,
+        provider: provider ?? null,
+        completedAt: null,
+      }),
+    );
+
+    setImmediate(() => {
+      this.runAssessBackground(
+        job.id,
+        candidates.map((c) => c.id),
+        provider,
+        model,
+      ).catch(async (err) => {
+        this.logger.error(`[csat] batch assess failed: ${err?.message ?? err}`);
+        await this.batchJobRepo
+          .update(job.id, { status: 'failed', completedAt: new Date() })
+          .catch(() => {});
+      });
+    });
+
+    return { jobId: job.id, total: candidates.length };
+  }
+
+  /**
+   * Candidate selection shared by the synchronous and background paths, so the
+   * two cannot drift on which records they consider assessable.
+   */
+  private async findAssessCandidates(
+    limit: number,
+    range?: { from?: string; to?: string },
+  ): Promise<InteractionCsat[]> {
+    // Reclassify any queued 4-5 scores that predate the exclusion rule.
+    await this.csatRepo
+      .createQueryBuilder()
+      .update(InteractionCsat)
+      .set({ status: 'excluded' })
+      .where('status IN (:...s) AND score IS NOT NULL AND score > :max', {
+        s: ['pending', 'awaiting_transcript'],
+        max: CSAT_MAX_SCORE,
+      })
+      .execute();
+
+    const qb = this.csatRepo
+      .createQueryBuilder('c')
+      .where('c.status IN (:...statuses)', {
+        statuses: ['pending', 'awaiting_transcript'],
+      })
+      .andWhere('c.recordingId IS NOT NULL')
+      .andWhere('c.score <= :max', { max: CSAT_MAX_SCORE });
+
+    // Honour the page's date range so an assessor can work through one slice at
+    // a time. Uses the SAME applyDateRange helper as the board and list — rolling
+    // a separate comparison here would let a record fall inside the range you can
+    // see but outside the range you can assess (or vice versa), and it would miss
+    // the inclusive end-of-day handling for a bare yyyy-MM-dd.
+    this.applyDateRange(qb, 'c', range?.from, range?.to);
+
+    return qb
+      .orderBy('c.createdAt', 'ASC')
+      .take(Math.min(Math.max(limit, 1), 2000))
+      .getMany();
+  }
+
+  private async runAssessBackground(
+    jobId: string,
+    ids: string[],
+    provider?: InsightsProviderName,
+    model?: string,
+  ): Promise<void> {
+    const errors: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      try {
+        const done = await this.assessOne(id, provider, model);
+        if (done === 'error') {
+          errors.push({ id, error: 'assessment returned error' });
+          await this.batchJobRepo.increment({ id: jobId }, 'errorCount', 1);
+        }
+      } catch (e: any) {
+        errors.push({ id, error: e?.message ?? String(e) });
+        await this.batchJobRepo.increment({ id: jobId }, 'errorCount', 1);
+        this.logger.error(`CSAT assess failed for ${id}: ${e?.message ?? e}`);
+      }
+      await this.batchJobRepo.increment({ id: jobId }, 'progress', 1);
+    }
+
+    await this.batchJobRepo.update(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+      errorsJson: errors.length ? JSON.stringify(errors.slice(-50)) : null,
+    });
+    this.logger.log(
+      `[csat] batch assess finished: ${ids.length} processed, ${errors.length} errored`,
+    );
   }
 
   async assessOne(

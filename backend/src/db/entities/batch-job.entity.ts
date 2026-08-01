@@ -13,7 +13,11 @@ export type BatchJobType =
   // unknown until the stream ends, so progress is a row counter, not a
   // percentage); import_promote has a real total up front.
   | 'import_parse'
-  | 'import_promote';
+  | 'import_promote'
+  // CSAT contest assessment. Was run synchronously inside the HTTP request,
+  // which capped a run at whatever the proxy timeout allowed (~25 records).
+  // A bulk import produces hundreds at once, so it needs the background pattern.
+  | 'csat_assess';
 export type BatchJobStatus = 'running' | 'completed' | 'failed';
 
 @Entity({ name: 'batch_jobs', schema: 'app' })

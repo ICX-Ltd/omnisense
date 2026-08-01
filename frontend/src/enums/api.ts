@@ -11,7 +11,8 @@ export const ApiPath = {
 
   CsatBoard: "/uiapi/csat/board",
   CsatList: "/uiapi/csat/list",
-  CsatRunBatch: "/uiapi/csat/run-batch",
+  CsatRunBatch: "/uiapi/csat/run-batch", // synchronous; bounded by the proxy timeout
+  CsatRunBatchAsync: "/uiapi/csat/run-batch-async", // background job + progress polling
   CsatRematch: "/uiapi/csat/rematch",
   CsatItem: "/uiapi/csat/item", // + /:id, /:id/assess, /:id/requeue
   CsatRaise: "/uiapi/csat/raise", // bulk/single "sent to client" marker

@@ -75,6 +75,7 @@
                 <option value="transcribing">transcribing</option>
                 <option value="transcribed">transcribed</option>
                 <option value="insights_done">insights_done</option>
+                <option value="insights_blocked">insights_blocked</option>
                 <option value="error">error</option>
               </select>
               <input
@@ -267,6 +268,8 @@ function fmtDate(d: string | null | undefined) {
 function statusChip(status: string) {
   const s = (status || "").toLowerCase();
   if (s === "insights_done") return "chip chip--st-done";
+  // Parked on purpose — has a transcript but held back from the insights batch.
+  if (s === "insights_blocked") return "chip chip--st-pending";
   if (s === "error") return "chip chip--danger";
   if (s === "transcribed") return "chip chip--st-transcribed";
   if (s === "transcribing") return "chip chip--st-transcribing";
