@@ -2034,22 +2034,54 @@ ${prompt}
     const flag = (p: string, alias: string) =>
       `SUM(CASE WHEN ${jv(p)} IN ('true', '1', 'Yes', 'Y') THEN 1 ELSE 0 END) AS ${alias}`;
     const isSet = (p: string) => `${jv(p)} IS NOT NULL AND ${jv(p)} <> ''`;
+    // competitor_purchase.make is populated even when the customer bought the
+    // CLIENT'S OWN brand — that's a retained sale, not a defection. Same
+    // definition as DEFECTED in survey-analytics.service.ts: must be set AND
+    // not match the enquired vehicleMake.
+    const ownBrandMatch = `UPPER(LTRIM(RTRIM(${jv('$.competitor_purchase.make')}))) = UPPER(LTRIM(RTRIM(COALESCE(ia.vehicleMake, ''))))`;
+    const isDefected = `(${isSet('$.competitor_purchase.make')} AND NOT (${ownBrandMatch}))`;
+    const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
 
     const totals = await this.insightsRepo.manager.query(
       `SELECT COUNT(1) AS total,
         SUM(CASE WHEN ${jv('$.meta.flow_status')} = 'Survey Taken' THEN 1 ELSE 0 END) AS survey_taken,
-        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS defections,
+        SUM(CASE WHEN ${isDefected} THEN 1 ELSE 0 END) AS defections,
+        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} AND ${ownBrandMatch} THEN 1 ELSE 0 END) AS won,
         ${flag('$.purchase_status.still_considering', 'still_considering')}
       ${FROM} ${where}`, params,
     );
+    const totalRecords = parseInt(totals[0]?.total ?? '0', 10);
+    const surveyTakenCount = parseInt(totals[0]?.survey_taken ?? '0', 10);
+    const defectionsCount = parseInt(totals[0]?.defections ?? '0', 10);
+    const wonCount = parseInt(totals[0]?.won ?? '0', 10);
+    // Denominator for "why didn't you buy from us" — Survey Taken minus the
+    // ones who did (Won); everyone else (Defected, Still Considering, or
+    // not-yet-purchased) has a reason to give.
+    const notPurchasedCohort = Math.max(0, surveyTakenCount - wonCount);
 
-    const categories = await this.insightsRepo.manager.query(
+    const categoriesRaw = await this.insightsRepo.manager.query<Array<{ category: string; count: string }>>(
       `SELECT COALESCE(ia.outcome, 'Unknown') AS category, COUNT(1) AS count
        ${FROM} ${where} GROUP BY ia.outcome ORDER BY COUNT(1) DESC`, params,
     );
+    const categories = categoriesRaw.map((r) => {
+      const count = parseInt(r.count, 10);
+      return { category: r.category, count, share_pct: pct(count, totalRecords) };
+    });
+
+    // Turns a single flag-sum row ({factorKey: countString, ...}) into a
+    // sorted array of {factor, count, share_pct}, so the LLM (and any future
+    // UI) gets a percentage it doesn't have to compute itself.
+    const toFactorList = (row: Record<string, string> | undefined, labels: Record<string, string>, denom: number) =>
+      Object.entries(labels)
+        .map(([key, factor]) => {
+          const count = parseInt(row?.[key] ?? '0', 10);
+          return { factor, key, count, share_pct: pct(count, denom) };
+        })
+        .sort((a, b) => b.count - a.count);
 
     // Initial interest — full 9-factor set (campaign_answers_json fidelity).
-    const interestFactors = await this.insightsRepo.manager.query(
+    // Denominator: everyone who completed the survey (Survey Taken).
+    const interestFactorsRow = (await this.insightsRepo.manager.query(
       `SELECT
         ${flag('$.initial_interest.styling_design', 'styling')},
         ${flag('$.initial_interest.brand_reputation', 'brand_reputation')},
@@ -2060,9 +2092,15 @@ ${prompt}
         ${flag('$.initial_interest.performance', 'performance')},
         ${flag('$.initial_interest.price_value', 'price_value')}
       ${FROM} ${where}`, params,
-    );
+    ))[0];
+    const interestFactors = toFactorList(interestFactorsRow, {
+      styling: 'Styling / Design', brand_reputation: 'Brand Reputation', brand_loyalty: 'Brand Loyalty',
+      recommendation: 'Recommendation', features: 'Features', size_practicality: 'Size / Practicality',
+      performance: 'Performance', price_value: 'Price / Value',
+    }, surveyTakenCount);
 
-    const notPurchaseReasons = await this.insightsRepo.manager.query(
+    // Denominator: Survey Taken minus Won — the "not purchased from us" cohort.
+    const notPurchaseReasonsRow = (await this.insightsRepo.manager.query(
       `SELECT
         ${flag('$.not_purchased_reasons.price', 'price')},
         ${flag('$.not_purchased_reasons.expectations', 'expectations')},
@@ -2072,10 +2110,17 @@ ${prompt}
         ${flag('$.not_purchased_reasons.dealership_experience', 'dealership')},
         ${flag('$.not_purchased_reasons.no_interest_in_evs', 'no_interest_in_evs')}
       ${FROM} ${where}`, params,
-    );
+    ))[0];
+    const notPurchaseReasons = toFactorList(notPurchaseReasonsRow, {
+      price: 'Price', expectations: 'Expectations', different_brand: 'Purchased Different Brand',
+      different_model: 'Purchased Different Model', financing: 'Financing',
+      dealership: 'Dealership Experience', no_interest_in_evs: 'No Interest in EVs',
+    }, notPurchasedCohort);
 
-    // Purchase influence — the full 18-factor P4 Q6 set (only in the JSON).
-    const influenceFactors = await this.insightsRepo.manager.query(
+    // Purchase influence — the full 16-factor P4 Q6 set (only in the JSON).
+    // Denominator: confirmed Defected (this question is "what pulled you to
+    // the competitor" — it doesn't apply to customers who bought our brand).
+    const influenceFactorsRow = (await this.insightsRepo.manager.query(
       `SELECT
         ${flag('$.influenced_by.apr_lower', 'apr_lower')},
         ${flag('$.influenced_by.better_value', 'better_value')},
@@ -2094,18 +2139,29 @@ ${prompt}
         ${flag('$.influenced_by.size', 'size')},
         ${flag('$.influenced_by.try_different', 'try_different')}
       ${FROM} ${where}`, params,
-    );
+    ))[0];
+    const influenceFactors = toFactorList(influenceFactorsRow, {
+      apr_lower: 'Lower APR', better_value: 'Better Value', brand_loyalty: 'Brand Loyalty',
+      colour_spec_pref: 'Colour / Spec Preference', comfortable_interior: 'Comfortable Interior',
+      customer_service: 'Customer Service', discount: 'Discount', drive_of_vehicle: 'Drive of Vehicle',
+      enhanced_features: 'Enhanced Features', longer_warranty: 'Longer Warranty',
+      monthly_payments_lower: 'Lower Monthly Payments', powertrain_options: 'Powertrain Options',
+      pref_design: 'Preferred Design', quicker_delivery: 'Quicker Delivery', size: 'Size',
+      try_different: 'Wanted to Try Different',
+    }, defectionsCount);
 
     const competitorPurchases = await this.insightsRepo.manager.query<Array<{ make: string; count: string }>>(
       `SELECT ${jv('$.competitor_purchase.make')} AS make, COUNT(1) AS count
-       ${FROM} ${where} AND ${isSet('$.competitor_purchase.make')}
+       ${FROM} ${where} AND ${isDefected}
        GROUP BY ${jv('$.competitor_purchase.make')} ORDER BY COUNT(1) DESC`, params,
     );
     // Tag each competitor make Chinese / other and roll up the headline share.
-    const competitorBrands = competitorPurchases.map((r) => ({
-      make: r.make, count: parseInt(r.count, 10), chinese: isChineseOem(r.make),
-    }));
-    const totalDefections = competitorBrands.reduce((a, b) => a + b.count, 0);
+    const totalDefectionsRaw = competitorPurchases.reduce((a, b) => a + parseInt(b.count, 10), 0);
+    const competitorBrands = competitorPurchases.map((r) => {
+      const count = parseInt(r.count, 10);
+      return { make: r.make, count, share_pct: pct(count, totalDefectionsRaw), chinese: isChineseOem(r.make) };
+    });
+    const totalDefections = totalDefectionsRaw;
     const chineseDefections = competitorBrands.filter((b) => b.chinese).reduce((a, b) => a + b.count, 0);
 
     const dealerRatings = await this.insightsRepo.manager.query(
@@ -2114,13 +2170,23 @@ ${prompt}
        GROUP BY ia.dealer HAVING COUNT(1) >= 2 ORDER BY AVG(TRY_CAST(${jv('$.dealership_rating.score')} AS FLOAT)) ASC`, params,
     );
 
-    const modelPerformance = await this.insightsRepo.manager.query(
+    const modelPerformanceRaw = await this.insightsRepo.manager.query<Array<{
+      model: string; total: string; still_considering: string; purchased_elsewhere: string;
+    }>>(
       `SELECT ia.vehicleModel AS model, COUNT(1) AS total,
         ${flag('$.purchase_status.still_considering', 'still_considering')},
-        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS purchased_elsewhere
+        SUM(CASE WHEN ${isDefected} THEN 1 ELSE 0 END) AS purchased_elsewhere
       ${FROM} ${where} AND ia.vehicleModel IS NOT NULL
       GROUP BY ia.vehicleModel HAVING COUNT(1) >= 2 ORDER BY COUNT(1) DESC`, params,
     );
+    const modelPerformance = modelPerformanceRaw.map((r) => {
+      const total = parseInt(r.total, 10);
+      return {
+        model: r.model, total, share_pct: pct(total, totalRecords),
+        still_considering: parseInt(r.still_considering, 10),
+        purchased_elsewhere: parseInt(r.purchased_elsewhere, 10),
+      };
+    });
 
     // Quarter-on-quarter: totals + defections, plus per-quarter competitor makes
     // so Chinese-OEM share by quarter can be folded in (Prompt 3).
@@ -2129,7 +2195,7 @@ ${prompt}
     }>>(
       `SELECT YEAR(${effDate}) AS yr, DATEPART(QUARTER, ${effDate}) AS qtr,
         COUNT(1) AS total,
-        SUM(CASE WHEN ${isSet('$.competitor_purchase.make')} THEN 1 ELSE 0 END) AS defections
+        SUM(CASE WHEN ${isDefected} THEN 1 ELSE 0 END) AS defections
       ${FROM} ${where}
       GROUP BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate})
       ORDER BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate})`, params,
@@ -2139,7 +2205,7 @@ ${prompt}
     }>>(
       `SELECT YEAR(${effDate}) AS yr, DATEPART(QUARTER, ${effDate}) AS qtr,
         ${jv('$.competitor_purchase.make')} AS make, COUNT(1) AS count
-      ${FROM} ${where} AND ${isSet('$.competitor_purchase.make')}
+      ${FROM} ${where} AND ${isDefected}
       GROUP BY YEAR(${effDate}), DATEPART(QUARTER, ${effDate}), ${jv('$.competitor_purchase.make')}`, params,
     );
     const chineseByQuarter = new Map<string, number>();
@@ -2197,9 +2263,9 @@ ${prompt}
       aggregated: {
         totals: totals[0] ?? {},
         categories,
-        interest_factors: interestFactors[0] ?? {},
-        not_purchase_reasons: notPurchaseReasons[0] ?? {},
-        purchase_influence_factors: influenceFactors[0] ?? {},
+        interest_factors: interestFactors,
+        not_purchase_reasons: notPurchaseReasons,
+        purchase_influence_factors: influenceFactors,
         competitor_purchases: competitorBrands,
         chinese_oem: {
           total_defections: totalDefections,

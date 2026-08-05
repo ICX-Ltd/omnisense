@@ -9,6 +9,7 @@ import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
 import InteractionDetailDrawer from "@/components/InteractionDetailDrawer.vue";
 import Sparkline from "@/components/Sparkline.vue";
 import RadarChart from "@/components/RadarChart.vue";
+import InfoTip from "@/components/InfoTip.vue";
 import { downloadCsv } from "@/utils/csv";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -109,6 +110,8 @@ const whyWeLose = ref<any>(null);
 const whatsWorking = ref<any>(null);
 // Transcript-mined insights (from campaign_transcript_json — beyond the survey).
 const transcriptInsights = ref<any>(null);
+// Survey (not-purchase reasons) x Transcript (why competitors win) cross-tab.
+const reasonCrossTab = ref<any>(null);
 
 // Drill-down
 const expandedCategory = ref<string | null>(null);
@@ -150,6 +153,15 @@ function barPct(n: number, max: number) {
 function maxCount(rows: Array<{ count: number }> | undefined) {
   if (!rows?.length) return 0;
   return Math.max(...rows.map((r) => r.count));
+}
+
+// Sequential single-hue shading for the reasons cross-tab heatmap — pct is
+// already row-normalised server-side, so intensity here directly reads as
+// "how concentrated" that cell is within its row's cohort.
+function xtabBg(cellPct: number) {
+  if (!cellPct) return "transparent";
+  const opacity = 0.08 + Math.min(cellPct, 100) * 0.006;
+  return `color-mix(in srgb, var(--brand, #2b6cb0) ${Math.round(opacity * 100)}%, transparent)`;
 }
 
 function riskColor(rate: number) {
@@ -450,6 +462,14 @@ async function loadAll() {
     } catch {
       transcriptInsights.value = null;
     }
+    // Cross-tab joins survey answers to transcript insights; same fail-soft
+    // rule — depends on both, so it's the most likely to 404/500 on data that
+    // hasn't been through the transcript insights run yet.
+    try {
+      reasonCrossTab.value = (await axios.get(ApiPath.SurveyReasonCrossTab, { params: p })).data;
+    } catch {
+      reasonCrossTab.value = null;
+    }
   } catch (e: any) {
     error.value = e?.response?.data?.message || e?.message || "Failed to load";
   } finally {
@@ -704,7 +724,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div class="tile-head">
         <IconChip name="filters" />
         <div class="tile-text">
-          <div class="tile-title">Filters</div>
+          <div class="tile-title">Filters<InfoTip text="These scope every panel on this page — they all share one query, so the numbers always agree. Outcome filters on the interaction's CRM result code, a different field from the survey's Won/Defected answer." /></div>
           <div class="tile-desc">Select date range and optionally filter by campaign, manufacturer, model or dealer</div>
         </div>
       </div>
@@ -782,13 +802,13 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="stat-label">Survey Not Taken</div><div class="stat-value">{{ overview.survey_not_taken }}</div>
         </div>
         <div class="stat stat--click stat--success" @click="openDrill('ov:won', 'Bought client brand (won)', { wonOnly: 'true' })">
-          <div class="stat-label">Bought Client Brand</div><div class="stat-value">{{ overview.won }}</div>
+          <div class="stat-label">Bought Client Brand<InfoTip text="competitor_purchase.make is set AND matches the make the customer originally enquired about (case/whitespace-insensitive)." /></div><div class="stat-value">{{ overview.won }}</div>
         </div>
         <div class="stat stat--click stat--risk" @click="openDrill('ov:defected', 'Defected to a competitor', { defectedOnly: 'true' })">
-          <div class="stat-label">Defected (Competitor)</div><div class="stat-value">{{ overview.defected }}</div>
+          <div class="stat-label">Defected (Competitor)<InfoTip text="competitor_purchase.make is set AND does NOT match the enquired make. Not gated on the survey's 'purchased make of interest' flag — that flag is set too broadly in the data and would wrongly exclude genuine competitor purchases." /></div><div class="stat-value">{{ overview.defected }}</div>
         </div>
         <div class="stat stat--click stat--warning" @click="openDrill('ov:considering', 'Still considering', { stillConsidering: 'true' })">
-          <div class="stat-label">Still Considering</div><div class="stat-value">{{ overview.still_considering }}</div>
+          <div class="stat-label">Still Considering<InfoTip text="purchase_status.still_considering flag is true — the customer hasn't purchased anything yet, from us or a competitor." /></div><div class="stat-value">{{ overview.still_considering }}</div>
         </div>
       </div>
 
@@ -814,7 +834,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="list" />
             <div class="tile-text">
-              <div class="tile-title">Outcome Categories</div>
+              <div class="tile-title">Outcome Categories<InfoTip text="Groups records by the interaction's outcome/result code (a CRM/dealer code like FPI or NI) — a different field from the survey's Won/Defected answer. Shows each outcome's count, share of all outcomes, defections, and defection rate within that outcome." /></div>
               <div class="tile-desc">Each outcome's overall share, plus its defections and defection rate. Click a category to see individual records</div>
             </div>
           </div>
@@ -855,7 +875,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="performance" />
             <div class="tile-text">
-              <div class="tile-title">Model Performance</div>
+              <div class="tile-title">Model Performance<InfoTip text="Per enquired model: total volume, still considering, purchased elsewhere (defected), and survey-taken count. Models with under 2 records in scope are hidden to avoid noisy single-record rows." /></div>
               <div class="tile-desc">Enquired models: still considering vs purchased elsewhere</div>
             </div>
           </div>
@@ -893,7 +913,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="factors" />
             <div class="tile-text">
-              <div class="tile-title">Initial Interest Factors</div>
+              <div class="tile-title">Initial Interest Factors<InfoTip text="What originally attracted the customer to the vehicle they enquired about, among everyone who completed the survey (Survey Taken) — regardless of what they went on to buy." /></div>
               <div class="tile-desc">What attracted customers ({{ interestFactors?.surveyed ?? 0 }} surveyed)</div>
             </div>
           </div>
@@ -918,7 +938,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="not-purchased" />
             <div class="tile-text">
-              <div class="tile-title">Not-Purchase Reasons</div>
+              <div class="tile-title">Not-Purchase Reasons<InfoTip text="Why non-purchasers (Survey Taken and not Won) didn't buy from us. A customer can tick more than one reason, so percentages don't need to sum to 100%. Price, Expectations, Financing and Dealership Experience expand into specific sub-reasons on click." /></div>
               <div class="tile-desc">Why customers did not buy ({{ notPurchaseReasons?.surveyed ?? 0 }} non-purchasers)</div>
             </div>
           </div>
@@ -958,7 +978,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="radar" />
           <div class="tile-text">
-            <div class="tile-title">Not-Purchase Reasons by Model</div>
+            <div class="tile-title">Not-Purchase Reasons by Model<InfoTip text="Same six not-purchase reasons, plotted per model. Each value is a % of that model's OWN non-purchaser cohort, not a raw count — so models with different survey volumes compare fairly. A model needs 3+ non-purchaser responses to appear." /></div>
             <div class="tile-desc">Each axis is a reason, as a % of that model's own non-purchaser cohort. Click a model to view it alone; Ctrl/Cmd-click to compare up to {{ RADAR_MAX_SELECTED }}</div>
           </div>
           <div class="chart-toggle">
@@ -987,7 +1007,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
               <RadarChart
                 :axes="modelReasonRadar.reasons.map((r) => r.label)"
                 :series="radarSeries"
-                :size="380"
+                :size="600"
               />
             </div>
           </template>
@@ -1021,7 +1041,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="comparison" />
             <div class="tile-text">
-              <div class="tile-title">Competitor Purchases</div>
+              <div class="tile-title">Competitor Purchases<InfoTip text="Which makes our defectors (customers who bought elsewhere) actually bought, ranked by count." /></div>
               <div class="tile-desc">Click a make to see models and individual records</div>
             </div>
           </div>
@@ -1070,7 +1090,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="ratings" />
             <div class="tile-text">
-              <div class="tile-title">Dealership Ratings</div>
+              <div class="tile-title">Dealership Ratings<InfoTip text="Distribution of the customer's 1–5 dealership rating, plus average rating by dealer. Dealers with under 2 ratings in scope are excluded from the by-dealer list." /></div>
               <div class="tile-desc">Customer ratings (1-5) from survey responses</div>
             </div>
           </div>
@@ -1119,7 +1139,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="dealer" />
           <div class="tile-text">
-            <div class="tile-title">Dealer Visit Outcomes</div>
+            <div class="tile-title">Dealer Visit Outcomes<InfoTip text="Did the customer visit the dealership and test drive? Grouped on the raw survey answer — records that didn't answer this question are excluded rather than counted as No." /></div>
             <div class="tile-desc">Did the customer visit? Did they test drive?</div>
           </div>
         </div>
@@ -1147,7 +1167,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="comparison" />
             <div class="tile-text">
-              <div class="tile-title">Competitor League</div>
+              <div class="tile-title">Competitor League<InfoTip text="Same defected-customer cohort as Competitor Purchases, with a 🇨🇳 flag for Chinese/Chinese-owned OEMs and each make's share of total defections. Click a make to drill into just those records." /></div>
               <div class="tile-desc">Where lost customers went ({{ competitorAnalysis.total_defections }} defections) &mdash; &#127464;&#127475; marks Chinese / Chinese-owned OEMs</div>
             </div>
           </div>
@@ -1178,7 +1198,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
           <div class="tile-head">
             <IconChip name="threat" />
             <div class="tile-text">
-              <div class="tile-title">Chinese OEM Threat</div>
+              <div class="tile-title">Chinese OEM Threat<InfoTip text="Chinese/Chinese-owned OEM defections ÷ total defections in scope, as one headline % plus a brand-by-brand breakdown. Same brand list as Competitor League." /></div>
               <div class="tile-desc">Share of defections going to Chinese / Chinese-owned brands</div>
             </div>
           </div>
@@ -1215,7 +1235,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="trends" />
           <div class="tile-text">
-            <div class="tile-title">Quarter-on-Quarter Trend</div>
+            <div class="tile-title">Quarter-on-Quarter Trend<InfoTip text="Per quarter: total surveyed, total defections, Chinese-OEM share of that quarter's defections, and that quarter's single top competitor and top Chinese competitor (each with their own share)." /></div>
             <div class="tile-desc">Surveyed volume, defections and Chinese-OEM share by quarter</div>
           </div>
         </div>
@@ -1254,7 +1274,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="trend-down" />
           <div class="tile-text">
-            <div class="tile-title">Monthly Defections by Chinese OEM</div>
+            <div class="tile-title">Monthly Defections by Chinese OEM<InfoTip text="One line per Chinese/Chinese-owned brand across the selected period, each with its peak month labelled. Toggle between % of that month's defections and raw counts." /></div>
             <div class="tile-desc">Each Chinese / Chinese-owned brand across the selected period — {{ brandChartPct ? '% of that month’s defections' : 'defection counts' }}. Labels mark each brand’s peak.</div>
           </div>
           <div class="chart-toggle">
@@ -1290,7 +1310,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="trend-down" />
           <div class="tile-text">
-            <div class="tile-title">Monthly Defections — Overall</div>
+            <div class="tile-title">Monthly Defections — Overall<InfoTip text="All competitor defections vs the Chinese-OEM subset, month by month. Toggle between defection rate (% of surveyed) and raw counts." /></div>
             <div class="tile-desc">All competitor defections vs the Chinese-OEM subset, month by month — {{ overallChartPct ? '% of surveyed (defection rate)' : 'counts' }}</div>
           </div>
           <div class="chart-toggle">
@@ -1326,7 +1346,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="warning" tone="risk" />
           <div class="tile-text">
-            <div class="tile-title">Model Risk Ranking</div>
+            <div class="tile-title">Model Risk Ranking<InfoTip text="Enquired models ranked by defection rate, highest risk first (min. 3 records). Each row shows the top competitor make, the Chinese-OEM share of that model's defections, and the single most common not-purchase reason." /></div>
             <div class="tile-desc">Enquired models ranked by defection rate (min 3 records)</div>
           </div>
         </div>
@@ -1362,7 +1382,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="search" />
           <div class="tile-text">
-            <div class="tile-title">Why We Lose</div>
+            <div class="tile-title">Why We Lose<InfoTip text="The six not-purchase reasons restricted to Defected customers only (not Still Considering), split three ways: overall, customers who bought a Chinese OEM, and everyone else." /></div>
             <div class="tile-desc">Not-purchase reasons among defectors &mdash; Chinese-OEM buyers vs everyone else</div>
           </div>
         </div>
@@ -1403,7 +1423,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="winning" />
           <div class="tile-text">
-            <div class="tile-title">What's Working</div>
+            <div class="tile-title">What's Working<InfoTip text="The mirror image of Why We Lose — the Won cohort's size, average dealership rating, the most common initial-interest factors among winners, and the top models being won." /></div>
             <div class="tile-desc">The "won" cohort: {{ whatsWorking.won }} positive outcomes<span v-if="whatsWorking.avg_rating != null"> &middot; avg dealership rating {{ whatsWorking.avg_rating }}&#9733;</span></div>
           </div>
         </div>
@@ -1445,7 +1465,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="insights" />
           <div class="tile-text">
-            <div class="tile-title">Transcript Insights &mdash; beyond the survey</div>
+            <div class="tile-title">Transcript Insights &mdash; beyond the survey<InfoTip text="Everything below reads an AI model's analysis of the actual call recording — a separate process from the tick-box survey above. Only exists for calls that have both a transcript and a completed insights run, so volumes here won't match the survey panels above." /></div>
             <div class="tile-desc">
               Mined from the call transcripts by the LLM ({{ transcriptInsights.total_with_transcript }} calls analysed).
               Verbatim voice-of-customer, balanced sentiment, competitor make/model and frustrations the tick-box survey can't capture.
@@ -1462,7 +1482,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="sentiment" />
           <div class="tile-text">
-            <div class="tile-title">Voice-of-Customer Sentiment</div>
+            <div class="tile-title">Voice-of-Customer Sentiment<InfoTip text="Positive/negative/mixed/not-expressed sentiment toward the brand, the vehicle, and the dealer — based on what the customer actually said on the call, not what they ticked on the survey." /></div>
             <div class="tile-desc">Positive &amp; negative views on the Nissan brand, the vehicle and the dealer</div>
           </div>
         </div>
@@ -1491,7 +1511,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="comparison" />
           <div class="tile-text">
-            <div class="tile-title">Competitors Considered (from transcript)</div>
+            <div class="tile-title">Competitors Considered (from transcript)<InfoTip text="Every competitor make/model the customer mentioned on the call — broader than the survey's single 'what did you buy' field, since it also catches brands cross-shopped but not purchased." /></div>
             <div class="tile-desc">
               Brands the customer considered, test-drove or bought &mdash; recovered from speech, including those the survey left blank.
               {{ transcriptInsights.competitors.chinese_share }}% of mentions are Chinese / Chinese-owned OEMs.
@@ -1534,7 +1554,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="trophy" />
           <div class="tile-text">
-            <div class="tile-title">Why Competitors Win (from transcript)</div>
+            <div class="tile-title">Why Competitors Win (from transcript)<InfoTip text="Free-text reasons the AI extracted for why a competitor was preferred, split by whether the record considered a Chinese OEM at all. Uses the same 18-factor vocabulary as the survey's purchase-influence question." /></div>
             <div class="tile-desc">Reasons the customer preferred a competitor &mdash; split by whether they considered a Chinese OEM</div>
           </div>
         </div>
@@ -1586,12 +1606,50 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         </div>
       </div>
 
+      <!-- Survey vs Transcript: not-purchase reasons cross-tab -->
+      <div v-if="reasonCrossTab && reasonCrossTab.rows.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <IconChip name="comparison" />
+          <div class="tile-text">
+            <div class="tile-title">Survey vs Transcript: Reasons Cross-Tab<InfoTip text="Two independent taggings of the same defected customer: rows are the transcript's why-competitors-win factors, columns are the survey's not-purchase reasons. Each cell is the % of that ROW's cohort who also ticked that column on the survey. Only covers defectors with BOTH a survey answer and a transcript reason, so the cohort here is smaller than either panel alone." /></div>
+            <div class="tile-desc">Of the customers tagged with each transcript reason (rows), what they also ticked on the survey (columns) — {{ reasonCrossTab.cohort }} customers have both data sources. Click a cell for the records.</div>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="table-scroll">
+            <table class="data-table xtab-table">
+              <thead>
+                <tr>
+                  <th>Transcript reason</th>
+                  <th class="num">n</th>
+                  <th v-for="c in reasonCrossTab.survey_reasons" :key="c.key" class="num">{{ c.label }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in reasonCrossTab.rows" :key="row.transcript_reason">
+                  <td>{{ row.transcript_reason_label }}</td>
+                  <td class="num mono">{{ row.row_total }}</td>
+                  <td
+                    v-for="cell in row.cells"
+                    :key="cell.key"
+                    class="num xtab-cell"
+                    :class="{ 'xtab-cell--click': cell.count > 0 }"
+                    :style="{ background: xtabBg(cell.pct) }"
+                    @click="cell.count && openTranscriptDrill(`xtab:${row.transcript_reason}:${cell.key}`, `${row.transcript_reason_label} (transcript) → ${cell.label} (survey)`, { competitorReason: row.transcript_reason, notPurchaseReasonSurvey: cell.key })"
+                  >{{ cell.count || '' }}<span v-if="cell.count" class="hint" style="margin-left: 3px">{{ cell.pct }}%</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <!-- Frustrations -->
       <div v-if="transcriptInsights && transcriptInsights.frustrations.total" class="tile" style="margin-top: 14px">
         <div class="tile-head">
           <IconChip name="warning" />
           <div class="tile-text">
-            <div class="tile-title">Customer Frustrations &amp; Resolutions</div>
+            <div class="tile-title">Customer Frustrations &amp; Resolutions<InfoTip text="Every frustration theme the AI picked up on the call, with a severity, root-cause owner, resolvability, and — for the highest-severity, most concrete ones — a representative quote and recommended action." /></div>
             <div class="tile-desc">{{ transcriptInsights.frustrations.total }} frustrations across the cohort, with what NMGB could do about them</div>
           </div>
         </div>
@@ -1658,7 +1716,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="distribution" />
           <div class="tile-text">
-            <div class="tile-title">Reportable Measures</div>
+            <div class="tile-title">Reportable Measures<InfoTip text="Four signals the tick-box survey structurally cannot capture: a gap between expected and quoted price, whether the dealer followed up, the customer's EV stance, and any loyalty signal in what they said." /></div>
             <div class="tile-desc">Signals the survey doesn't ask about: EV stance, loyalty, price-expectation gaps and dealer follow-up</div>
           </div>
         </div>
@@ -1710,7 +1768,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
         <div class="tile-head">
           <IconChip name="quotes" />
           <div class="tile-text">
-            <div class="tile-title">Key Quotes &amp; Survey Gaps Filled</div>
+            <div class="tile-title">Key Quotes &amp; Survey Gaps Filled<InfoTip text="Report-ready verbatim quotes tagged by theme and sentiment, plus an explicit list of things the transcript revealed that the survey's fixed question set had no field for." /></div>
             <div class="tile-desc">Report-ready verbatims, and what the transcript revealed that the survey missed</div>
           </div>
         </div>
@@ -1749,7 +1807,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div v-if="askOpen" class="ask-modal">
         <div class="drill-modal-header">
           <div>
-            <div class="drill-modal-title"><Sparkles :size="16" style="vertical-align: -3px" /> Ask AI — filtered survey dataset</div>
+            <div class="drill-modal-title"><Sparkles :size="16" style="vertical-align: -3px" /> Ask AI — filtered survey dataset<InfoTip text="Not a semantic guess — the model is shown the actual matching rows (survey answers + transcript text) and answers directly from them. Capped at 400 rows and a character budget; if truncated, the answer reports how many rows were actually considered." /></div>
             <div class="drill-modal-sub">Answers are grounded in the records matching your current filters.</div>
           </div>
           <button class="drawer-close" @click="askOpen = false">&times;</button>
@@ -1873,7 +1931,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
       <div class="tile-head">
         <IconChip name="narrative" />
         <div class="tile-text">
-          <div class="tile-title">Generate Executive Narrative</div>
+          <div class="tile-title">Generate Executive Narrative<InfoTip text="A director-level briefing synthesised from BOTH survey answers and transcript insights across the current filter selection: competitive landscape, Chinese-OEM threat, why customers defect, model risk, and recommendations." /></div>
           <div class="tile-desc">Director-level briefing built from survey answers <strong>and</strong> transcript insights: competitive landscape, Chinese-OEM threat &amp; quarterly trend, why customers defect, model risk, emerging themes, what Nissan does well, and recommendations</div>
         </div>
       </div>
@@ -2174,6 +2232,10 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 .data-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .data-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .data-table td .legend-dot { margin-right: 4px; vertical-align: middle; }
+.data-table th.num, .data-table td.num { text-align: center; }
+.xtab-table td.num { transition: background 0.1s; }
+.xtab-cell--click { cursor: pointer; }
+.xtab-cell--click:hover { outline: 1px solid var(--brand, #6366f1); outline-offset: -1px; }
 
 /* ── Ask AI modal ────────────────────────────────────────────────────────── */
 .ask-ai-btn { margin-left: auto; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }

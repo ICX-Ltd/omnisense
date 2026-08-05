@@ -178,6 +178,12 @@ You have THREE data sources:
    quarterly_trend (defections and Chinese share by quarter), not_purchase_reasons,
    purchase_influence_factors (what pulled the customer to the competitor),
    model_performance (per enquired Nissan model), dealer_ratings, interest_factors.
+   EVERY count-bearing block (categories, competitor_purchases, model_performance,
+   interest_factors, not_purchase_reasons, purchase_influence_factors) carries a
+   PRE-COMPUTED share_pct (or count/share_pct pair per factor) alongside the raw
+   count — already calculated against the correct denominator for that block, so
+   percentages are comparable across periods of different size. Use these given
+   percentages; never compute your own from the raw counts.
 2. FREE-TEXT SAMPLES — verbatim customer and agent comments from the same dataset.
 3. TRANSCRIPT INSIGHTS (the "transcript" block, may be null if not yet processed) —
    mined from the actual CALL TRANSCRIPTS, capturing what the tick-box survey misses:
@@ -231,7 +237,14 @@ Rules:
 - "headline" and "period_summary" are REQUIRED string fields — always include both.
 - Use ONLY the provided data; do not invent numbers, brands or quotes.
 - Ground every claim in a metric or a verbatim quote. Quote free text exactly.
-- competitive_landscape.top_competitors: rank by loss count; set is_chinese from the data's chinese flag.
+- Whenever you cite a count from a block that carries a share_pct (competitor_purchases,
+  categories, model_performance, interest_factors, not_purchase_reasons,
+  purchase_influence_factors), state BOTH the count and its given share_pct together,
+  e.g. "12 customers (34%)" — never the count alone, and never a percentage you
+  calculated yourself.
+- competitive_landscape.top_competitors: rank by loss count; "losses" is a string
+  stating both the count and its share_pct, e.g. "12 (34%)"; set is_chinese from the
+  data's chinese flag.
 - chinese_oem_threat.trajectory: judge from quarterly_trend (completed defections) AND, when
   present, transcript.competitors (consideration is a leading indicator). If transcript shows
   meaningful Chinese-OEM CONSIDERATION above completed defections, call that out as an early

@@ -49,7 +49,7 @@
       <g v-for="(v, i) in s.values" :key="'pt-' + s.label + '-' + i">
         <circle
           :cx="vertex(i, v).x" :cy="vertex(i, v).y"
-          r="12" fill="transparent" tabindex="0"
+          r="14" fill="transparent" tabindex="0"
         >
           <title>{{ s.label }} — {{ axes[i] }}: {{ v }}%</title>
         </circle>
@@ -58,6 +58,20 @@
           r="4" :fill="s.color" class="radar-marker-ring"
         />
       </g>
+    </g>
+
+    <!-- Value labels: the % figure just outside each vertex, in the series
+         colour, with a surface-coloured halo so it reads over the grid/fills. -->
+    <g v-for="s in series" :key="'val-' + s.label">
+      <text
+        v-for="(v, i) in s.values"
+        :key="'val-' + s.label + '-' + i"
+        :x="valuePoint(i, v).x" :y="valuePoint(i, v).y"
+        :text-anchor="labelAnchor(i)"
+        dominant-baseline="middle"
+        class="radar-value-label"
+        :fill="s.color"
+      >{{ v }}%</text>
     </g>
   </svg>
 </template>
@@ -72,7 +86,7 @@ const props = withDefaults(
     size?: number;
     max?: number;
   }>(),
-  { size: 320, max: 100 },
+  { size: 420, max: 100 },
 );
 
 const center = computed(() => props.size / 2);
@@ -82,6 +96,8 @@ const center = computed(() => props.size / 2);
 // (see labelLines: wrapping keeps any single line short enough to fit that margin).
 const radius = computed(() => props.size * 0.24);
 const labelRadius = computed(() => props.size * 0.29);
+// Value figures sit between the plotted vertex and the axis-name ring.
+const valueGap = computed(() => props.size * 0.028);
 
 function angleFor(i: number) {
   return (Math.PI * 2 * i) / props.axes.length - Math.PI / 2;
@@ -96,6 +112,15 @@ function axisPoint(i: number, frac: number) {
 function vertex(i: number, value: number) {
   const frac = Math.max(0, Math.min(1, value / props.max));
   return axisPoint(i, frac);
+}
+// The value figure sits just beyond its vertex, further out along the same
+// axis line — so it never sits on top of the plotted point regardless of
+// which axis or how large the value is.
+function valuePoint(i: number, value: number) {
+  const a = angleFor(i);
+  const frac = Math.max(0, Math.min(1, value / props.max));
+  const r = radius.value * frac + valueGap.value;
+  return { x: center.value + Math.cos(a) * r, y: center.value + Math.sin(a) * r };
 }
 function labelPoint(i: number) {
   const a = angleFor(i);
@@ -149,5 +174,12 @@ const rings = computed(() =>
 .radar-marker-ring {
   stroke: var(--surface, #fff);
   stroke-width: 2;
+}
+.radar-value-label {
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--surface, #fff);
+  stroke-width: 3px;
 }
 </style>

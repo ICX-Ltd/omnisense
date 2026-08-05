@@ -295,6 +295,7 @@ export class SurveyAnalyticsController {
     @Query('transcriptNonChineseOnly') transcriptNonChineseOnly?: string,
     @Query('competitorReason') competitorReason?: string,
     @Query('chineseReason') chineseReason?: string,
+    @Query('notPurchaseReasonSurvey') notPurchaseReasonSurvey?: string,
     @Query('frustrationTheme') frustrationTheme?: string,
     @Query('frustrationSeverity') frustrationSeverity?: string,
     @Query('frustrationResolvable') frustrationResolvable?: string,
@@ -318,6 +319,7 @@ export class SurveyAnalyticsController {
         transcriptNonChineseOnly: transcriptNonChineseOnly === 'true',
         competitorReason: competitorReason || undefined,
         chineseReason: chineseReason || undefined,
+        notPurchaseReasonSurvey: notPurchaseReasonSurvey || undefined,
         frustrationTheme: frustrationTheme || undefined,
         frustrationSeverity: frustrationSeverity || undefined,
         frustrationResolvable: frustrationResolvable || undefined,
@@ -329,6 +331,16 @@ export class SurveyAnalyticsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
     );
+  }
+
+  @Get('reason-cross-tab')
+  async reasonCrossTab(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
+  ) {
+    return this.svc.getReasonCrossTab(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('transcript-insights')

@@ -70,6 +70,7 @@ export const ApiPath = {
   SurveyWhyWeLose: "/uiapi/survey/why-we-lose",
   SurveyWhatsWorking: "/uiapi/survey/whats-working",
   SurveyTranscriptInsights: "/uiapi/survey/transcript-insights",
+  SurveyReasonCrossTab: "/uiapi/survey/reason-cross-tab",
   SurveyDrillRecords: "/uiapi/survey/drill-records",
   SurveyTranscriptDrillRecords: "/uiapi/survey/transcript-drill-records",
   SurveyRecordsByCategory: "/uiapi/survey/records-by-category",

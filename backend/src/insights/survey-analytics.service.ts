@@ -1428,6 +1428,64 @@ export class SurveyAnalyticsService {
     };
   }
 
+  // ── Survey vs Transcript: not-purchase reasons cross-tab ───────────────────
+  // Two independent taggings of the SAME defected customer: the survey's 6
+  // not-purchase reasons (tick-box) vs the transcript's factor-level "why they
+  // preferred the competitor" (LLM-mined, same vocabulary as influenced_by).
+  // Cross-tabs them so "of the N tagged 'better value' in the transcript,
+  // what did they tick on the survey" is answerable directly. Restricted to
+  // defectors with BOTH a survey answer and at least one transcript reason —
+  // a stricter subset than either panel alone, since it needs both sources.
+  async getReasonCrossTab(f: SurveyFilter) {
+    const { clause, params } = this.buildWhere(f);
+    const baseFilter = clause + ` AND ${DEFECTED} AND ii.campaign_transcript_json IS NOT NULL`;
+    const FROM = `${FROM_SURVEY} INNER JOIN app.interaction_insights ii ON ii.recordingId = s.recordingId`;
+
+    const rows = await this.repo.manager.query<Array<Record<string, string>>>(
+      `SELECT tr.value AS transcript_reason,
+        COUNT(DISTINCT CAST(ia.id AS VARCHAR(36))) AS row_total,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.price')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS price,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.expectations')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS expectations,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.different_brand')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS different_brand,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.different_client_model')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS different_model,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.financing')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS financing,
+        SUM(CASE WHEN ${CA('$.not_purchased_reasons.dealership_experience')} IN ${TRUTHY} THEN 1 ELSE 0 END) AS dealership_experience
+       ${FROM}
+       CROSS APPLY OPENJSON(ii.campaign_transcript_json, '$.competitor_reasons.reasons') tr
+       ${baseFilter}
+       GROUP BY tr.value
+       ORDER BY COUNT(DISTINCT CAST(ia.id AS VARCHAR(36))) DESC`,
+      params,
+    );
+
+    const cohortRows = await this.repo.manager.query<Array<{ n: string }>>(
+      `SELECT COUNT(DISTINCT CAST(ia.id AS VARCHAR(36))) AS n
+       ${FROM} ${baseFilter}
+         AND EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_reasons.reasons'))`,
+      params,
+    );
+
+    const surveyReasons = SurveyAnalyticsService.RADAR_REASONS;
+    const matrix = rows.map((r) => {
+      const rowTotal = parseInt(r.row_total, 10);
+      return {
+        transcript_reason: r.transcript_reason,
+        transcript_reason_label: INFLUENCE_LABELS[r.transcript_reason] ?? r.transcript_reason,
+        row_total: rowTotal,
+        cells: surveyReasons.map(({ key, label }) => {
+          const count = parseInt(r[key] ?? '0', 10);
+          return { key, label, count, pct: rowTotal ? Math.round((count / rowTotal) * 100) : 0 };
+        }),
+      };
+    });
+
+    return {
+      cohort: parseInt(cohortRows[0]?.n ?? '0', 10),
+      survey_reasons: surveyReasons,
+      rows: matrix,
+    };
+  }
+
   // ── Transcript drill: individual records behind a transcript-insight tile ──
   // Mirrors getDrillRecords but filters on campaign_transcript_json. Reuses the
   // same recordSelect() projection so the existing detail drawer works unchanged.
@@ -1441,6 +1499,10 @@ export class SurveyAnalyticsService {
       competitorReason?: string; chineseReason?: string;
       frustrationTheme?: string; frustrationSeverity?: string; frustrationResolvable?: string;
       priceGap?: boolean; dealerFollowUp?: string; evStance?: string; loyaltyAnswer?: string;
+      // Cross-tab drill: the SURVEY's not-purchase reason (a different
+      // vocabulary from competitorReason, which is the transcript's). Reads
+      // via `s` (interaction_survey), LEFT JOINed in FROM_SURVEY_TX_ANSWERS.
+      notPurchaseReasonSurvey?: string;
     },
     limit = 200,
     offset = 0,
@@ -1481,6 +1543,10 @@ export class SurveyAnalyticsService {
         `EXISTS (SELECT 1 FROM OPENJSON(ii.campaign_transcript_json, '$.competitor_reasons.chinese_specific_reasons') r ` +
           `WHERE r.value = ${pushParam(criteria.chineseReason)})`,
       );
+    }
+    if (criteria.notPurchaseReasonSurvey) {
+      const path = SurveyAnalyticsService.REASON_PATHS[criteria.notPurchaseReasonSurvey];
+      if (path) conds.push(`${CA(path)} IN ${TRUTHY}`);
     }
     if (criteria.frustrationTheme || criteria.frustrationSeverity || criteria.frustrationResolvable) {
       const frConds: string[] = [];
