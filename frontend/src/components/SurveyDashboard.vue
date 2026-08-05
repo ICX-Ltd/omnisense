@@ -8,6 +8,7 @@ import { toPrettyInsights } from "@/utils/insights-response";
 import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
 import InteractionDetailDrawer from "@/components/InteractionDetailDrawer.vue";
 import Sparkline from "@/components/Sparkline.vue";
+import RadarChart from "@/components/RadarChart.vue";
 import { downloadCsv } from "@/utils/csv";
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -15,11 +16,13 @@ const campaignOptions = ref<string[]>([]);
 const manufactureOptions = ref<string[]>([]);
 const modelOptions = ref<string[]>([]);
 const dealerOptions = ref<string[]>([]);
+const outcomeOptions = ref<string[]>([]);
 
 const campaign = ref("");
 const manufacture = ref("");
 const model = ref("");
 const dealer = ref("");
+const outcome = ref("");
 const surveyTakenOnly = ref(false);
 
 function isoStartOfDay(d: Date) {
@@ -52,6 +55,7 @@ const sharedParams = computed(() => ({
   ...(manufacture.value && { manufacture: manufacture.value }),
   ...(model.value && { model: model.value }),
   ...(dealer.value && { dealer: dealer.value }),
+  ...(outcome.value && { outcome: outcome.value }),
   ...(surveyTakenOnly.value && { surveyTakenOnly: 'true' }),
 }));
 
@@ -92,6 +96,7 @@ const overview = ref<any>(null);
 const categories = ref<any[]>([]);
 const interestFactors = ref<any>(null);
 const notPurchaseReasons = ref<any>(null);
+const modelReasonRadar = ref<{ reasons: Array<{ key: string; label: string }>; models: Array<{ model: string; cohort: number; values: Array<{ key: string; label: string; count: number; pct: number }> }> } | null>(null);
 const competitorPurchases = ref<any[]>([]);
 const dealershipRatings = ref<any>(null);
 const dealerVisits = ref<any[]>([]);
@@ -190,6 +195,44 @@ const LINE_COLORS = [
   "#dc2626", "#ea580c", "#d97706", "#059669", "#0284c7", "#7c3aed",
   "#db2777", "#0d9488", "#4f46e5", "#65a30d", "#c026d3", "#0891b2",
 ];
+
+// ── Not-purchased reasons by model (radar chart) ─────────────────────────────
+// Color is assigned by each model's fixed rank in the backend's cohort-desc
+// list (not by selection order), so checking/unchecking a model never repaints
+// the colors of the models still selected.
+const RADAR_MAX_SELECTED = 6;
+const selectedRadarModels = ref<string[]>([]);
+const radarTableView = ref(false);
+function radarModelColor(model: string): string {
+  const idx = (modelReasonRadar.value?.models ?? []).findIndex((m) => m.model === model);
+  return LINE_COLORS[Math.max(idx, 0) % LINE_COLORS.length] ?? "#6366f1";
+}
+// Plain click isolates the chart to just that one model (the common case —
+// "show me this model"); Ctrl/Cmd-click adds/removes it from the current
+// selection so a handful of models can still be compared side by side.
+function toggleRadarModel(model: string, event?: MouseEvent) {
+  const cur = selectedRadarModels.value;
+  if (event?.ctrlKey || event?.metaKey) {
+    if (cur.includes(model)) {
+      selectedRadarModels.value = cur.filter((m) => m !== model);
+    } else if (cur.length < RADAR_MAX_SELECTED) {
+      selectedRadarModels.value = [...cur, model];
+    }
+    return;
+  }
+  selectedRadarModels.value = cur.length === 1 && cur[0] === model ? [] : [model];
+}
+const radarSeries = computed(() => {
+  const d = modelReasonRadar.value;
+  if (!d) return [];
+  return d.models
+    .filter((m) => selectedRadarModels.value.includes(m.model))
+    .map((m) => ({
+      label: m.model,
+      color: radarModelColor(m.model),
+      values: m.values.map((v) => v.pct),
+    }));
+});
 
 function fmtMonth(key: string) {
   const [y, m] = key.split("-").map(Number);
@@ -319,6 +362,10 @@ async function loadFilterOptions() {
     manufactureOptions.value = res.data.manufactures ?? [];
     modelOptions.value = res.data.models ?? [];
     dealerOptions.value = res.data.dealers ?? [];
+    // "Unknown" (null/blank outcome) isn't a distinct DB value, so it's not
+    // returned by the backend — add it manually to match the "Unknown" bucket
+    // shown in the Outcome Categories panel.
+    outcomeOptions.value = [...(res.data.outcomes ?? []), 'Unknown'];
   } catch { /* non-critical */ }
 }
 
@@ -331,6 +378,7 @@ function writeUrlState() {
   setOrDel("make", manufacture.value);
   setOrDel("model", model.value);
   setOrDel("dealer", dealer.value);
+  setOrDel("outcome", outcome.value);
   setOrDel("from", fromDateStr.value);
   setOrDel("to", toDateStr.value);
   setOrDel("taken", surveyTakenOnly.value ? "1" : "");
@@ -343,6 +391,7 @@ function readUrlState() {
   if (g("make")) manufacture.value = g("make");
   if (g("model")) model.value = g("model");
   if (g("dealer")) dealer.value = g("dealer");
+  if (g("outcome")) outcome.value = g("outcome");
   if (g("from")) fromDateStr.value = g("from");
   if (g("to")) toDateStr.value = g("to");
   if (q.get("taken") === "1") surveyTakenOnly.value = true;
@@ -359,11 +408,12 @@ async function loadAll() {
 
   try {
     const p = sharedParams.value;
-    const [ovRes, catRes, intRes, nprRes, compRes, drRes, dvRes, mpRes, caRes, qtRes, mtRes, mrRes, wwlRes, wwRes] = await Promise.all([
+    const [ovRes, catRes, intRes, nprRes, mrrRes, compRes, drRes, dvRes, mpRes, caRes, qtRes, mtRes, mrRes, wwlRes, wwRes] = await Promise.all([
       axios.get(ApiPath.SurveyOverview, { params: p }),
       axios.get(ApiPath.SurveyCategories, { params: p }),
       axios.get(ApiPath.SurveyInterestFactors, { params: p }),
       axios.get(ApiPath.SurveyNotPurchaseReasons, { params: p }),
+      axios.get(ApiPath.SurveyModelReasonRadar, { params: p }),
       axios.get(ApiPath.SurveyCompetitorPurchases, { params: p }),
       axios.get(ApiPath.SurveyDealershipRatings, { params: p }),
       axios.get(ApiPath.SurveyDealerVisits, { params: p }),
@@ -379,6 +429,8 @@ async function loadAll() {
     categories.value = catRes.data;
     interestFactors.value = intRes.data;
     notPurchaseReasons.value = nprRes.data;
+    modelReasonRadar.value = mrrRes.data;
+    selectedRadarModels.value = (mrrRes.data?.models ?? []).slice(0, 5).map((m: any) => m.model);
     competitorPurchases.value = compRes.data;
     dealershipRatings.value = drRes.data;
     dealerVisits.value = dvRes.data;
@@ -695,6 +747,13 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
             </select>
           </div>
           <div class="filter-group">
+            <label class="label">Outcome</label>
+            <select v-model="outcome" class="select select--sm">
+              <option value="">All</option>
+              <option v-for="o in outcomeOptions" :key="o" :value="o">{{ o }}</option>
+            </select>
+          </div>
+          <div class="filter-group">
             <label class="label">&nbsp;</label>
             <label class="checkbox-label">
               <input type="checkbox" v-model="surveyTakenOnly" />
@@ -756,7 +815,7 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
             <IconChip name="list" />
             <div class="tile-text">
               <div class="tile-title">Outcome Categories</div>
-              <div class="tile-desc">Click a category to see individual records</div>
+              <div class="tile-desc">Each outcome's overall share, plus its defections and defection rate. Click a category to see individual records</div>
             </div>
           </div>
           <div class="tile-body">
@@ -765,7 +824,9 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
                 <div class="metric-left"><span class="chip chip--secondary">{{ c.category }}</span></div>
                 <div class="metric-right">
                   <span class="count-pill">{{ c.count }}</span>
-                  <span class="pct-label">{{ pct(c.count, overview.total) }}%</span>
+                  <span class="pct-label">{{ pct(c.count, overview.total) }}% of all</span>
+                  <span class="count-pill">{{ c.defected }} defected</span>
+                  <span class="pct-label">{{ c.defected_pct }}%</span>
                   <span class="expand-icon">{{ expandedCategory === c.category ? '&#9650;' : '&#9660;' }}</span>
                 </div>
               </div>
@@ -889,6 +950,68 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
               </div>
             </template>
           </div>
+        </div>
+      </div>
+
+      <!-- Not-purchase reasons by model — spider/radar chart -->
+      <div v-if="modelReasonRadar && modelReasonRadar.models.length" class="tile" style="margin-top: 14px">
+        <div class="tile-head">
+          <IconChip name="radar" />
+          <div class="tile-text">
+            <div class="tile-title">Not-Purchase Reasons by Model</div>
+            <div class="tile-desc">Each axis is a reason, as a % of that model's own non-purchaser cohort. Click a model to view it alone; Ctrl/Cmd-click to compare up to {{ RADAR_MAX_SELECTED }}</div>
+          </div>
+          <div class="chart-toggle">
+            <button :class="{ 'chart-toggle-on': !radarTableView }" @click="radarTableView = false">Chart</button>
+            <button :class="{ 'chart-toggle-on': radarTableView }" @click="radarTableView = true">Table</button>
+          </div>
+        </div>
+        <div class="tile-body">
+          <div class="chart-legend" style="margin-bottom: 12px">
+            <span
+              v-for="m in modelReasonRadar.models"
+              :key="m.model"
+              class="legend-item legend-item--click"
+              :class="{ 'legend-item--off': !selectedRadarModels.includes(m.model) }"
+              @click="toggleRadarModel(m.model, $event)"
+            >
+              <span class="legend-dot" :style="{ background: radarModelColor(m.model) }" />{{ m.model }}
+              <span class="hint" style="margin-left: 2px">({{ m.cohort }})</span>
+            </span>
+          </div>
+
+          <div v-if="!selectedRadarModels.length" class="hint">Select a model above to plot it.</div>
+
+          <template v-else-if="!radarTableView">
+            <div style="display: flex; justify-content: center">
+              <RadarChart
+                :axes="modelReasonRadar.reasons.map((r) => r.label)"
+                :series="radarSeries"
+                :size="380"
+              />
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Cohort</th>
+                    <th v-for="r in modelReasonRadar.reasons" :key="r.key">{{ r.label }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="m in modelReasonRadar.models.filter((mm) => selectedRadarModels.includes(mm.model))" :key="m.model">
+                    <td><span class="legend-dot" :style="{ background: radarModelColor(m.model) }" /> {{ m.model }}</td>
+                    <td>{{ m.cohort }}</td>
+                    <td v-for="v in m.values" :key="v.key">{{ v.pct }}% <span class="hint">({{ v.count }})</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -2040,6 +2163,17 @@ onMounted(async () => { readUrlState(); loadModelOptions(); await loadFilterOpti
 .chart-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend-item--click { cursor: pointer; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); user-select: none; }
+.legend-item--click:hover { background: var(--surface-soft); }
+.legend-item--off { opacity: 0.4; }
+.legend-item--off .legend-dot { background: var(--muted) !important; }
+
+/* ── Table view (radar chart twin) ──────────────────────────────────────── */
+.table-scroll { width: 100%; overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.data-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.data-table td .legend-dot { margin-right: 4px; vertical-align: middle; }
 
 /* ── Ask AI modal ────────────────────────────────────────────────────────── */
 .ask-ai-btn { margin-left: auto; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }

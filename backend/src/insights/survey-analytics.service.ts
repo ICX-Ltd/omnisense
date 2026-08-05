@@ -15,6 +15,7 @@ export type SurveyFilter = {
   model?: string;
   dealer?: string;
   surveyTakenOnly?: boolean;
+  outcome?: string;
 };
 
 // ── survey answer access helpers ─────────────────────────────────────────────
@@ -202,6 +203,13 @@ export class SurveyAnalyticsService {
     if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
     if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
     if (f.surveyTakenOnly) parts.push(`${CA('$.meta.flow_status')} = 'Survey Taken'`);
+    if (f.outcome) {
+      // "Unknown" in the UI represents a NULL/blank outcome, not a literal
+      // string — match the same COALESCE(..., 'Unknown') grouping used
+      // everywhere else (getCategoryBreakdown, getRecordsByCategory).
+      if (f.outcome === 'Unknown') parts.push(`(ia.outcome IS NULL OR ia.outcome = '')`);
+      else { parts.push(`ia.outcome = @${params.length}`); params.push(f.outcome); }
+    }
 
     return { clause: 'WHERE ' + parts.join(' AND '), params };
   }
@@ -220,6 +228,10 @@ export class SurveyAnalyticsService {
     if (f.manufacture) { parts.push(`ia.vehicleMake = @${params.length}`); params.push(f.manufacture); }
     if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
     if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
+    if (f.outcome) {
+      if (f.outcome === 'Unknown') parts.push(`(ia.outcome IS NULL OR ia.outcome = '')`);
+      else { parts.push(`ia.outcome = @${params.length}`); params.push(f.outcome); }
+    }
 
     return { clause: 'WHERE ' + parts.join(' AND '), params };
   }
@@ -314,6 +326,7 @@ export class SurveyAnalyticsService {
       manufactures: await distinct('ia.vehicleMake'),
       models: await distinct('ia.vehicleModel'),
       dealers: await distinct('ia.dealer'),
+      outcomes: await distinct('ia.outcome'),
     };
   }
 
@@ -353,15 +366,25 @@ export class SurveyAnalyticsService {
   async getCategoryBreakdown(f: SurveyFilter) {
     const { clause, params } = this.buildWhere(f);
 
-    const rows = await this.repo.manager.query<Array<{ category: string; count: string }>>(
-      `SELECT COALESCE(ia.outcome, 'Unknown') AS category, COUNT(1) AS count
+    const rows = await this.repo.manager.query<Array<{ category: string; count: string; defected: string }>>(
+      `SELECT COALESCE(ia.outcome, 'Unknown') AS category, COUNT(1) AS count,
+        SUM(CASE WHEN ${DEFECTED} THEN 1 ELSE 0 END) AS defected
        ${FROM_SURVEY} ${clause}
        GROUP BY ia.outcome
        ORDER BY COUNT(1) DESC`,
       params,
     );
 
-    return rows.map((r) => ({ category: r.category, count: parseInt(r.count, 10) }));
+    return rows.map((r) => {
+      const count = parseInt(r.count, 10);
+      const defected = parseInt(r.defected, 10);
+      return {
+        category: r.category,
+        count,
+        defected,
+        defected_pct: count ? Math.round((defected / count) * 100) : 0,
+      };
+    });
   }
 
   // ── Initial interest factors ──────────────────────────────────────────────
@@ -451,6 +474,58 @@ export class SurveyAnalyticsService {
     }
 
     return { surveyed: parseInt(r.surveyed ?? '0', 10), reasons };
+  }
+
+  // ── Not-purchase reasons by model (for the spider/radar chart) ─────────────
+  // One row per enquired model, each reason expressed as a % of THAT model's own
+  // not-purchased cohort (not raw counts) — so models with very different survey
+  // volumes can be plotted on the same radar without the bigger-volume model
+  // simply drawing a bigger polygon.
+  private static readonly RADAR_REASONS: Array<{ key: string; label: string }> = [
+    { key: 'price', label: 'Price' },
+    { key: 'expectations', label: 'Expectations' },
+    { key: 'different_brand', label: 'Different Brand' },
+    { key: 'different_model', label: 'Different Model' },
+    { key: 'financing', label: 'Financing' },
+    { key: 'dealership_experience', label: 'Dealership' },
+  ];
+
+  async getModelReasonRadar(f: SurveyFilter) {
+    const { clause, params } = this.buildWhere(f);
+    const baseFilter =
+      clause +
+      ` AND ${CA('$.meta.flow_status')} = 'Survey Taken' AND ${NOT_PURCHASED}` +
+      ` AND ia.vehicleModel IS NOT NULL AND ia.vehicleModel <> ''`;
+
+    const rows = await this.repo.manager.query<Array<Record<string, string>>>(
+      `SELECT ia.vehicleModel AS model,
+        ${flagSum('$.not_purchased_reasons.price', 'price')},
+        ${flagSum('$.not_purchased_reasons.expectations', 'expectations')},
+        ${flagSum('$.not_purchased_reasons.different_brand', 'different_brand')},
+        ${flagSum('$.not_purchased_reasons.different_client_model', 'different_model')},
+        ${flagSum('$.not_purchased_reasons.financing', 'financing')},
+        ${flagSum('$.not_purchased_reasons.dealership_experience', 'dealership_experience')},
+        COUNT(1) AS cohort
+       ${FROM_SURVEY} ${baseFilter}
+       GROUP BY ia.vehicleModel
+       HAVING COUNT(1) >= 3
+       ORDER BY COUNT(1) DESC`,
+      params,
+    );
+
+    const models = rows.map((r) => {
+      const cohort = parseInt(r.cohort, 10);
+      return {
+        model: r.model,
+        cohort,
+        values: SurveyAnalyticsService.RADAR_REASONS.map(({ key, label }) => {
+          const count = parseInt(r[key] ?? '0', 10);
+          return { key, label, count, pct: cohort ? Math.round((count / cohort) * 100) : 0 };
+        }),
+      };
+    });
+
+    return { reasons: SurveyAnalyticsService.RADAR_REASONS, models };
   }
 
   // ── Competitor purchases ──────────────────────────────────────────────────

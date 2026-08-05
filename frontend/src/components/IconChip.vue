@@ -96,6 +96,7 @@ const REGISTRY: Record<string, { icon: Component; tone: IconTone }> = {
   actions: { icon: Zap, tone: "warning" },
   retries: { icon: RefreshCcw, tone: "warning" },
   discover: { icon: Radar, tone: "analytics" },
+  radar: { icon: Radar, tone: "risk" },
   add: { icon: Plus, tone: "neutral" },
   // transcription / audio
   audio: { icon: Music, tone: "analytics" },

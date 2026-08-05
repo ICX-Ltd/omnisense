@@ -650,3 +650,22 @@ Updates
   survey verbatim as csatComment, and a UTF-8 BOM so Excel reads accents correctly. This needed
   reviewerCommentsJson adding to the list projection; it was previously only on the detail endpoint.
 - APP_VERSION -> 1.82.0.
+
+2026-08-05
+- Survey Insights: Outcome Categories panel now shows, per outcome, its count, % of all outcomes,
+  defections, and defection rate — previously only a raw count + share of total. "Defected" =
+  competitor_purchase.make is set and does NOT match the enquired vehicleMake (buying the enquired
+  brand is "won", not a defection); getCategoryBreakdown in survey-analytics.service.ts now aggregates
+  both.
+- Survey Insights: added an Outcome filter to the filter bar, threaded through SurveyFilter /
+  buildWhere / buildWhereTx and every survey-analytics endpoint (including the Ask AI POST body).
+  "Unknown" is selectable for null/blank outcomes, matching the existing "Unknown" bucket in Outcome
+  Categories. getFilterOptions now also returns distinct outcomes.
+- Survey Insights: new "Not-Purchase Reasons by Model" spider/radar chart — one axis per not-purchase
+  reason, one polygon per model, each value expressed as a % of that model's own non-purchaser cohort
+  (not raw counts) so models with different survey volumes compare fairly. New backend endpoint GET
+  /uiapi/survey/model-reason-radar (getModelReasonRadar in survey-analytics.service.ts), requires >=3
+  non-purchaser responses per model to appear. New hand-rolled SVG RadarChart.vue (no chart library,
+  matching Sparkline.vue's existing pattern) with axis labels wrapped onto 2 lines so long reason
+  names never clip. Click a model in the legend to view it alone; Ctrl/Cmd-click to compare up to 6.
+- APP_VERSION -> 1.84.0.

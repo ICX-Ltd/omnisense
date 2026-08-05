@@ -17,7 +17,7 @@ export class SurveyAnalyticsController {
   private parseFilter(
     from?: string, to?: string, campaign?: string,
     manufacture?: string, model?: string, dealer?: string,
-    surveyTakenOnly?: string,
+    surveyTakenOnly?: string, outcome?: string,
   ): SurveyFilter {
     const f: SurveyFilter = {};
     if (from) {
@@ -33,6 +33,7 @@ export class SurveyAnalyticsController {
     if (model) f.model = model;
     if (dealer) f.dealer = dealer;
     if (surveyTakenOnly === 'true') f.surveyTakenOnly = true;
+    if (outcome) f.outcome = outcome;
     return f;
   }
 
@@ -46,9 +47,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getOverview(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getOverview(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('categories')
@@ -56,9 +57,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getCategoryBreakdown(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getCategoryBreakdown(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('interest-factors')
@@ -66,9 +67,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getInterestFactors(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getInterestFactors(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('not-purchase-reasons')
@@ -76,9 +77,19 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getNotPurchaseReasons(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getNotPurchaseReasons(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
+  }
+
+  @Get('model-reason-radar')
+  async modelReasonRadar(
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
+    @Query('model') model?: string, @Query('dealer') dealer?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
+  ) {
+    return this.svc.getModelReasonRadar(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('competitor-purchases')
@@ -86,9 +97,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getCompetitorPurchases(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getCompetitorPurchases(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('competitor-models')
@@ -97,10 +108,10 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
     if (!make) throw new BadRequestException('make is required');
-    return this.svc.getCompetitorModels(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly), make);
+    return this.svc.getCompetitorModels(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome), make);
   }
 
   @Get('dealership-ratings')
@@ -108,9 +119,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getDealershipRatings(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getDealershipRatings(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('dealer-visits')
@@ -118,9 +129,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getDealerVisitOutcomes(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getDealerVisitOutcomes(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('model-performance')
@@ -128,9 +139,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getModelPerformance(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getModelPerformance(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('records-by-category')
@@ -140,11 +151,11 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
     if (!category) throw new BadRequestException('category is required');
     return this.svc.getRecordsByCategory(
-      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome),
       category,
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
@@ -158,11 +169,11 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
     if (!make) throw new BadRequestException('make is required');
     return this.svc.getRecordsByCompetitorMake(
-      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome),
       make,
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
@@ -174,9 +185,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getCompetitorAnalysis(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getCompetitorAnalysis(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('quarterly-trends')
@@ -184,9 +195,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getQuarterlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getQuarterlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('monthly-trends')
@@ -194,9 +205,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getMonthlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getMonthlyTrends(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('model-risk')
@@ -204,9 +215,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getModelRisk(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getModelRisk(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('why-we-lose')
@@ -214,9 +225,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getWhyWeLose(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getWhyWeLose(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('whats-working')
@@ -224,9 +235,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getWhatWorking(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getWhatWorking(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   @Get('drill-records')
@@ -249,11 +260,11 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
     const rating = ratingScore != null && ratingScore !== '' ? parseInt(ratingScore, 10) : undefined;
     return this.svc.getDrillRecords(
-      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome),
       {
         competitorMake: competitorMake || undefined,
         chineseOnly: chineseOnly === 'true',
@@ -295,10 +306,10 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
     return this.svc.getTranscriptDrillRecords(
-      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly),
+      this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome),
       {
         sentimentTopic: sentimentTopic || undefined,
         sentimentValue: sentimentValue || undefined,
@@ -325,9 +336,9 @@ export class SurveyAnalyticsController {
     @Query('from') from?: string, @Query('to') to?: string,
     @Query('campaign') campaign?: string, @Query('manufacture') manufacture?: string,
     @Query('model') model?: string, @Query('dealer') dealer?: string,
-    @Query('surveyTakenOnly') surveyTakenOnly?: string,
+    @Query('surveyTakenOnly') surveyTakenOnly?: string, @Query('outcome') outcome?: string,
   ) {
-    return this.svc.getTranscriptInsights(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly));
+    return this.svc.getTranscriptInsights(this.parseFilter(from, to, campaign, manufacture, model, dealer, surveyTakenOnly, outcome));
   }
 
   // Grounded "Ask AI" over the filtered survey dataset. Filters come in the body
@@ -340,12 +351,13 @@ export class SurveyAnalyticsController {
       provider?: string;
       from?: string; to?: string; campaign?: string;
       manufacture?: string; model?: string; dealer?: string; surveyTakenOnly?: string;
+      outcome?: string;
     },
   ) {
     if (!body?.question?.trim()) throw new BadRequestException('question is required');
     const f = this.parseFilter(
       body.from, body.to, body.campaign, body.manufacture, body.model, body.dealer,
-      body.surveyTakenOnly,
+      body.surveyTakenOnly, body.outcome,
     );
     return this.svc.askSurvey(f, body.question, body.provider);
   }
