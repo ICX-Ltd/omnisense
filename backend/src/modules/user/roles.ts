@@ -41,6 +41,14 @@ export const ROLES: RoleDef[] = [
     label: 'Agent',
     description: 'Limited access, intended for contact-centre agents.',
   },
+  {
+    id: 'client',
+    label: 'Client',
+    description:
+      'External client access — Operations, Client Services, Survey Insights and ' +
+      'Narratives only, scoped to their own client’s data. Requires a client ' +
+      'assignment.',
+  },
 ];
 
 export const ROLE_IDS = ROLES.map((r) => r.id);

@@ -915,10 +915,10 @@ onMounted(loadAll);
         <button
           type="button"
           class="split-cell split-cell--neutral"
-          title="Scores of 4-5 are not assessed. Click to list & export."
-          @click="openKpiModal({ status: 'excluded' }, 'Excluded (4-5)')"
+          title="Scores of 4-5 and bot-handled conversations are not assessed. Click to list & export."
+          @click="openKpiModal({ status: 'excluded' }, 'Excluded (4-5 / Bot)')"
         >
-          <div class="stat-label">Excluded (4-5)</div>
+          <div class="stat-label">Excluded (4-5 / Bot)</div>
           <div class="stat-value">{{ board.excluded ?? 0 }}</div>
         </button>
         <button
@@ -1119,7 +1119,7 @@ onMounted(loadAll);
           <option value="assessed">Assessed</option>
           <option value="error">Error</option>
           <option value="unmatched">Unmatched</option>
-          <option value="excluded">Excluded (4-5)</option>
+          <option value="excluded">Excluded (4-5 / Bot)</option>
         </select>
       </div>
       <div class="control-group">

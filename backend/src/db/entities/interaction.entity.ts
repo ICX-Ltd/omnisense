@@ -107,6 +107,14 @@ export class Interaction {
   @Column({ type: 'bit', nullable: true })
   hasCsat!: boolean | null;
 
+  // The client (tenant) this interaction belongs to — set at data-import time
+  // going forward; nullable because existing rows need backfilling and not
+  // every campaign has a confirmed mapping yet (see add-client-scoping.sql).
+  // A null clientId is only ever visible to internal staff, never to a
+  // 'client'-role user or an admin's "view as" preview.
+  @Column({ type: 'uniqueidentifier', nullable: true })
+  clientId!: string | null;
+
   @BeforeInsert()
   @BeforeUpdate()
   private computeDaysToMaturity() {

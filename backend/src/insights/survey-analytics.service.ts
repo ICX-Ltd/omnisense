@@ -16,6 +16,10 @@ export type SurveyFilter = {
   dealer?: string;
   surveyTakenOnly?: boolean;
   outcome?: string;
+  // The effective client (tenant) scope resolved from the caller's auth —
+  // null/undefined means unfiltered (only ever true for internal staff with
+  // no "view as" active). See AuthScope.effectiveClientId.
+  clientId?: string;
 };
 
 // ── survey answer access helpers ─────────────────────────────────────────────
@@ -202,6 +206,7 @@ export class SurveyAnalyticsService {
     if (f.manufacture) { parts.push(`ia.vehicleMake = @${params.length}`); params.push(f.manufacture); }
     if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
     if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
+    if (f.clientId) { parts.push(`ia.clientId = @${params.length}`); params.push(f.clientId); }
     if (f.surveyTakenOnly) parts.push(`${CA('$.meta.flow_status')} = 'Survey Taken'`);
     if (f.outcome) {
       // "Unknown" in the UI represents a NULL/blank outcome, not a literal
@@ -228,6 +233,7 @@ export class SurveyAnalyticsService {
     if (f.manufacture) { parts.push(`ia.vehicleMake = @${params.length}`); params.push(f.manufacture); }
     if (f.model) { parts.push(`ia.vehicleModel = @${params.length}`); params.push(f.model); }
     if (f.dealer) { parts.push(`ia.dealer = @${params.length}`); params.push(f.dealer); }
+    if (f.clientId) { parts.push(`ia.clientId = @${params.length}`); params.push(f.clientId); }
     if (f.outcome) {
       if (f.outcome === 'Unknown') parts.push(`(ia.outcome IS NULL OR ia.outcome = '')`);
       else { parts.push(`ia.outcome = @${params.length}`); params.push(f.outcome); }
@@ -313,12 +319,14 @@ export class SurveyAnalyticsService {
 
   // ── Filter options ────────────────────────────────────────────────────────
 
-  async getFilterOptions() {
+  async getFilterOptions(clientId?: string) {
+    const clientCond = clientId ? ` AND ia.clientId = @0` : '';
     const distinct = async (col: string) =>
       (await this.repo.manager.query<Array<{ v: string }>>(
         `SELECT DISTINCT ${col} AS v ${FROM_SURVEY}
          WHERE s.answersJson IS NOT NULL
-           AND ${col} IS NOT NULL AND ${col} <> '' ORDER BY ${col}`,
+           AND ${col} IS NOT NULL AND ${col} <> ''${clientCond} ORDER BY ${col}`,
+        clientId ? [clientId] : [],
       )).map((r) => r.v);
 
     return {
@@ -799,7 +807,8 @@ export class SurveyAnalyticsService {
 
   // ── Single record detail (projected from campaign_answers_json) ───────────
 
-  async getRecordDetail(id: string) {
+  async getRecordDetail(id: string, clientId?: string) {
+    const clientCond = clientId ? ` AND ia.clientId = @1` : '';
     const rows = await this.repo.manager.query<Array<{
       caj: string | null; ctj: string | null; interaction_id: string; interaction_tps_id: string | null;
       manufacture: string | null; model: string | null; dealer: string | null;
@@ -824,8 +833,8 @@ export class SurveyAnalyticsService {
       ) tr
       WHERE (s.answersJson IS NOT NULL OR ii.campaign_transcript_json IS NOT NULL)
         AND (CAST(ia.id AS VARCHAR(36)) = @0
-             OR CAST(TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS VARCHAR(20)) = @0)`,
-      [String(id)],
+             OR CAST(TRY_CAST(${CA('$.meta.id_opportunity')} AS INT) AS VARCHAR(20)) = @0)${clientCond}`,
+      clientId ? [String(id), clientId] : [String(id)],
     );
 
     const row = rows[0];

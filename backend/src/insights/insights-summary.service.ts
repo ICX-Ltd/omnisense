@@ -210,12 +210,15 @@ export class InsightsSummaryService {
     private prompts: PromptsService,
   ) {}
 
-  async getFilterOptions(filterKey?: InteractionFilter): Promise<FilterOptions> {
+  async getFilterOptions(filterKey?: InteractionFilter, clientId?: string): Promise<FilterOptions> {
     const applyChannel = (qb: SelectQueryBuilder<Interaction>) => {
       if (filterKey === 'calls') {
         qb.andWhere("(ia.interactionType IS NULL OR ia.interactionType = 'call')");
       } else if (filterKey === 'chats') {
         qb.andWhere("ia.interactionType = 'chat'");
+      }
+      if (clientId) {
+        qb.andWhere('ia.clientId = :clientId', { clientId });
       }
       return qb;
     };
@@ -439,6 +442,7 @@ export class InsightsSummaryService {
     excludeOutcomes?: string[],
     vehicleMake?: string,
     vehicleModels?: string[],
+    clientId?: string,
   ): SelectQueryBuilder<T> {
     if (filterKey === 'calls') {
       qb.andWhere("(ia.interactionType IS NULL OR ia.interactionType = 'call')");
@@ -460,6 +464,9 @@ export class InsightsSummaryService {
     if (vehicleModels?.length) {
       qb.andWhere('ia.vehicleModel IN (:...vehicleModels)', { vehicleModels });
     }
+    if (clientId) {
+      qb.andWhere('ia.clientId = :clientId', { clientId });
+    }
     return qb;
   }
 
@@ -473,6 +480,7 @@ export class InsightsSummaryService {
     excludeOutcomes?: string[],
     vehicleMake?: string,
     vehicleModels?: string[],
+    clientId?: string,
   ): { clause: string; extraParams: unknown[] } {
     const parts: string[] = [];
     const extraParams: unknown[] = [];
@@ -512,6 +520,11 @@ export class InsightsSummaryService {
         return `@${1 + extraParams.length}`;
       });
       parts.push(`ia.vehicleModel IN (${placeholders.join(', ')})`);
+    }
+
+    if (clientId) {
+      extraParams.push(clientId);
+      parts.push(`ia.clientId = @${1 + extraParams.length}`);
     }
 
     const clause = parts.length ? 'AND ' + parts.join(' AND ') : '';
@@ -676,7 +689,7 @@ export class InsightsSummaryService {
   // GENERAL METRICS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async getMetricsSummary(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[]) {
+  async getMetricsSummary(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[], clientId?: string) {
     const dateWhere = 'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
     const dateParams = { from, to };
 
@@ -686,19 +699,19 @@ export class InsightsSummaryService {
         .innerJoin(Interaction, 'ia', 'ia.id = ii.recordingId')
         .where(dateWhere, dateParams);
 
-    const totals = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const totals = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select('COUNT(1)', 'total_calls')
       .addSelect('AVG(ii.sentiment_overall)', 'avg_sentiment')
       .getRawOne<{ total_calls: string; avg_sentiment: number | null }>();
 
-    const byCampaign = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byCampaign = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ii.campaign_detected, 'unknown')", 'campaign_detected')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ii.campaign_detected, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ campaign_detected: string; count: string }>();
 
-    const byScore = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byScore = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select('AVG(ii.overall_score)', 'avg_score')
       .addSelect('MIN(ii.overall_score)', 'min_score')
       .addSelect('MAX(ii.overall_score)', 'max_score')
@@ -707,7 +720,7 @@ export class InsightsSummaryService {
 
     const connectedDispositionFilter = `ii.contact_disposition NOT IN ('no_answer', 'voicemail', 'busy', 'call_dropped', 'invalid_number')`;
 
-    const worstSentiment = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const worstSentiment = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
@@ -721,7 +734,7 @@ export class InsightsSummaryService {
       .limit(5)
       .getRawMany();
 
-    const byContact = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byContact = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select(
         "COALESCE(ii.contact_disposition, 'unknown')",
         'contact_disposition',
@@ -731,21 +744,21 @@ export class InsightsSummaryService {
       .orderBy('count', 'DESC')
       .getRawMany<{ contact_disposition: string; count: string }>();
 
-    const byConversationType = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byConversationType = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ii.conversation_type, 'unknown')", 'conversation_type')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ii.conversation_type, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ conversation_type: string; count: string }>();
 
-    const byInterest = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byInterest = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ii.interest_level, 'unknown')", 'interest_level')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ii.interest_level, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ interest_level: string; count: string }>();
 
-    const leadGenerated = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const leadGenerated = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select(
         'SUM(CASE WHEN ii.lead_generated_for_dealer = 1 THEN 1 ELSE 0 END)',
         'count_true',
@@ -753,7 +766,7 @@ export class InsightsSummaryService {
       .addSelect('COUNT(1)', 'total')
       .getRawOne<{ count_true: string; total: string }>();
 
-    const bestSentiment = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const bestSentiment = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
@@ -767,7 +780,7 @@ export class InsightsSummaryService {
       .limit(5)
       .getRawMany();
 
-    const dealerFollowups = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const dealerFollowups = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
@@ -831,10 +844,11 @@ export class InsightsSummaryService {
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
     excludePartial = false,
+    clientId?: string,
   ) {
     const dateWhere = 'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
     const dateParams = { from, to };
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
 
     const baseQb = () =>
       this.insightsRepo
@@ -842,7 +856,7 @@ export class InsightsSummaryService {
         .innerJoin(Interaction, 'ia', 'ia.id = ii.recordingId')
         .where(dateWhere, dateParams);
 
-    const scoreStats = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const scoreStats = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select('AVG(ii.overall_score)', 'avg_score')
       .addSelect('MIN(ii.overall_score)', 'min_score')
       .addSelect('MAX(ii.overall_score)', 'max_score')
@@ -851,7 +865,7 @@ export class InsightsSummaryService {
       .getRawOne<{ avg_score: number | null; min_score: number | null; max_score: number | null; scored_count: string; total_count: string }>();
 
     // QA overall-score stats (from qa_assessment.overall_score inside qa_scores_json)
-    const qaScoreStats = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const qaScoreStats = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("AVG(CAST(JSON_VALUE(ii.qa_scores_json, '$.overall_score') AS FLOAT))", 'avg_score')
       .addSelect("MIN(CAST(JSON_VALUE(ii.qa_scores_json, '$.overall_score') AS FLOAT))", 'min_score')
       .addSelect("MAX(CAST(JSON_VALUE(ii.qa_scores_json, '$.overall_score') AS FLOAT))", 'max_score')
@@ -862,7 +876,7 @@ export class InsightsSummaryService {
       .andWhere('ii.qa_scores_json IS NOT NULL')
       .getRawOne<{ avg_score: number | null; min_score: number | null; max_score: number | null; scored_count: string }>();
 
-    const scoreBuckets = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const scoreBuckets = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select(
         `CASE WHEN ii.overall_score < 5 THEN 'below_5' WHEN ii.overall_score < 7 THEN '5_to_7' WHEN ii.overall_score < 9 THEN '7_to_9' ELSE '9_plus' END`,
         'bucket',
@@ -939,7 +953,7 @@ export class InsightsSummaryService {
     )`;
 
     // Partial scores grouped by outcome — one aggregation per layer.
-    const partialByOutcomeOps = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const partialByOutcomeOps = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ia.outcome, 'unknown')", 'outcome')
       .addSelect('COUNT(1)', 'count')
       .andWhere(flagIsTrueSql('operations_partial_scoring', '$.operations.scoring_flags.partial_scoring'))
@@ -947,7 +961,7 @@ export class InsightsSummaryService {
       .orderBy('count', 'DESC')
       .getRawMany<{ outcome: string; count: string }>();
 
-    const partialByOutcomeQa = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const partialByOutcomeQa = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ia.outcome, 'unknown')", 'outcome')
       .addSelect('COUNT(1)', 'count')
       .andWhere(flagIsTrueSql('qa_partial_scoring', '$.qa_assessment.scoring_flags.partial_scoring'))
@@ -957,7 +971,7 @@ export class InsightsSummaryService {
 
     // Low-score alerts grouped by agent — one aggregation per layer. Null or
     // empty agents bucketed as "unknown".
-    const lowScoreByAgentOps = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const lowScoreByAgentOps = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(NULLIF(ia.agent, ''), 'unknown')", 'agent')
       .addSelect('COUNT(1)', 'count')
       .addSelect('AVG(ii.overall_score)', 'avg_score')
@@ -966,7 +980,7 @@ export class InsightsSummaryService {
       .orderBy('count', 'DESC')
       .getRawMany<{ agent: string; count: string; avg_score: number | null }>();
 
-    const lowScoreByAgentQa = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const lowScoreByAgentQa = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(NULLIF(ia.agent, ''), 'unknown')", 'agent')
       .addSelect('COUNT(1)', 'count')
       .addSelect('AVG(ii.overall_score)', 'avg_score')
@@ -976,7 +990,7 @@ export class InsightsSummaryService {
       .getRawMany<{ agent: string; count: string; avg_score: number | null }>();
 
     // Flag counts — split by layer (operations vs QA) to avoid visual overlap
-    const flagCounts = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const flagCounts = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select(
         'SUM(CASE WHEN ii.operations_partial_scoring = 1 THEN 1 ELSE 0 END)',
         'ops_partial_count',
@@ -1027,7 +1041,7 @@ export class InsightsSummaryService {
 
     const topCoachingNeeds = mergeCoachingNeeds(rawCoachingNeeds);
 
-    const outcomeDistribution = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const outcomeDistribution = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ia.outcome, 'unknown')", 'outcome')
       .addSelect('COUNT(1)', 'count')
       .addSelect('AVG(ii.overall_score)', 'avg_score')
@@ -1035,7 +1049,7 @@ export class InsightsSummaryService {
       .orderBy('count', 'DESC')
       .getRawMany<{ outcome: string; count: string; avg_score: number | null }>();
 
-    const lowestScored = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const lowestScored = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
@@ -1124,6 +1138,7 @@ export class InsightsSummaryService {
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    clientId?: string,
   ) {
     const dateWhere =
       'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
@@ -1145,6 +1160,7 @@ export class InsightsSummaryService {
         campaign,
         agentFilter,
         excludeOutcomes,
+        undefined, undefined, clientId,
       )
         .select('COUNT(1)', 'chats_measured')
         .addSelect('AVG(ii.chat_response_avg_seconds)', 'avg_response_seconds')
@@ -1198,6 +1214,7 @@ export class InsightsSummaryService {
       campaign,
       undefined,
       excludeOutcomes,
+      undefined, undefined, clientId,
     )
       .select("COALESCE(NULLIF(ia.agent, ''), 'unknown')", 'agent')
       .addSelect('COUNT(1)', 'chats')
@@ -1222,6 +1239,7 @@ export class InsightsSummaryService {
       campaign,
       agent,
       excludeOutcomes,
+      undefined, undefined, clientId,
     )
       .select([
         'ii.recordingId AS recordingId',
@@ -1272,6 +1290,7 @@ export class InsightsSummaryService {
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    clientId?: string,
   ) {
     // We always operate on chats — calls have no per-message timestamps to
     // measure. Honour the user's filterKey but coerce 'calls' to 'chats'
@@ -1296,6 +1315,7 @@ export class InsightsSummaryService {
       campaign,
       agent,
       excludeOutcomes,
+      undefined, undefined, clientId,
     )
       .select([
         'ii.recordingId AS recordingId',
@@ -1366,10 +1386,10 @@ export class InsightsSummaryService {
   // CLIENT SERVICES METRICS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async getClientServicesMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[]) {
+  async getClientServicesMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[], clientId?: string) {
     const dateWhere = 'COALESCE(ia.interactionDateTime, ia.createdAt) >= :from AND COALESCE(ia.interactionDateTime, ia.createdAt) < :to';
     const dateParams = { from, to };
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
 
     const baseQb = () =>
       this.insightsRepo
@@ -1377,7 +1397,7 @@ export class InsightsSummaryService {
         .innerJoin(Interaction, 'ia', 'ia.id = ii.recordingId')
         .where(dateWhere, dateParams);
 
-    const scalars = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const scalars = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select('COUNT(1)', 'total')
       .addSelect('SUM(CASE WHEN ii.lead_generated_for_dealer = 1 THEN 1 ELSE 0 END)', 'leads')
       .addSelect('SUM(CASE WHEN ii.is_in_market_now = 1 THEN 1 ELSE 0 END)', 'in_market')
@@ -1385,7 +1405,7 @@ export class InsightsSummaryService {
       .addSelect('SUM(CASE WHEN ii.has_purchased_elsewhere = 1 THEN 1 ELSE 0 END)', 'purchased_elsewhere')
       .getRawOne<{ total: string; leads: string; in_market: string; lost_sales: string; purchased_elsewhere: string }>();
 
-    const topCompetitors = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const topCompetitors = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ii.competitor_purchased, 'unknown')", 'competitor')
       .addSelect('COUNT(1)', 'count')
       .andWhere('ii.has_purchased_elsewhere = 1')
@@ -1422,7 +1442,7 @@ export class InsightsSummaryService {
       [from, to, ...extraParams],
     );
 
-    const topDealers = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const topDealers = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(NULLIF(ia.dealer, ''), ii.dealer_name, 'unknown')", 'dealer_name')
       .addSelect('COUNT(1)', 'count')
       .andWhere('ii.lead_generated_for_dealer = 1')
@@ -1431,28 +1451,28 @@ export class InsightsSummaryService {
       .limit(10)
       .getRawMany<{ dealer_name: string; count: string }>();
 
-    const byInterest = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byInterest = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ii.interest_level, 'unknown')", 'interest_level')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ii.interest_level, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ interest_level: string; count: string }>();
 
-    const byOutcome = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byOutcome = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ia.outcome, 'unknown')", 'outcome')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ia.outcome, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ outcome: string; count: string }>();
 
-    const byVehicleMake = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const byVehicleMake = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select("COALESCE(ia.vehicleMake, 'unknown')", 'vehicle_make')
       .addSelect('COUNT(1)', 'count')
       .groupBy("COALESCE(ia.vehicleMake, 'unknown')")
       .orderBy('count', 'DESC')
       .getRawMany<{ vehicle_make: string; count: string }>();
 
-    const recentLostSales = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels)
+    const recentLostSales = await this.applyFilters(baseQb(), filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId)
       .select([
         'ii.recordingId AS recordingId',
         'ii.summary_short AS summary_short',
@@ -1707,8 +1727,9 @@ export class InsightsSummaryService {
   async getInteractionsByObjectionCategory(
     from: Date, to: Date, filterKey: InteractionFilter = 'chats',
     category: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[], opportunitiesOnly = false,
+    clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
     const oppClause = opportunitiesOnly ? 'AND (ii.is_opportunity = 1 OR ii.is_opportunity IS NULL)' : '';
 
@@ -1825,13 +1846,19 @@ export class InsightsSummaryService {
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
     model?: string,
+    clientId?: string,
   ) {
     const selectedProvider =
       provider ??
       (process.env.INSIGHTS_PROVIDER as InsightsProviderName | undefined) ??
       'openai';
 
-    const storedKey = [filterKey, selectedProvider, model ?? 'default', campaign ?? 'all', agent ?? 'all'].join('__');
+    // clientId is folded into the dedup key (not just the new column) because
+    // the existing unique index is (fromUtc, toUtc, filterKey, narrativeType) —
+    // without it, two different clients generating a narrative for the same
+    // window/type would silently overwrite or read back each other's cached
+    // narrative.
+    const storedKey = [filterKey, selectedProvider, model ?? 'default', campaign ?? 'all', agent ?? 'all', clientId ?? 'all'].join('__');
 
     const cached = await this.summariesRepo.findOne({
       where: { fromUtc: from, toUtc: to, filterKey: storedKey, narrativeType },
@@ -1866,23 +1893,23 @@ export class InsightsSummaryService {
       undefined;
 
     if (narrativeType === 'calls_operations') {
-      metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, undefined, clientId);
       prompt = buildCallsOperationsNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'calls_client_services') {
-      metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
       prompt = buildCallsClientServicesNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'chats_operations') {
-      metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      metrics = await this.getOperationsMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, undefined, clientId);
       prompt = buildChatsOperationsNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'chats_client_services') {
-      metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      metrics = await this.getClientServicesMetrics(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
       prompt = buildChatsClientServicesNarrativePrompt(metrics, promptTemplate);
     } else if (narrativeType === 'survey_analytics') {
-      const surveyMetrics = await this.gatherSurveyMetricsForNarrative(from, to, campaign);
+      const surveyMetrics = await this.gatherSurveyMetricsForNarrative(from, to, campaign, clientId);
       metrics = surveyMetrics.aggregated;
       prompt = buildSurveyAnalyticsNarrativePrompt(surveyMetrics.aggregated, surveyMetrics.freeText, promptTemplate);
     } else {
-      metrics = await this.getMetricsSummary(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      metrics = await this.getMetricsSummary(from, to, filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
       prompt = buildNarrativeSummaryPrompt(metrics, promptTemplate);
     }
 
@@ -1927,6 +1954,7 @@ ${prompt}
         metricsJson: JSON.stringify(metrics),
         narrativeJson: JSON.stringify(parsedNarrative),
         model: firstPass.model,
+        clientId: clientId ?? null,
       },
       ['fromUtc', 'toUtc', 'filterKey', 'narrativeType'],
     );
@@ -1950,9 +1978,10 @@ ${prompt}
   // ── Per-interaction "Ask AI" ───────────────────────────────────────────────
   // Answers a free-text question about ONE interaction (any type), grounded in
   // its metadata, insight / survey answers and transcript (when present).
-  async askInteraction(id: string, question: string, provider?: string) {
+  async askInteraction(id: string, question: string, provider?: string, clientId?: string) {
     const q = (question ?? '').trim().slice(0, 1000);
     if (!q) return { answer: 'Please enter a question.', model: null, provider: null };
+    const clientCond = clientId ? ' AND ia.clientId = @1' : '';
 
     const rows = await this.insightsRepo.manager.query<Array<{
       campaign: string | null; vehicleMake: string | null; vehicleModel: string | null;
@@ -1970,9 +1999,9 @@ ${prompt}
       FROM app.interaction_insights ii
       INNER JOIN app.interactions ia ON ia.id = ii.recordingId
       LEFT JOIN app.interaction_transcripts t ON t.recordingId = ia.id
-      WHERE CAST(ia.id AS VARCHAR(36)) = @0
-         OR CAST(TRY_CAST(JSON_VALUE(ii.campaign_answers_json, '$.meta.id_opportunity') AS INT) AS VARCHAR(20)) = @0`,
-      [String(id)],
+      WHERE (CAST(ia.id AS VARCHAR(36)) = @0
+         OR CAST(TRY_CAST(JSON_VALUE(ii.campaign_answers_json, '$.meta.id_opportunity') AS INT) AS VARCHAR(20)) = @0)${clientCond}`,
+      clientId ? [String(id), clientId] : [String(id)],
     );
     const row = rows[0];
     if (!row) return { answer: 'Could not find that interaction.', model: null, provider: null };
@@ -2012,7 +2041,7 @@ ${prompt}
   // the decommissioned app.survey_responses table. Scoped to survey-type
   // insights so it never mixes in Parity / other campaigns that share the
   // campaign_answers_json column.
-  private async gatherSurveyMetricsForNarrative(from: Date, to: Date, campaign?: string) {
+  private async gatherSurveyMetricsForNarrative(from: Date, to: Date, campaign?: string, clientId?: string) {
     const parts: string[] = [
       'ii.campaign_answers_json IS NOT NULL',
       `ii.conversation_type = 'survey'`,
@@ -2023,6 +2052,10 @@ ${prompt}
     if (campaign) {
       parts.push(`ia.campaign = @${params.length}`);
       params.push(campaign);
+    }
+    if (clientId) {
+      parts.push(`ia.clientId = @${params.length}`);
+      params.push(clientId);
     }
     const where = 'WHERE ' + parts.join(' AND ');
     const FROM = `FROM app.interaction_insights ii INNER JOIN app.interactions ia ON ia.id = ii.recordingId`;
@@ -2370,6 +2403,7 @@ ${prompt}
     from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
     excludePartial = false,
+    clientId?: string,
   ) {
     // Partial-exclusion clauses: fall back to JSON_VALUE on the raw `json` blob
     // so the filter still bites on records that predate the indexed bit column.
@@ -2404,7 +2438,7 @@ ${prompt}
       : '';
 
     // Overall averages (no agent filter)
-    const { clause: overallClause, extraParams: overallParams } = this.buildRawFilters(filterKey, campaign, undefined, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: overallClause, extraParams: overallParams } = this.buildRawFilters(filterKey, campaign, undefined, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const overall = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
       `${this.dimensionAvgSql} ${overallClause} ${opsPartialClause}`,
       [from, to, ...overallParams],
@@ -2433,7 +2467,7 @@ ${prompt}
     let agentData: Record<string, number | null> | null = null;
     let qaAgentData: Record<string, number | null> | null = null;
     if (agent) {
-      const { clause: agentClause, extraParams: agentParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+      const { clause: agentClause, extraParams: agentParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
       const agentResult = await this.insightsRepo.manager.query<Array<Record<string, number | null>>>(
         `${this.dimensionAvgSql} ${agentClause} ${opsPartialClause}`,
         [from, to, ...agentParams],
@@ -2470,7 +2504,7 @@ ${prompt}
   async getInteractionsByScoreBucket(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     bucket: string, limit = 50, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
     const ranges: Record<string, [number, number]> = {
       below_5: [0, 5],
@@ -2481,7 +2515,7 @@ ${prompt}
     const range = ranges[bucket];
     if (!range) return [];
 
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const rows = await this.insightsRepo.manager.query(
@@ -2511,9 +2545,9 @@ ${prompt}
   async getInteractionsByCoachingNeed(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     need: string, limit = 50, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const rows = await this.insightsRepo.manager.query(
@@ -2555,9 +2589,9 @@ ${prompt}
   async getVulnerabilityMetrics(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const rows = await this.insightsRepo.manager.query<Array<{ handled: string; not_handled: string; total_qa: string }>>(
       `SELECT
          SUM(CASE WHEN ${this.Q13_ANSWER} = 'yes' THEN 1 ELSE 0 END) AS handled,
@@ -2586,9 +2620,9 @@ ${prompt}
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     answer?: string, limit = 200, offset = 0,
     campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const conds = [`${this.Q13_ANSWER} IN ('yes', 'no')`];
     const params: any[] = [from, to, ...extraParams];
     if (answer === 'yes' || answer === 'no') {
@@ -2614,9 +2648,9 @@ ${prompt}
   async getInteractionsByOutcome(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     outcome: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const isUnknown = outcome === 'unknown';
@@ -2653,8 +2687,9 @@ ${prompt}
     outcome: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
     layer: 'ops' | 'qa' = 'ops',
+    clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const isUnknown = outcome === 'unknown';
@@ -2709,8 +2744,9 @@ ${prompt}
     targetAgent: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
     layer: 'ops' | 'qa' = 'ops',
+    clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const isUnknown = targetAgent === 'unknown';
@@ -2763,9 +2799,9 @@ ${prompt}
   async getInteractionsByInterestLevel(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     interestLevel: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const isUnknown = interestLevel === 'unknown';
@@ -2799,9 +2835,9 @@ ${prompt}
   async getInteractionsByCompetitor(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     competitor: string, limit = 200, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     const isUnknown = competitor === 'unknown';
@@ -2833,8 +2869,8 @@ ${prompt}
   // OPS: OPPORTUNITY METRICS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async getOpportunityMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[]) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+  async getOpportunityMetrics(from: Date, to: Date, filterKey: InteractionFilter = 'calls', campaign?: string, agent?: string, excludeOutcomes?: string[], vehicleMake?: string, vehicleModels?: string[], clientId?: string) {
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
 
     const rows = await this.insightsRepo.manager.query<Array<{
       total: string;
@@ -2889,9 +2925,9 @@ ${prompt}
   async getInteractionsByOpportunityReason(
     from: Date, to: Date, filterKey: InteractionFilter = 'calls',
     reason: string, limit = 50, offset = 0, campaign?: string, agent?: string, excludeOutcomes?: string[],
-    vehicleMake?: string, vehicleModels?: string[],
+    vehicleMake?: string, vehicleModels?: string[], clientId?: string,
   ) {
-    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels);
+    const { clause: filterClause, extraParams } = this.buildRawFilters(filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId);
     const paramOffset = 2 + extraParams.length;
 
     let isOpportunityFilter: string;
@@ -3689,8 +3725,10 @@ ${prompt}
     };
   }
 
-  async getInteractionDetail(recordingId: string) {
-    const interaction = await this.recordingsRepo.findOne({ where: { id: recordingId } });
+  async getInteractionDetail(recordingId: string, clientId?: string) {
+    const interaction = await this.recordingsRepo.findOne({
+      where: clientId ? { id: recordingId, clientId } : { id: recordingId },
+    });
     if (!interaction) return null;
 
     const insight = await this.insightsRepo.findOne({ where: { recordingId } });

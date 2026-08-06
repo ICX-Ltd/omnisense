@@ -71,6 +71,6 @@ export class UserController {
     @Body() dto: UpdateUserRoleDto,
   ) {
     const { userId } = this.userService.requireRole(auth, ROLE_ADMIN_ROLES);
-    return this.userService.updateRole(id, dto.roleId, userId);
+    return this.userService.updateRole(id, dto.roleId, userId, dto.clientId);
   }
 }

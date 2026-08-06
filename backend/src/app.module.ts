@@ -33,6 +33,8 @@ import { DataImportModule } from './data-import/data-import.module';
 import { ImportRun } from './db/entities/import-run.entity';
 import { ImportConversation } from './db/entities/import-conversation.entity';
 import { ImportMessage } from './db/entities/import-message.entity';
+import { Client } from './db/entities/client.entity';
+import { ClientsModule } from './clients/clients.module';
 
 @Module({
   imports: [
@@ -67,6 +69,7 @@ import { ImportMessage } from './db/entities/import-message.entity';
             ImportRun,
             ImportConversation,
             ImportMessage,
+            Client,
           ],
           synchronize: false,
           logging: false,
@@ -90,6 +93,7 @@ import { ImportMessage } from './db/entities/import-message.entity';
     CorrectionsModule,
     CsatModule,
     DataImportModule,
+    ClientsModule,
     TranscriptionModule,
     InsightsModule,
     RecordingsModule,

@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsIn, IsString, MinLength, IsOptional, IsUUID } from 'class-validator';
 
 import { ROLE_IDS } from '../roles';
 
@@ -23,4 +23,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsIn(ROLE_IDS)
   roleId?: string;
+
+  // Required by UserService.create when roleId is 'client' (checked there,
+  // not here, since the requirement depends on another field's value).
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
 }

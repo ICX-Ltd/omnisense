@@ -39,6 +39,14 @@ export class UserAccount extends BaseEntity {
   @Column({ type: 'nvarchar', name: 'role_id', length: 50, nullable: true })
   roleId?: string | null;
 
+  // Which client this account belongs to — required when roleId is 'client'
+  // (enforced in UserService), null for every internal role. Determines the
+  // one client's data a 'client'-role user can ever see; never overridable by
+  // the user themselves (only an admin's "view as" can substitute a different
+  // client, and only for their OWN preview session).
+  @Column({ type: 'uniqueidentifier', name: 'client_id', nullable: true })
+  clientId?: string | null;
+
   @Column({ type: 'datetime2', name: 'last_login_date', nullable: true })
   lastLoggedInDate?: Date | null;
 

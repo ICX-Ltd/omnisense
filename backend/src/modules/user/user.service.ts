@@ -66,6 +66,7 @@ export class UserService {
       mobilePhone: user.mobilePhone ?? null,
       email: user.email,
       roleId: user.roleId ?? null,
+      clientId: user.clientId ?? null,
       lastLoggedInDate: user.lastLoggedInDate ?? null,
       twoFactorEnabled: !!user.twoFactorEnabled,
       twoFactorConfirmedAt: user.twoFactorConfirmedAt ?? null,
@@ -103,7 +104,12 @@ export class UserService {
    * cannot be undone through the UI, because you would immediately lose the
    * access needed to reverse it. Someone else with dev/admin has to do it.
    */
-  async updateRole(id: string, roleId: string, actingUserId: string) {
+  async updateRole(
+    id: string,
+    roleId: string,
+    actingUserId: string,
+    clientId?: string,
+  ) {
     const user = await this.accountRepo.findOne({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
 
@@ -121,7 +127,14 @@ export class UserService {
       );
     }
 
-    await this.accountRepo.update(id, { roleId: next });
+    // A 'client'-role account must be tied to exactly one client — that's the
+    // whole enforcement mechanism for what data it can ever see.
+    const nextClientId = next === 'client' ? clientId ?? user.clientId : null;
+    if (next === 'client' && !nextClientId) {
+      throw new BadRequestException('clientId is required for the client role');
+    }
+
+    await this.accountRepo.update(id, { roleId: next, clientId: nextClientId });
     return this.findOne(id);
   }
 
@@ -134,6 +147,10 @@ export class UserService {
       throw new ConflictException('A user with that email already exists');
     }
 
+    if (dto.roleId === 'client' && !dto.clientId) {
+      throw new BadRequestException('clientId is required for the client role');
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
     const user = this.accountRepo.create({
@@ -144,6 +161,7 @@ export class UserService {
       jobTitle: (dto as any).jobTitle ?? null,
       mobilePhone: (dto as any).mobilePhone ?? null,
       roleId: (dto as any).roleId ?? null,
+      clientId: (dto as any).roleId === 'client' ? dto.clientId : null,
       tagList: (dto as any).tagList ?? null,
       passwordHash,
       twoFactorEnabled: false,

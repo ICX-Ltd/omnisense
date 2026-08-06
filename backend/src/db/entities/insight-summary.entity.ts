@@ -33,6 +33,12 @@ export class InsightSummary {
   @Column({ type: 'varchar', length: 50, nullable: true })
   model!: string | null;
 
+  // The client this narrative is scoped to — a real column, unlike campaign
+  // (still smuggled into filterKey below for the other narrative types).
+  // Null for narratives generated before this existed or with no client scope.
+  @Column({ type: 'uniqueidentifier', nullable: true })
+  clientId!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

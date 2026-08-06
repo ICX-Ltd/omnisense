@@ -61,6 +61,7 @@ export class AuthService {
       name,
       email: user.email,
       roleId: user.roleId ?? null,
+      clientId: user.clientId ?? null,
       tagList: user.tagList ?? null,
     };
   }
@@ -71,6 +72,7 @@ export class AuthService {
         sub: user.id,
         email: user.email,
         roleId: user.roleId ?? null,
+        clientId: user.clientId ?? null,
         amr,
       },
       { expiresIn: ACCESS_TTL },

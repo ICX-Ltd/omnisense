@@ -26,6 +26,16 @@ const CSAT_MAX_SCORE = Number(process.env.CSAT_ASSESS_MAX_SCORE) || 3;
 // with CSAT_BOT_AGENT_PATTERN if a real colleague's name ever collides.
 const CSAT_BOT_AGENT_PATTERN = process.env.CSAT_BOT_AGENT_PATTERN || '%BOT%';
 
+// JS equivalent of the SQL LIKE match above, so ingest() can classify a bot
+// row as 'excluded' immediately instead of leaving it 'pending' until a batch
+// run's sweep catches it — a fresh data load's Pending count should already
+// reflect only what will actually get assessed.
+function likePatternToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/%/g, '.*').replace(/_/g, '.')}$`, 'i');
+}
+const CSAT_BOT_AGENT_REGEX = likePatternToRegExp(CSAT_BOT_AGENT_PATTERN);
+
 // A reviewer comment stored on a CSAT record (reviewerCommentsJson array).
 export interface CsatReviewerComment {
   user: string | null;
@@ -85,15 +95,19 @@ export class CsatService {
       const campaign = item.campaign ?? interaction?.campaign ?? existing?.campaign ?? null;
       const effScore = item.score ?? existing?.score ?? null;
 
-      // Preserve an existing assessment; otherwise: exclude 4-5 scores from
-      // assessment (only <= CSAT_MAX_SCORE are contest-assessed), mark unmatched
-      // when no interaction, else queue as pending.
+      // Preserve an existing assessment; otherwise: exclude 4-5 scores AND
+      // bot-handled conversations from assessment up front (both are decided
+      // the moment the record exists, not only once a batch run's sweep gets
+      // to them — a fresh import's Pending count would otherwise include rows
+      // that were never going to be assessed, and inflate it against the
+      // batch job's own candidate count once bots get swept out mid-run).
       const alreadyAssessed = existing?.status === 'assessed';
+      const isBotAgent = !!interaction?.agent && CSAT_BOT_AGENT_REGEX.test(interaction.agent);
       const status = !interaction
         ? 'unmatched'
         : alreadyAssessed
           ? 'assessed'
-          : effScore != null && effScore > CSAT_MAX_SCORE
+          : (effScore != null && effScore > CSAT_MAX_SCORE) || isBotAgent
             ? 'excluded'
             : 'pending';
 
@@ -136,7 +150,11 @@ export class CsatService {
       if (interaction) {
         row.recordingId = interaction.id;
         row.campaign = row.campaign ?? interaction.campaign ?? null;
-        row.status = 'pending';
+        // Same eager exclusion as ingest() — a rematch is still the first time
+        // this row learns which agent handled it, so it must get the same
+        // score/bot check rather than defaulting straight to 'pending'.
+        const isBotAgent = !!interaction.agent && CSAT_BOT_AGENT_REGEX.test(interaction.agent);
+        row.status = (row.score != null && row.score > CSAT_MAX_SCORE) || isBotAgent ? 'excluded' : 'pending';
         await this.csatRepo.save(row);
         if (!interaction.hasCsat) {
           await this.interactionsRepo.update(interaction.id, { hasCsat: true });
