@@ -42,6 +42,8 @@ export type StagingField =
   | 'outcome'
   | 'vehicleMake'
   | 'vehicleModel'
+  | 'recordingUrl'
+  | 'maturityDate'
   // QA-only: never promoted, but filterable in the eyeball grid
   | 'skill'
   | 'agentGroup'
@@ -163,10 +165,48 @@ export interface PiiMapping {
   dropColumns: string[];
 }
 
+/** Parameters an operator supplies when starting a SQL-source pull. */
+export interface SqlSourceParams {
+  from: Date;
+  to: Date;
+  /** The seeded app.clients.key for the chosen Client selector, e.g. 'nmgb'. */
+  clientKey: string;
+  /** Transcription engine override — only meaningful for call sources. */
+  provider?: string;
+}
+
+export interface SqlSourceConfig {
+  /** Builds the parameterized query text + bind values for one pull. Bind
+   *  values only — never string-concatenate an operator-influenced value
+   *  into `text`, even though the template itself is developer-authored. */
+  buildQuery(params: SqlSourceParams): { text: string; values: unknown[] };
+}
+
 export interface SourceMapping {
   key: string;
   label: string;
   version: string;
+  /**
+   * 'file' (the default when omitted) reads an uploaded/server-inbox file.
+   * 'sql' pulls rows via `sql.buildQuery` instead — the frontend's Source
+   * tile swaps the file picker for a date-range control accordingly.
+   */
+  sourceKind?: 'file' | 'sql';
+  sql?: SqlSourceConfig;
+  /**
+   * When set, promote does NOT create a new app.interactions row for this
+   * source's rows — it resolves an ALREADY-PROMOTED interaction by matching
+   * this staging column against app.interactions, and only inserts into
+   * app.interaction_survey. See import-promote.service.ts's attach-mode path.
+   */
+  attachToExisting?: { matchColumn: 'recordingUrl' };
+  /**
+   * False when this source has no transcript at all (yet) — e.g. call
+   * recordings staged ahead of transcription. Suppresses the
+   * no-transcript/unparsed-transcript stage-time errors that otherwise apply
+   * to every source. Defaults to true (today's behaviour) when omitted.
+   */
+  transcriptExpected?: boolean;
   /** 'auto' sniffs the delimiter from the header line. */
   delimiter: 'auto' | ',' | '\t' | ';' | '|';
   /** Disambiguates 01/02/2026 — 'dmy' is the UK house format. */
@@ -182,7 +222,17 @@ export interface SourceMapping {
   fields: FieldMap[];
   transcript: TranscriptMapping;
   csat: CsatMapping;
-  survey: { type: string; pairs: SurveyPairMap[] };
+  /**
+   * `pairs` builds a flat SurveyAnswer[] from parallel Q&A columns (see
+   * buildSurveyAnswers) — the shape LivePerson's inline post-chat survey needs.
+   * `rawJsonColumn` is the alternative for a source whose SQL pull already
+   * assembles the final nested answersJson shape itself (e.g. a `FOR JSON
+   * PATH` subquery aliased to one column) — that string is carried straight
+   * through unchanged, preserving whatever shape existing dashboards already
+   * depend on rather than flattening it into the pairs shape. At most one of
+   * the two is meaningful for a given source.
+   */
+  survey: { type: string; pairs: SurveyPairMap[]; rawJsonColumn?: string };
   pii: PiiMapping;
   /** Constants stamped onto every promoted app.interactions row. */
   interactionDefaults: {
@@ -211,6 +261,10 @@ export interface ProjectedRow {
   outcome: string | null;
   vehicleMake: string | null;
   vehicleModel: string | null;
+  recordingUrl: string | null;
+  maturityDate: Date | null;
+  /** Derived in stageRow(), never mapped directly — see maturityDate. */
+  daysToMaturityAtInteraction: number | null;
 
   skill: string | null;
   agentGroup: string | null;

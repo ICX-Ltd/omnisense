@@ -12,6 +12,7 @@ import { ImportMessage } from '../db/entities/import-message.entity';
 import { BatchJob } from '../db/entities/batch-job.entity';
 import { Interaction } from '../db/entities/interaction.entity';
 import { JwtSharedModule } from '../modules/auth/jwt-shared.module';
+import { ClientsModule } from '../clients/clients.module';
 
 /**
  * Upload storage is configured at the interceptor in data-import.controller.ts
@@ -26,6 +27,7 @@ import { JwtSharedModule } from '../modules/auth/jwt-shared.module';
 @Module({
   imports: [
     JwtSharedModule,
+    ClientsModule,
     TypeOrmModule.forFeature([
       ImportRun,
       ImportConversation,

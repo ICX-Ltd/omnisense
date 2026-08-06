@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -20,6 +21,15 @@ export class ClientsService {
       where: includeInactive ? {} : { active: true },
       order: { name: 'ASC' },
     });
+  }
+
+  /** Used by the SQL-source import routes to resolve a client's `key` (the
+   *  stable slug the query templates key their campaign lookup on) from the
+   *  clientId chosen in the Client selector. */
+  async requireById(id: string) {
+    const client = await this.repo.findOne({ where: { id } });
+    if (!client) throw new BadRequestException(`Unknown client "${id}"`);
+    return client;
   }
 
   async create(name: string, key: string) {

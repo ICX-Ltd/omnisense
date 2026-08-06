@@ -10,7 +10,7 @@ export type ImportRunStatus =
   | 'promote_failed'
   | 'rolled_back';
 
-export type ImportIntake = 'upload' | 'server';
+export type ImportIntake = 'upload' | 'server' | 'sql';
 
 /**
  * import_runs — one row per file load.

@@ -35,6 +35,9 @@ const EMPTY_PROJECTION: ProjectedRow = {
   outcome: null,
   vehicleMake: null,
   vehicleModel: null,
+  recordingUrl: null,
+  maturityDate: null,
+  daysToMaturityAtInteraction: null,
   skill: null,
   agentGroup: null,
   lob: null,
@@ -429,6 +432,8 @@ export interface StagedRow {
   projected: ProjectedRow;
   transcript: NormalisedTranscript;
   surveyAnswers: SurveyAnswer[];
+  /** Set only when mapping.survey.rawJsonColumn is configured — see mapping.types.ts. */
+  rawSurveyJson: string | null;
   rawJson: string;
   droppedColumns: string[];
   issues: RowIssue[];
@@ -508,6 +513,17 @@ export function stageRow(input: StageRowInput): StagedRow {
 
   const projected = out as unknown as ProjectedRow;
 
+  // ── maturity ──────────────────────────────────────────────────────────────
+  // Mirrors Interaction's own @BeforeInsert hook exactly, so promote (raw SQL,
+  // which bypasses that hook) can just copy the value straight across instead
+  // of recomputing it — what the operator reviews here is what will land.
+  if (projected.maturityDate) {
+    const anchor = projected.interactionDateTime;
+    projected.daysToMaturityAtInteraction = anchor
+      ? Math.floor((projected.maturityDate.getTime() - anchor.getTime()) / 86_400_000)
+      : null;
+  }
+
   // ── transcript ────────────────────────────────────────────────────────────
   const transcript = normaliseTranscript({
     raw: projected.transcriptRaw,
@@ -536,7 +552,11 @@ export function stageRow(input: StageRowInput): StagedRow {
     });
   }
 
-  if (transcript.status === 'empty') {
+  // Sources with no transcript at all yet (e.g. call recordings staged ahead
+  // of transcription — see mapping.transcriptExpected) skip these entirely;
+  // there is nothing to flag as missing when nothing was ever expected.
+  const transcriptExpected = mapping.transcriptExpected !== false;
+  if (transcriptExpected && transcript.status === 'empty') {
     issues.push({
       level: 'error',
       code: 'E_NO_TRANSCRIPT',
@@ -544,7 +564,7 @@ export function stageRow(input: StageRowInput): StagedRow {
         'No transcript content. interaction_transcripts.text is NOT NULL, so ' +
         'there is nothing to promote.',
     });
-  } else if (transcript.status === 'unparsed') {
+  } else if (transcriptExpected && transcript.status === 'unparsed') {
     issues.push({
       level: 'error',
       code: 'E_TRANSCRIPT_UNPARSED',
@@ -553,7 +573,7 @@ export function stageRow(input: StageRowInput): StagedRow {
         `"HH:MM[:SS] - Speaker: text" format (${transcript.unparsedLineCount} ` +
         `unparsed lines).`,
     });
-  } else if (transcript.status === 'partial') {
+  } else if (transcriptExpected && transcript.status === 'partial') {
     issues.push({
       level: 'warning',
       code: 'W_TRANSCRIPT_PARTIAL',
@@ -626,6 +646,9 @@ export function stageRow(input: StageRowInput): StagedRow {
 
   const { rawJson, droppedColumns } = buildRawJson(row, headers, mapping);
   const surveyAnswers = buildSurveyAnswers(row, headers, mapping);
+  const rawSurveyJson = mapping.survey.rawJsonColumn
+    ? (readColumn(row, headers, mapping.survey.rawJsonColumn) ?? null)
+    : null;
 
   const hasError = issues.some((i) => i.level === 'error');
   const validationStatus: ValidationStatus = hasError
@@ -639,6 +662,7 @@ export function stageRow(input: StageRowInput): StagedRow {
     projected,
     transcript,
     surveyAnswers,
+    rawSurveyJson,
     rawJson,
     droppedColumns,
     issues,

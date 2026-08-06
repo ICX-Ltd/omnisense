@@ -34,7 +34,40 @@
     <template v-else>
       <!-- ─── intake ──────────────────────────────────────────────────────── -->
       <div class="grid">
-        <div class="tile tile--accent">
+        <div v-if="isSqlSource" class="tile tile--accent">
+          <div class="tile-head">
+            <IconChip name="calendar" />
+            <div class="tile-text">
+              <div class="tile-title">Date range</div>
+              <div class="tile-desc">
+                Pulls straight from the source database for this window — no
+                file involved. Rows already promoted are skipped automatically.
+              </div>
+            </div>
+          </div>
+          <div class="tile-body">
+            <div class="field-row">
+              <label class="field-label">From</label>
+              <input v-model="sqlFrom" type="date" class="input" />
+            </div>
+            <div class="field-row">
+              <label class="field-label">To</label>
+              <input v-model="sqlTo" type="date" class="input" />
+            </div>
+            <div class="actions-row" style="margin-top: 10px">
+              <button
+                class="btn btn--primary"
+                @click="doStageSql"
+                :disabled="busy || !clientId || !sqlFrom || !sqlTo"
+                :title="!clientId ? 'Select a client first' : ''"
+              >
+                {{ busy ? "Pulling…" : "Stage" }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!isSqlSource" class="tile tile--accent">
           <div class="tile-head">
             <IconChip name="add" />
             <div class="tile-text">
@@ -464,6 +497,7 @@ import {
   previewServerFile,
   previewUpload,
   stageServerFile,
+  stageSql,
   stageUpload,
   type ImportRunSummary,
   type PreviewResult,
@@ -476,6 +510,15 @@ const sources = ref<SourceInfo[]>([]);
 const sourceKey = ref<string>("liveperson");
 const clients = ref<ClientDef[]>([]);
 const clientId = ref<string>("");
+
+// SQL-source staging (e.g. ICX call-centre calls/survey) — a date range
+// instead of a file. Defaults to the last 7 days, matching the ad-hoc scripts
+// this replaces.
+const isSqlSource = computed(() => activeSource.value?.sourceKind === "sql");
+const today = new Date();
+const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+const sqlFrom = ref(weekAgo.toISOString().slice(0, 10));
+const sqlTo = ref(today.toISOString().slice(0, 10));
 const serverFiles = ref<ServerFile[]>([]);
 const serverFilesError = ref("");
 const runs = ref<ImportRunSummary[]>([]);
@@ -670,6 +713,20 @@ async function doStageServer(name: string) {
   }
 }
 
+async function doStageSql() {
+  if (!clientId.value || !sqlFrom.value || !sqlTo.value) return;
+  busy.value = true;
+  errorMsg.value = "";
+  try {
+    const res = await stageSql(sourceKey.value, clientId.value, sqlFrom.value, sqlTo.value);
+    afterStage(res.runId, null);
+  } catch (e) {
+    errorMsg.value = describe(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
 function afterStage(runId: string, duplicateOfRunId: string | null) {
   preview.value = null;
   file.value = null;
@@ -789,6 +846,18 @@ onUnmounted(() => {
 }
 .kv-block {
   margin-top: 10px;
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.field-label {
+  width: 60px;
+  flex: 0 0 60px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .dropzone {
   display: flex;

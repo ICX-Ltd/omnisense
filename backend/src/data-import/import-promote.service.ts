@@ -202,6 +202,11 @@ export class ImportPromoteService {
     mapping: SourceMapping,
     clientId: string | null,
   ): Promise<void> {
+    if (mapping.attachToExisting) {
+      await this.runPromoteBackgroundAttach(runId, jobId, mapping);
+      return;
+    }
+
     const batchSize = promoteBatchRows();
     const maxScore = csatAssessMaxScore();
     let totals = {
@@ -245,6 +250,53 @@ export class ImportPromoteService {
         `${totals.transcripts} transcripts, ${totals.csat} CSAT, ` +
         `${totals.surveys} surveys` +
         (totals.skipped ? `, ${totals.skipped} skipped as already present` : ''),
+    );
+  }
+
+  /**
+   * Promote loop for an "attach to existing interaction" source (e.g.
+   * icx_survey): never creates an app.interactions row, only resolves one
+   * already promoted by another run and inserts into app.interaction_survey.
+   */
+  private async runPromoteBackgroundAttach(
+    runId: string,
+    jobId: string,
+    mapping: SourceMapping,
+  ): Promise<void> {
+    const batchSize = promoteBatchRows();
+    let totals = { surveys: 0, unmatched: 0 };
+
+    for (;;) {
+      // The unmatched-exclusion pass inside promoteChunkAttach is unbounded
+      // (no TOP), so every promotable-but-unmatched row is excluded on its
+      // first call — `claimed` alone is a safe loop-termination signal.
+      const claimed = await this.promoteChunkAttach(runId, mapping, batchSize);
+      totals = {
+        surveys: totals.surveys + claimed.surveys,
+        unmatched: totals.unmatched + claimed.unmatched,
+      };
+      if (claimed.claimed === 0) break;
+      await this.jobRepo.increment({ id: jobId }, 'progress', claimed.claimed);
+    }
+
+    await this.runsRepo.update(runId, {
+      status: 'promoted',
+      promotedAt: new Date(),
+      promotedSurveys: totals.surveys,
+      // No dedicated "unmatched" counter on ImportRun — folded into
+      // promoteSkipped, which already means "staged but not promoted".
+      promoteSkipped: totals.unmatched,
+    });
+    await this.jobRepo.update(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+    });
+
+    this.logger.log(
+      `[import] run ${runId} promoted (attach mode): ${totals.surveys} survey rows` +
+        (totals.unmatched
+          ? `, ${totals.unmatched} excluded — no matching interaction found`
+          : ''),
     );
   }
 
@@ -495,10 +547,120 @@ export class ImportPromoteService {
     });
   }
 
+  /**
+   * Promotes one chunk for an "attach to existing interaction" source.
+   *
+   * Never claims a fresh id — Step 0 resolves an ALREADY-PROMOTED interaction
+   * by matching mapping.attachToExisting.matchColumn, then only inserts into
+   * app.interaction_survey. A row with no match is excluded (not left
+   * pending forever, and not silently skipped) so it surfaces in the review
+   * grid — the operator can re-promote later once the matching icx_calls run
+   * has landed.
+   */
+  private async promoteChunkAttach(
+    runId: string,
+    mapping: SourceMapping,
+    batchSize: number,
+  ): Promise<{ claimed: number; surveys: number; unmatched: number }> {
+    const matchColumn = mapping.attachToExisting!.matchColumn;
+
+    return this.ds.transaction(async (em) => {
+      // Rows whose match column resolves to no existing interaction can never
+      // be promoted by this run — excluding them (rather than leaving them
+      // pending) keeps the loop below terminating and makes the miss visible
+      // in the review grid instead of silently stalling.
+      const unmatchedResult = await em.query(
+        `UPDATE c
+            SET excluded = 1,
+                excludedReason = 'No matching interaction found for this ${matchColumn}'
+           FROM app.import_conversations c
+          WHERE c.importRunId = @0
+            AND ${this.promotablePredicate('c')}
+            AND c.promotedInteractionId IS NULL
+            AND (c.${matchColumn} IS NULL
+                 OR NOT EXISTS (SELECT 1 FROM app.interactions i
+                                 WHERE i.${matchColumn} = c.${matchColumn}));
+         SELECT @@ROWCOUNT AS n;`,
+        [runId],
+      );
+
+      const claimResult = await em.query(
+        `UPDATE TOP (${batchSize}) c
+            SET c.promotedInteractionId = i.id
+           FROM app.import_conversations c
+           JOIN app.interactions i ON i.${matchColumn} = c.${matchColumn}
+          WHERE c.importRunId = @0
+            AND ${this.promotablePredicate('c')}
+            AND c.promotedInteractionId IS NULL;
+         SELECT @@ROWCOUNT AS claimed;`,
+        [runId],
+      );
+      const claimed = Number(claimResult?.[0]?.claimed ?? 0);
+      const unmatched = Number(unmatchedResult?.[0]?.n ?? 0);
+      if (claimed === 0) {
+        return { claimed: 0, surveys: 0, unmatched };
+      }
+
+      // Same shape as promoteChunk's Step 5 — the only survey-producing step
+      // this mode runs; interactions/transcripts/CSAT are never touched.
+      const sv = await em.query(
+        `INSERT INTO app.interaction_survey
+           (recordingId, interactionTpsId, campaign, surveyType, answersJson, respondedAt)
+         SELECT c.promotedInteractionId, c.interactionTpsId, c.campaign, @1,
+                c.surveyAnswersJson, c.csatRespondedAt
+           FROM app.import_conversations c
+          WHERE c.importRunId = @0
+            AND c.promotedInteractionId IS NOT NULL
+            AND c.promoteStatus IN ('pending','failed')
+            AND c.surveyAnswersJson IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM app.interaction_survey s
+                             WHERE s.recordingId = c.promotedInteractionId
+                               AND s.surveyType = @1);
+         SELECT @@ROWCOUNT AS n;`,
+        [runId, mapping.survey.type],
+      );
+
+      await em.query(
+        `UPDATE c SET promoteStatus = 'promoted', promoteError = NULL
+           FROM app.import_conversations c
+          WHERE c.importRunId = @0
+            AND c.promotedInteractionId IS NOT NULL
+            AND c.promoteStatus IN ('pending','failed')`,
+        [runId],
+      );
+
+      return { claimed, surveys: Number(sv?.[0]?.n ?? 0), unmatched };
+    });
+  }
+
   // ─── rollback ──────────────────────────────────────────────────────────────
 
   /** What a rollback would destroy. Writes nothing. */
-  async previewRollback(runId: string): Promise<RollbackPreview> {
+  async previewRollback(runId: string, mapping: SourceMapping): Promise<RollbackPreview> {
+    if (mapping.attachToExisting) {
+      // Attach mode never creates an interaction, so nothing here touches
+      // app.interactions/interaction_transcripts/interaction_csat — reporting
+      // otherwise (the join below still legitimately matches THOSE tables,
+      // since the interaction exists, just wasn't created by this run) would
+      // make a survey-only rollback look far more destructive than it is.
+      const r = await this.ds.query(
+        `SELECT COUNT(*) AS n
+           FROM app.interaction_survey s
+           JOIN app.import_conversations c ON c.promotedInteractionId = s.recordingId
+          WHERE c.importRunId = @0 AND c.promoteStatus = 'promoted' AND s.surveyType = @1`,
+        [runId, mapping.survey.type],
+      );
+      return {
+        runId,
+        promotedInteractions: 0,
+        insightsAffected: 0,
+        transcriptsAffected: 0,
+        csatCreatedByImport: 0,
+        csatPreExisting: 0,
+        surveysAffected: Number(r?.[0]?.n ?? 0),
+      };
+    }
+
     const r = await this.ds.query(
       `SELECT
          (SELECT COUNT(*) FROM app.import_conversations
@@ -567,7 +729,11 @@ export class ImportPromoteService {
       );
     }
 
-    const before = await this.previewRollback(runId);
+    if (mapping.attachToExisting) {
+      return this.rollbackAttach(runId, mapping);
+    }
+
+    const before = await this.previewRollback(runId, mapping);
     if (before.promotedInteractions === 0) {
       throw new BadRequestException(
         'Nothing to roll back — this run has no promoted rows.',
@@ -680,6 +846,87 @@ export class ImportPromoteService {
         `unlinked, ${result.surveysDeleted} surveys deleted`,
     );
     return result;
+  }
+
+  /**
+   * Rollback for an "attach to existing interaction" source. Deletes only the
+   * survey rows this run created — critically, NEVER touches
+   * app.interactions or app.interaction_csat, since this mode never created
+   * either (the interaction pre-existed, promoted by a different run, and any
+   * CSAT on it is unrelated to this survey attach).
+   */
+  private async rollbackAttach(
+    runId: string,
+    mapping: SourceMapping,
+  ): Promise<{
+    interactionsDeleted: number;
+    csatDeleted: number;
+    csatUnlinked: number;
+    surveysDeleted: number;
+  }> {
+    const before = await this.previewRollback(runId, mapping);
+    if (before.surveysAffected === 0) {
+      throw new BadRequestException(
+        'Nothing to roll back — this run has no promoted survey rows.',
+      );
+    }
+
+    const surveysDeleted = await this.ds.transaction(async (em) => {
+      const counts = await em.query(
+        `SELECT COUNT(*) AS n
+           FROM app.interaction_survey s
+           JOIN app.import_conversations c ON c.promotedInteractionId = s.recordingId
+          WHERE c.importRunId = @0 AND c.promoteStatus = 'promoted' AND s.surveyType = @1`,
+        [runId, mapping.survey.type],
+      );
+
+      await em.query(
+        `DELETE s
+           FROM app.interaction_survey s
+           JOIN app.import_conversations c ON c.promotedInteractionId = s.recordingId
+          WHERE c.importRunId = @0 AND c.promoteStatus = 'promoted' AND s.surveyType = @1`,
+        [runId, mapping.survey.type],
+      );
+
+      // Reset staging so a re-promote re-attempts every row, including ones
+      // this run excluded as "no matching interaction" — the matching
+      // icx_calls run may have been promoted since.
+      await em.query(
+        `UPDATE app.import_conversations
+            SET promoteStatus = 'pending',
+                promotedInteractionId = NULL,
+                promoteError = NULL,
+                excluded = CASE
+                  WHEN excludedReason LIKE 'No matching interaction found for this %' THEN 0
+                  ELSE excluded END,
+                excludedReason = CASE
+                  WHEN excludedReason LIKE 'No matching interaction found for this %' THEN NULL
+                  ELSE excludedReason END
+          WHERE importRunId = @0`,
+        [runId],
+      );
+
+      return Number(counts?.[0]?.n ?? 0);
+    });
+
+    await this.runsRepo.update(runId, {
+      status: 'staged',
+      rolledBackAt: new Date(),
+      promotedAt: null,
+      promotedSurveys: 0,
+      promoteSkipped: 0,
+    });
+
+    this.logger.warn(
+      `[import] run ${runId} rolled back (attach mode): ${surveysDeleted} survey rows deleted`,
+    );
+
+    return {
+      interactionsDeleted: 0,
+      csatDeleted: 0,
+      csatUnlinked: 0,
+      surveysDeleted,
+    };
   }
 
   // ─── dedupe report ─────────────────────────────────────────────────────────

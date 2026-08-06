@@ -88,6 +88,23 @@ export class ImportConversation {
   @Column({ type: 'nvarchar', length: 100, nullable: true })
   vehicleModel!: string | null;
 
+  // Call recording location — essential for SQL-sourced call-centre imports:
+  // it's what app.interactions.recordingUrl is stamped from at promote time,
+  // and the match key a later "attach survey to existing interaction" run
+  // resolves against (see import-promote.service.ts's attach-mode promote).
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  recordingUrl!: string | null;
+
+  // End-date of the customer's finance agreement, carried straight through to
+  // app.interactions.maturityDate. daysToMaturityAtInteraction is computed
+  // once here (at stage time, same formula as Interaction's own
+  // @BeforeInsert hook) so what the operator reviews is exactly what promotes.
+  @Column({ type: 'datetime2', nullable: true })
+  maturityDate!: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  daysToMaturityAtInteraction!: number | null;
+
   // ── QA-only: never promoted, but filterable in the eyeball grid ──────────
   @Column({ type: 'nvarchar', length: 200, nullable: true })
   skill!: string | null;

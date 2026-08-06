@@ -141,6 +141,7 @@ export class DataImportService {
       key: m.key,
       label: m.label,
       version: m.version,
+      sourceKind: m.sourceKind ?? 'file',
       delimiter: m.delimiter,
       dateOrder: m.dateOrder,
       naturalKeyCandidates: m.naturalKeyCandidates,

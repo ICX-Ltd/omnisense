@@ -18,6 +18,7 @@ import { DataImportService } from './data-import.service';
 import { ImportParseService } from './import-parse.service';
 import { ImportPromoteService } from './import-promote.service';
 import { ImportRunsService } from './import-runs.service';
+import { ClientsService } from '../clients/clients.service';
 import { assertAllowedExtension, deleteQuietly } from './helpers/file-source';
 import {
   lazyImportDiskStorage,
@@ -64,6 +65,7 @@ export class DataImportController {
     private readonly parseSvc: ImportParseService,
     private readonly promoteSvc: ImportPromoteService,
     private readonly runsSvc: ImportRunsService,
+    private readonly clientsSvc: ClientsService,
   ) {}
 
   // ─── sources & intake discovery ───────────────────────────────────────────
@@ -204,6 +206,44 @@ export class DataImportController {
       // The inbox file is the operator's; never delete it.
       deleteFileWhenDone: false,
     });
+  }
+
+  /**
+   * Stages a SQL-source pull (e.g. ICX call-centre calls/survey) for a date
+   * range — no file involved. The Client selector's `clientKey` (not the raw
+   * clientId) is what the source's query template keys its campaign lookup
+   * on, so it's resolved here rather than passed straight through.
+   */
+  @Post('runs/sql')
+  async stageSql(
+    @Query('sourceKey') sourceKey: string,
+    @Query('clientId') clientId: string,
+    @Query('from') fromRaw: string,
+    @Query('to') toRaw: string,
+    @Headers('authorization') auth?: string,
+  ) {
+    const { roleId } = this.svc.requireRole(auth, WRITE_ROLES);
+    const key = requireSourceKey(sourceKey);
+    const mapping = this.svc.requireMapping(key);
+    if (mapping.sourceKind !== 'sql') {
+      throw new BadRequestException(`Source "${key}" is not a SQL source`);
+    }
+    const resolvedClientId = requireClientId(clientId);
+    const client = await this.clientsSvc.requireById(resolvedClientId);
+    const from = requireDate(fromRaw, 'from');
+    const to = requireDate(toRaw, 'to');
+
+    const result = await this.parseSvc.startSqlParse({
+      sourceKey: key,
+      mapping,
+      displayName: `${mapping.label} (${fromRaw} to ${toRaw})`,
+      clientId: resolvedClientId,
+      clientKey: client.key,
+      from,
+      to,
+      createdBy: roleId,
+    });
+    return { runId: result.runId, jobId: result.jobId, rowsPulled: result.rowsPulled };
   }
 
   // ─── runs ─────────────────────────────────────────────────────────────────
@@ -370,8 +410,9 @@ export class DataImportController {
     @Headers('authorization') auth?: string,
   ) {
     this.svc.requireRole(auth, READ_ROLES);
-    await this.runsSvc.requireRun(id);
-    return this.promoteSvc.previewRollback(id);
+    const run = await this.runsSvc.requireRun(id);
+    const mapping = this.svc.requireMapping(run.sourceKey);
+    return this.promoteSvc.previewRollback(id, mapping);
   }
 
   /**
@@ -434,6 +475,19 @@ function requireClientId(value: string | undefined): string {
     throw new BadRequestException('Missing "clientId" query parameter');
   }
   return clientId;
+}
+
+/** Parses a `?from=`/`?to=` query param into a Date, rejecting anything ambiguous. */
+function requireDate(value: string | undefined, paramName: string): Date {
+  const raw = (value ?? '').trim();
+  if (!raw) {
+    throw new BadRequestException(`Missing "${paramName}" query parameter`);
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new BadRequestException(`"${paramName}" is not a valid date: "${raw}"`);
+  }
+  return parsed;
 }
 
 /**

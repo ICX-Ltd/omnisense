@@ -3,7 +3,333 @@
 // Adding a provider means adding a SourceMapping here — no schema change, no
 // parser change. Everything provider-specific lives in this file.
 
-import { SourceMapping } from './mapping.types';
+import { SourceMapping, SqlSourceParams } from './mapping.types';
+
+// ─── ICX call-centre (SQL-sourced) ───────────────────────────────────────────
+//
+// Unlike LivePerson's raw CSV columns, this query already joins historycall +
+// Opportunity + dim.list (x2) + maxcontact.allocation.allocationqueue and
+// resolves clean, typed, sized values (LOWER(), CAST(), resolved names) — much
+// closer to the ad-hoc sql/interaction_build.sql's shape than to a file export.
+// So the FieldMap below is almost entirely direct 1:1 carries, no alias/
+// truncation rules needed.
+//
+// `icx-rep` is a SQL Server linked server configured at the instance level —
+// reachable via three/four-part names in any query run against this app's own
+// database (see sql-source-reader.ts), exactly like this codebase's existing
+// ad-hoc scripts (nmgb_survey_load.sql, sql/interaction_build.sql) already do.
+
+/**
+ * Which ICX campaign (dim.list.listgrouping value) each seeded client's calls
+ * live under. One more entry here is all a new client campaign needs — no new
+ * UI control, since the Client selector (already mandatory at stage time) is
+ * what picks this.
+ */
+const ICX_CAMPAIGN_BY_CLIENT: Record<string, string> = {
+  nmgb: 'NMGB Survey',
+};
+
+function resolveIcxCampaign(clientKey: string): string {
+  const campaign = ICX_CAMPAIGN_BY_CLIENT[clientKey];
+  if (!campaign) {
+    throw new Error(
+      `No ICX campaign mapping for client "${clientKey}" yet — add one to ` +
+        `ICX_CAMPAIGN_BY_CLIENT in source-mappings.ts.`,
+    );
+  }
+  return campaign;
+}
+
+/**
+ * "Ignore calls there's no point transcribing" — result codes that mean no
+ * useful conversation happened (no answer, refused, wrong number, ...). Kept
+ * as a named, reviewable constant rather than buried inline in the query text.
+ */
+const ICX_CALLS_EXCLUDED_RESULT_CODES = [
+  'AGAM',
+  'DECEASED',
+  'HKT',
+  'HKT_WARM',
+  'HKTCSREJ',
+  'NOANSWER',
+  'NPCB',
+  'REFUSED',
+  'REFUSEDDPA',
+  'WRONGNO',
+];
+
+function buildIcxCallsQuery(params: SqlSourceParams): { text: string; values: unknown[] } {
+  const campaign = resolveIcxCampaign(params.clientKey);
+  const excludedList = ICX_CALLS_EXCLUDED_RESULT_CODES.map((c) => `'${c}'`).join(', ');
+  return {
+    text: `
+      SELECT
+        historycall.[call recording]      AS recordingUrl,
+        CAST(history_id AS VARCHAR(50))   AS interactionId,
+        CAST(reference_id AS VARCHAR(50)) AS interactionTpsId,
+        list2.listgrouping                AS campaign,
+        historycall.start_date_time       AS interactionDateTime,
+        historycall.user_routing          AS agent,
+        historycall.result_code           AS outcome,
+        allocationqueue.maturitydate      AS maturityDate,
+        allocationqueue.make              AS vehicleMake,
+        allocationqueue.model             AS vehicleModel,
+        allocationqueue.dealername        AS dealer,
+        list.list                         AS campaignOriginal
+      FROM [icx-rep].bi.historycall WITH (NOLOCK)
+      INNER JOIN [icx-rep].bi.Opportunity WITH (NOLOCK)
+        ON Opportunity.[IDaction] = historycall.reference_id
+      INNER JOIN [icx-rep].dim.list WITH (NOLOCK)
+        ON [original list id] = list.idlist
+      INNER JOIN [icx-rep].dim.list list2 WITH (NOLOCK)
+        ON [list id] = list2.idlist
+      INNER JOIN maxcontact.allocation.allocationqueue
+        ON historycall.reference_id = allocationqueue.idaction
+      WHERE historycall.start_date_time BETWEEN @0 AND @1
+        AND ISNULL(historycall.[call recording], '') <> ''
+        AND historycall.result_code NOT IN (${excludedList})
+        AND list2.listgrouping = @2
+    `,
+    values: [params.from, params.to, campaign],
+  };
+}
+
+/**
+ * Builds an ICX-calls mapping for a given transcription engine. The operator
+ * picks Deepgram vs OpenAI by choosing which of the two registered sources to
+ * stage (see SOURCE_MAPPINGS below) rather than a separate per-run control —
+ * recordings.service.ts's transcribeOne branches on exactly this `provider`
+ * value, with the Deepgram path built specifically to work around MaxContact's
+ * non-Range download endpoint.
+ */
+function buildIcxCallsMapping(opts: {
+  key: string;
+  label: string;
+  provider: string;
+}): SourceMapping {
+  return {
+    key: opts.key,
+    label: opts.label,
+    version: '1',
+    sourceKind: 'sql',
+    sql: { buildQuery: buildIcxCallsQuery },
+    // Recordings are staged ahead of transcription — done later via this
+    // tool's own transcription pipeline, not at import time.
+    transcriptExpected: false,
+    // Unused for a SQL source (no file to sniff); dateOrder matters, since
+    // the SQL reader stringifies dates as naive ISO (see sql-source-reader.ts).
+    delimiter: 'auto',
+    dateOrder: 'iso',
+    multiValueDelimiter: ';',
+    naturalKeyCandidates: ['interactionId'],
+    fields: [
+      // interactionId is the natural key (derived by stageRow itself, not a
+      // FieldMap). interactionTpsId is mapped explicitly because it differs —
+      // reference_id is the underlying opportunity/action id, which can be
+      // shared across multiple call attempts to the same lead.
+      {
+        target: 'interactionTpsId',
+        column: 'interactionTpsId',
+        transform: 'trim',
+        maxLength: 50,
+        hardKey: true,
+      },
+      { target: 'campaign', column: 'campaign', transform: 'trim', maxLength: 50 },
+      { target: 'interactionDateTime', column: 'interactionDateTime', transform: 'datetime' },
+      { target: 'agent', column: 'agent', transform: 'trim', maxLength: 100 },
+      { target: 'outcome', column: 'outcome', transform: 'trim', maxLength: 200 },
+      { target: 'vehicleMake', column: 'vehicleMake', transform: 'trim', maxLength: 100 },
+      { target: 'vehicleModel', column: 'vehicleModel', transform: 'trim', maxLength: 100 },
+      { target: 'dealer', column: 'dealer', transform: 'trim', maxLength: 200 },
+      { target: 'recordingUrl', column: 'recordingUrl', transform: 'trim', maxLength: 2048 },
+      { target: 'maturityDate', column: 'maturityDate', transform: 'datetime' },
+    ],
+    transcript: {
+      column: '',
+      agentNameColumns: [],
+      agentLabels: [],
+      customerLabels: [],
+      systemLabels: [],
+      botLabels: [],
+    },
+    csat: { scoreMax: 5, commentColumns: [] },
+    survey: { type: '', pairs: [] },
+    pii: { dropColumns: [] },
+    interactionDefaults: {
+      provider: opts.provider,
+      interactionSource: 'maxcontact',
+      interactionType: 'call',
+      status: 'pending_transcription',
+    },
+  };
+}
+
+export const ICX_CALLS_DEEPGRAM_MAPPING = buildIcxCallsMapping({
+  key: 'icx_calls',
+  label: 'ICX Call Centre (calls — Deepgram transcription)',
+  provider: 'deepgram',
+});
+
+export const ICX_CALLS_OPENAI_MAPPING = buildIcxCallsMapping({
+  key: 'icx_calls_openai',
+  label: 'ICX Call Centre (calls — OpenAI transcription)',
+  provider: 'openai',
+});
+
+// ─── ICX survey (attaches to an already-promoted icx_calls interaction) ─────
+//
+// Adapts backend/sql/nmgb_survey_load.sql — which already builds the exact
+// nested answersJson shape the Survey Insights dashboards depend on
+// (competitor_purchase.make, purchase_status.still_considering, ...) — into a
+// SELECT instead of an INSERT. That shape does NOT fit the flat SurveyAnswer[]
+// LivePerson's inline Q&A pairs produce, so this uses `survey.rawJsonColumn`
+// to carry the FOR JSON PATH subquery's output straight through unchanged
+// rather than flattening it.
+function buildIcxSurveyQuery(params: SqlSourceParams): { text: string; values: unknown[] } {
+  const campaign = resolveIcxCampaign(params.clientKey);
+  return {
+    text: `
+      SELECT
+        i.interactionId                          AS interactionId,
+        i.interactionTpsId                        AS interactionTpsId,
+        i.campaign                                AS campaign,
+        i.recordingUrl                            AS recordingUrl,
+        i.interactionDateTime                     AS interactionDateTime,
+        i.interactionDateTime                     AS respondedAt,
+        (
+          SELECT
+            'NMGB'                                                 AS [survey],
+            s.[IDOpportunity]                                      AS [meta.id_opportunity],
+            s.[Survey Data Status]                                 AS [meta.data_status],
+            s.[Survey Flow Status]                                 AS [meta.flow_status],
+            s.[P2 Q1 Has Not Purchased Yet]                        AS [purchase_status.has_not_purchased_yet],
+            s.[P2 Q2 Still Considering]                            AS [purchase_status.still_considering],
+            s.[P3 Q1 Interest Follow Up]                           AS [follow_up_interest],
+            s.[P4 Q1 Initial Interest Styling Design]              AS [initial_interest.styling_design],
+            s.[P4 Q1 Initial Interest Brand Reputation]            AS [initial_interest.brand_reputation],
+            s.[P4 Q1 Initial Interest Brand Loyalty]               AS [initial_interest.brand_loyalty],
+            s.[P4 Q1 Initial Interest Recommendation]              AS [initial_interest.recommendation],
+            s.[P4 Q1 Initial Interest Features]                    AS [initial_interest.features],
+            s.[P4 Q1 Initial Interest Size Practicality]           AS [initial_interest.size_practicality],
+            s.[P4 Q1 Initial Interest Performance]                 AS [initial_interest.performance],
+            s.[P4 Q1 Initial Interest Price Value]                 AS [initial_interest.price_value],
+            s.[P4 Q1 Initial Interest Other]                       AS [initial_interest.other],
+            s.[P4 Q1 Initial Interest Other Feedback]              AS [initial_interest.other_feedback],
+            s.[P4 Q2 Did you visit]                                AS [dealer_visit.visited],
+            s.[P4 Q2a Impression of Vehicle]                       AS [dealer_visit.vehicle_impression],
+            s.[P4 Q2b Why No Test Drive]                           AS [dealer_visit.why_no_test_drive],
+            s.[P4 Q3 Dealership Rating]                            AS [dealership_rating.score],
+            s.[P4 Q3a Dealership Rating Feedback]                  AS [dealership_rating.feedback],
+            s.[P4 Q4 Not Purchase Reason Price]                    AS [not_purchased_reasons.price],
+            s.[P4 Q4 Not Purchase Reason Price Sub Reason]         AS [not_purchased_reasons.price_sub_reason],
+            s.[P4 Q4 Not Purchase Reason Expectations]             AS [not_purchased_reasons.expectations],
+            s.[P4 Q4 Not Purchase Reason Expectations Sub Reason]  AS [not_purchased_reasons.expectations_sub_reason],
+            s.[P4 Q4 Not Purchase Reason Purchase Different Brand] AS [not_purchased_reasons.different_brand],
+            s.[P4 Q4 Not Purchase Reason Purchase Different Client Model] AS [not_purchased_reasons.different_client_model],
+            s.[P4 Q4 Not Purchase Reason Financing]                AS [not_purchased_reasons.financing],
+            s.[P4 Q4 Not Purchase Reason Financing Sub Reason]     AS [not_purchased_reasons.financing_sub_reason],
+            s.[P4 Q4 Not Purchase Reason Dealership Experience]    AS [not_purchased_reasons.dealership_experience],
+            s.[P4 Q4 Not Purchase Reason Dealership Experience Sub Reason] AS [not_purchased_reasons.dealership_experience_sub_reason],
+            s.[P4 Q4 Not Purchase Reason No Interest in EVs]       AS [not_purchased_reasons.no_interest_in_evs],
+            s.[P4 Q4 Not Purchase Reason Purchased MOI on Record]  AS [not_purchased_reasons.purchased_moi_on_record],
+            s.[P4 Q4 Not Purchase Reason Other]                    AS [not_purchased_reasons.other],
+            s.[P4 Q4 Not Purchase Reason Other Feedback]           AS [not_purchased_reasons.other_feedback],
+            s.[P4 Q5 Purchase Another Vehicle]                     AS [competitor_purchase.purchased_another_vehicle],
+            s.[P4 Q5 Purchase Make]                                AS [competitor_purchase.make],
+            s.[P4 Q5 Purchase Model]                               AS [competitor_purchase.model],
+            s.[P4 Q5 Purchase Other Model Not Listed]              AS [competitor_purchase.other_model_not_listed],
+            s.[P4 Q5 Purchase New Used]                            AS [competitor_purchase.new_used],
+            s.[P4 Q6 Influenced APR Lower]                         AS [influenced_by.apr_lower],
+            s.[P4 Q6 Influenced Better Value]                      AS [influenced_by.better_value],
+            s.[P4 Q6 Influenced Brand Loyalty]                     AS [influenced_by.brand_loyalty],
+            s.[P4 Q6 Influenced Colour Spec Pref]                  AS [influenced_by.colour_spec_pref],
+            s.[P4 Q6 Influenced Comfortable Interior]              AS [influenced_by.comfortable_interior],
+            s.[P4 Q6 Influenced Customer Service]                  AS [influenced_by.customer_service],
+            s.[P4 Q6 Influenced Discount]                          AS [influenced_by.discount],
+            s.[P4 Q6 Influenced Drive Of Vehicle]                  AS [influenced_by.drive_of_vehicle],
+            s.[P4 Q6 Influenced Enhanced Features]                 AS [influenced_by.enhanced_features],
+            s.[P4 Q6 Influenced Longer Warranty]                   AS [influenced_by.longer_warranty],
+            s.[P4 Q6 Influenced Monthly Payments Lower]            AS [influenced_by.monthly_payments_lower],
+            s.[P4 Q6 Influenced Powertrain Options]                AS [influenced_by.powertrain_options],
+            s.[P4 Q6 Influenced Pref Design]                       AS [influenced_by.pref_design],
+            s.[P4 Q6 Influenced Quicker Delivery]                  AS [influenced_by.quicker_delivery],
+            s.[P4 Q6 Influenced Size]                              AS [influenced_by.size],
+            s.[P4 Q6 Influenced Try Different]                     AS [influenced_by.try_different],
+            s.[P4 Q6 Influenced Purchased MOI on Record]           AS [influenced_by.purchased_moi_on_record],
+            s.[P4 Q6 Influenced Other]                             AS [influenced_by.other],
+            s.[P4 Q6 Influenced Other Feedback]                    AS [influenced_by.other_feedback],
+            s.[P4 Q7 Purchase Reason For]                          AS [purchase_reason],
+            s.[P4 Q8 Improve Anything Different]                   AS [improvements.anything_different],
+            s.[P4 Q9 Improve Follow Up]                            AS [improvements.follow_up],
+            s.[Agent Notes]                                        AS [agent_notes],
+            s.[Complaint Type]                                     AS [complaint.type],
+            s.[Complaint Type Category]                            AS [complaint.category]
+          FROM [icx-rep].[bi].[LeadDataSurvey_NMGB] s
+          WHERE LTRIM(RTRIM(s.[Call Recording])) = LTRIM(RTRIM(i.recordingUrl)) COLLATE DATABASE_DEFAULT
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        ) AS answersJsonRaw
+      FROM app.interactions i
+      WHERE i.campaign = @0
+        AND i.interactionDateTime BETWEEN @1 AND @2
+        AND EXISTS (
+          SELECT 1 FROM [icx-rep].[bi].[LeadDataSurvey_NMGB] s
+          WHERE LTRIM(RTRIM(s.[Call Recording])) = LTRIM(RTRIM(i.recordingUrl)) COLLATE DATABASE_DEFAULT
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM app.interaction_survey xs WHERE xs.recordingId = i.id
+        )
+    `,
+    values: [campaign, params.from, params.to],
+  };
+}
+
+export const ICX_SURVEY_MAPPING: SourceMapping = {
+  key: 'icx_survey',
+  label: 'ICX Survey (attaches to an existing call)',
+  version: '1',
+  sourceKind: 'sql',
+  sql: { buildQuery: buildIcxSurveyQuery },
+  attachToExisting: { matchColumn: 'recordingUrl' },
+  transcriptExpected: false,
+  delimiter: 'auto',
+  dateOrder: 'iso',
+  multiValueDelimiter: ';',
+  naturalKeyCandidates: ['interactionId'],
+  fields: [
+    {
+      target: 'interactionTpsId',
+      column: 'interactionTpsId',
+      transform: 'trim',
+      maxLength: 50,
+      hardKey: true,
+    },
+    { target: 'campaign', column: 'campaign', transform: 'trim', maxLength: 50 },
+    { target: 'interactionDateTime', column: 'interactionDateTime', transform: 'datetime' },
+    { target: 'recordingUrl', column: 'recordingUrl', transform: 'trim', maxLength: 2048 },
+    { target: 'csatRespondedAt', column: 'respondedAt', transform: 'datetime' },
+  ],
+  transcript: {
+    column: '',
+    agentNameColumns: [],
+    agentLabels: [],
+    customerLabels: [],
+    systemLabels: [],
+    botLabels: [],
+  },
+  csat: { scoreMax: 5, commentColumns: [] },
+  // 'nmgb' matches the surveyType nmgb_survey_load.sql already writes, so rows
+  // loaded either way land in the same namespace.
+  survey: { type: 'nmgb', pairs: [], rawJsonColumn: 'answersJsonRaw' },
+  pii: { dropColumns: [] },
+  interactionDefaults: {
+    // Never read in attach mode — promote skips the interactions INSERT
+    // entirely — but the type requires the shape.
+    provider: 'n/a',
+    interactionSource: 'maxcontact',
+    interactionType: 'call',
+    status: 'pending_transcription',
+  },
+};
 
 /**
  * LivePerson Conversational Cloud tabular export (RAC chat).
@@ -238,6 +564,9 @@ export const LIVEPERSON_MAPPING: SourceMapping = {
 
 export const SOURCE_MAPPINGS: Record<string, SourceMapping> = {
   [LIVEPERSON_MAPPING.key]: LIVEPERSON_MAPPING,
+  [ICX_CALLS_DEEPGRAM_MAPPING.key]: ICX_CALLS_DEEPGRAM_MAPPING,
+  [ICX_CALLS_OPENAI_MAPPING.key]: ICX_CALLS_OPENAI_MAPPING,
+  [ICX_SURVEY_MAPPING.key]: ICX_SURVEY_MAPPING,
 };
 
 export function getSourceMapping(key: string): SourceMapping | undefined {

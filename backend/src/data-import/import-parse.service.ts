@@ -7,7 +7,7 @@
 // `total` is written at the end and the UI shows a row counter rather than a
 // percentage bar.
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -16,8 +16,9 @@ import { BatchJob } from '../db/entities/batch-job.entity';
 import { ImportConversation } from '../db/entities/import-conversation.entity';
 import { ImportMessage } from '../db/entities/import-message.entity';
 import { ImportRun } from '../db/entities/import-run.entity';
-import { SourceMapping } from './mappings/mapping.types';
+import { SourceMapping, SourceRow } from './mappings/mapping.types';
 import { ReaderPlan, iterateRows, planRead } from './helpers/delimited-reader';
+import { readSqlSource } from './helpers/sql-source-reader';
 import {
   StagedRow,
   resolveNaturalKeyColumn,
@@ -213,6 +214,200 @@ export class ImportParseService implements OnModuleInit {
   }
 
   /**
+   * Creates the run + job rows and kicks off a SQL-source pull, staging the
+   * whole result set. Sibling to startParse() for file intake: same run/job
+   * bookkeeping, different acquisition — a bounded date-range query rather
+   * than a file stream, so it is read into memory in one shot instead of
+   * streamed.
+   */
+  async startSqlParse(args: {
+    sourceKey: string;
+    mapping: SourceMapping;
+    displayName: string;
+    clientId: string;
+    clientKey: string;
+    from: Date;
+    to: Date;
+    provider?: string;
+    createdBy?: string | null;
+  }): Promise<{ runId: string; jobId: string; rowsPulled: number }> {
+    if (!args.mapping.sql) {
+      throw new BadRequestException(`Source "${args.sourceKey}" has no SQL configuration`);
+    }
+
+    const query = args.mapping.sql.buildQuery({
+      from: args.from,
+      to: args.to,
+      clientKey: args.clientKey,
+      provider: args.provider,
+    });
+    const { headers, rows } = await readSqlSource(this.ds, query);
+
+    const naturalKeyColumn = resolveNaturalKeyColumn(
+      headers,
+      args.mapping,
+      rows.slice(0, 20),
+    );
+
+    const run = await this.runsRepo.save(
+      this.runsRepo.create({
+        sourceKey: args.sourceKey,
+        mappingVersion: args.mapping.version,
+        intake: 'sql',
+        originalFilename: args.displayName,
+        headerJson: JSON.stringify(headers),
+        naturalKeyColumn,
+        status: 'parsing',
+        createdBy: args.createdBy ?? null,
+        clientId: args.clientId,
+        notes: `Pulled ${args.from.toISOString().slice(0, 10)} to ${args.to.toISOString().slice(0, 10)}`,
+      }),
+    );
+
+    const job = await this.jobRepo.save(
+      this.jobRepo.create({
+        type: 'import_parse',
+        // Unlike a streaming file parse, the total is known up front here.
+        status: 'running',
+        total: rows.length,
+        progress: 0,
+        errorCount: 0,
+        provider: args.sourceKey,
+        completedAt: null,
+      }),
+    );
+    await this.runsRepo.update(run.id, { parseJobId: job.id });
+
+    setImmediate(() => {
+      this.runSqlParseBackground(run.id, job.id, headers, rows, args.mapping, naturalKeyColumn).catch(
+        async (err) => {
+          this.logger.error(
+            `[import] sql parse failed for run ${run.id}: ${describeError(err)}`,
+          );
+          await this.failRun(run.id, job.id, describeError(err));
+        },
+      );
+    });
+
+    return { runId: run.id, jobId: job.id, rowsPulled: rows.length };
+  }
+
+  /**
+   * Stages an in-memory SQL result set. Mirrors runParseBackground's per-row
+   * loop, buffering and set-based validation passes — the only difference is
+   * the source is a bounded array already in memory rather than a file
+   * stream, so there is no "unreadable record" concept to track.
+   */
+  private async runSqlParseBackground(
+    runId: string,
+    jobId: string,
+    headers: string[],
+    rows: SourceRow[],
+    mapping: SourceMapping,
+    naturalKeyColumn: string | null,
+  ): Promise<void> {
+    let rowsStaged = 0;
+    let messagesStaged = 0;
+    const statusCounts: Record<string, number> = {};
+    const transcriptCounts: Record<string, number> = {};
+
+    let convBuffer: Array<Partial<ImportConversation>> = [];
+    let msgBuffer: Array<Partial<ImportMessage>> = [];
+
+    const convChunk = chunkSizeFor(this.convRepo.metadata.columns.length);
+    const msgChunk = chunkSizeFor(this.msgRepo.metadata.columns.length);
+
+    const flush = async () => {
+      if (convBuffer.length) {
+        for (let i = 0; i < convBuffer.length; i += convChunk) {
+          await this.convRepo.insert(convBuffer.slice(i, i + convChunk));
+        }
+      }
+      if (msgBuffer.length) {
+        for (let i = 0; i < msgBuffer.length; i += msgChunk) {
+          await this.msgRepo.insert(msgBuffer.slice(i, i + msgChunk));
+        }
+      }
+      const staged = convBuffer.length;
+      convBuffer = [];
+      msgBuffer = [];
+      if (staged) {
+        await this.jobRepo.increment({ id: jobId }, 'progress', staged);
+      }
+    };
+
+    const bufferLimit = Math.max(
+      1,
+      Number(process.env.IMPORT_STAGE_CHUNK_ROWS ?? 200) || 200,
+    );
+
+    let rowNumber = 0;
+    for (const row of rows) {
+      rowNumber++;
+      const staged = stageRow({ row, headers, rowNumber, mapping, naturalKeyColumn });
+
+      statusCounts[staged.validationStatus] =
+        (statusCounts[staged.validationStatus] ?? 0) + 1;
+      transcriptCounts[staged.transcript.status] =
+        (transcriptCounts[staged.transcript.status] ?? 0) + 1;
+
+      const conversationStageId = randomUUID();
+      convBuffer.push(this.toConversationRow(conversationStageId, runId, staged, mapping));
+      for (const m of staged.transcript.messages) {
+        msgBuffer.push({
+          importRunId: runId,
+          conversationStageId,
+          rowNumber: staged.rowNumber,
+          seq: m.seq,
+          source: m.source,
+          sender: m.sender ? m.sender.slice(0, 200) : null,
+          timestampText: m.timestampText,
+          timestampIso: m.timestampIso,
+          dayOffset: m.dayOffset,
+          content: m.content,
+          charCount: m.content.length,
+          isAuto: m.isAuto,
+          isHandover: m.isHandover,
+          includedInTranscript: m.includedInTranscript,
+          parseWarning: m.parseWarning ? m.parseWarning.slice(0, 200) : null,
+        });
+      }
+      rowsStaged++;
+      messagesStaged += staged.transcript.messages.length;
+
+      if (convBuffer.length >= bufferLimit) await flush();
+    }
+    await flush();
+
+    await this.runsRepo.update(runId, {
+      rowsRead: rows.length,
+      rowsStaged,
+      rowsSkipped: 0,
+      messagesStaged,
+      transcriptsParsed: transcriptCounts.parsed ?? 0,
+      transcriptsPartial: transcriptCounts.partial ?? 0,
+      transcriptsFailed:
+        (transcriptCounts.unparsed ?? 0) + (transcriptCounts.empty ?? 0),
+    });
+
+    await this.runValidationPasses(runId);
+    await this.refreshRunCounts(runId);
+
+    await this.runsRepo.update(runId, { status: 'staged', stagedAt: new Date() });
+    await this.jobRepo.update(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+      total: rows.length,
+      errorCount: 0,
+      errorsJson: null,
+    });
+
+    this.logger.log(
+      `[import] run ${runId} staged (sql): ${rowsStaged} rows, ${messagesStaged} messages`,
+    );
+  }
+
+  /**
    * Streams the file into staging.
    *
    * Deliberately NOT wrapped in a single transaction: a 200k-row transaction
@@ -379,6 +574,9 @@ export class ImportParseService implements OnModuleInit {
       outcome: p.outcome,
       vehicleMake: p.vehicleMake,
       vehicleModel: p.vehicleModel,
+      recordingUrl: p.recordingUrl,
+      maturityDate: p.maturityDate,
+      daysToMaturityAtInteraction: p.daysToMaturityAtInteraction,
       skill: p.skill,
       agentGroup: p.agentGroup,
       lob: p.lob,
@@ -398,9 +596,9 @@ export class ImportParseService implements OnModuleInit {
       alertedMcs: p.alertedMcs,
       surveyType: p.surveyType,
       surveyStatus: p.surveyStatus,
-      surveyAnswersJson: staged.surveyAnswers.length
-        ? JSON.stringify(staged.surveyAnswers)
-        : null,
+      surveyAnswersJson:
+        staged.rawSurveyJson ??
+        (staged.surveyAnswers.length ? JSON.stringify(staged.surveyAnswers) : null),
       transcriptRaw: p.transcriptRaw,
       transcriptJson: staged.transcript.transcriptJson,
       transcriptMessageCount: staged.transcript.includedCount,

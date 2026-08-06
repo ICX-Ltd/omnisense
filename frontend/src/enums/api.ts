@@ -86,6 +86,7 @@ export const ApiPath = {
   DataImportPreviewServer: "/uiapi/data-import/runs/preview-server",
   DataImportStageUpload: "/uiapi/data-import/runs/upload", // POST multipart
   DataImportStageServer: "/uiapi/data-import/runs/server",
+  DataImportStageSql: "/uiapi/data-import/runs/sql",
   DataImportRuns: "/uiapi/data-import/runs", // + /:id, /:id/rows, /:id/rekey, /:id/promote, ...
   DataImportDedupeReport: "/uiapi/data-import/dedupe-report",
 } as const;

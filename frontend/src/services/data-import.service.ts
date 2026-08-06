@@ -28,6 +28,8 @@ export interface SourceInfo {
   key: string;
   label: string;
   version: string;
+  /** 'sql' sources pull via a date-range query instead of a file. */
+  sourceKind: "file" | "sql";
   delimiter: string;
   dateOrder: string;
   naturalKeyCandidates: string[];
@@ -327,6 +329,27 @@ export async function stageServerFile(
     ApiPath.DataImportStageServer,
     null,
     { params: { sourceKey, file: fileName, clientId, naturalKeyColumn } },
+  );
+  return data;
+}
+
+export interface StartSqlRunResult {
+  runId: string;
+  jobId: string;
+  rowsPulled: number;
+}
+
+/** Stages a SQL-source pull (e.g. ICX call-centre calls/survey) for a date range. */
+export async function stageSql(
+  sourceKey: string,
+  clientId: string,
+  from: string,
+  to: string,
+): Promise<StartSqlRunResult> {
+  const { data } = await api.post<StartSqlRunResult>(
+    ApiPath.DataImportStageSql,
+    null,
+    { params: { sourceKey, clientId, from, to } },
   );
   return data;
 }
