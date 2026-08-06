@@ -138,6 +138,7 @@ export interface RunCounts {
 export interface ImportRunSummary {
   id: string;
   sourceKey: string;
+  clientId: string | null;
   mappingVersion: string | null;
   intake: "upload" | "server";
   originalFilename: string | null;
@@ -296,6 +297,7 @@ export async function previewServerFile(
 export async function stageUpload(
   file: File,
   sourceKey: string,
+  clientId: string,
   naturalKeyColumn?: string,
   onProgress?: (percent: number) => void,
 ): Promise<StartRunResult> {
@@ -305,7 +307,7 @@ export async function stageUpload(
     ApiPath.DataImportStageUpload,
     form,
     {
-      params: { sourceKey, naturalKeyColumn },
+      params: { sourceKey, clientId, naturalKeyColumn },
       headers: { "Content-Type": "multipart/form-data" },
       onUploadProgress: (e) => {
         if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -318,12 +320,13 @@ export async function stageUpload(
 export async function stageServerFile(
   fileName: string,
   sourceKey: string,
+  clientId: string,
   naturalKeyColumn?: string,
 ): Promise<StartRunResult> {
   const { data } = await api.post<StartRunResult>(
     ApiPath.DataImportStageServer,
     null,
-    { params: { sourceKey, file: fileName, naturalKeyColumn } },
+    { params: { sourceKey, file: fileName, clientId, naturalKeyColumn } },
   );
   return data;
 }

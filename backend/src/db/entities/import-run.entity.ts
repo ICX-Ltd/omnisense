@@ -40,6 +40,16 @@ export class ImportRun {
   @Column({ type: 'varchar', length: 16 })
   intake!: ImportIntake;
 
+  /**
+   * Client this run's interactions belong to — stamped once here and copied
+   * onto every app.interactions row the promote step creates (see
+   * import-promote.service.ts), the same way sourceKey becomes
+   * interactionSource. Nullable only for parity with app.interactions.clientId;
+   * the UI requires a selection before staging can start.
+   */
+  @Column({ type: 'uniqueidentifier', nullable: true })
+  clientId!: string | null;
+
   @Column({ type: 'nvarchar', length: 400, nullable: true })
   originalFilename!: string | null;
 

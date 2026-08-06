@@ -3930,6 +3930,7 @@ ${prompt}
         providerUsed: parts[1] || null,
         campaign: parts[2] && parts[2] !== 'all' ? parts[2] : null,
         agent: parts[3] && parts[3] !== 'all' ? parts[3] : null,
+        clientId: r.clientId,
         createdAt: r.createdAt.toISOString(),
         model: r.model,
         narrative: r.narrativeJson ? safeParseJson(r.narrativeJson) : null,

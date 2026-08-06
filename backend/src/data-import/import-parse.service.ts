@@ -52,6 +52,8 @@ export interface StartParseArgs {
   intake: 'upload' | 'server';
   /** Path recorded on the run; only meaningful for server-inbox intake. */
   serverPath?: string | null;
+  /** Stamped onto every interaction this run promotes — see import-promote.service.ts. */
+  clientId?: string | null;
   naturalKeyColumnOverride?: string;
   createdBy?: string | null;
   /**
@@ -161,6 +163,7 @@ export class ImportParseService implements OnModuleInit {
         naturalKeyColumn,
         status: 'parsing',
         createdBy: args.createdBy ?? null,
+        clientId: args.clientId ?? null,
       }),
     );
 

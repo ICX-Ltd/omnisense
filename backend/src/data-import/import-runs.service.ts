@@ -343,6 +343,7 @@ export class ImportRunsService {
     const base = {
       id: run.id,
       sourceKey: run.sourceKey,
+      clientId: run.clientId,
       mappingVersion: run.mappingVersion,
       intake: run.intake,
       originalFilename: run.originalFilename,

@@ -4,6 +4,13 @@ import axios from "axios";
 import { computed, onMounted, ref } from "vue";
 import { ApiPath } from "@/enums/api";
 import NarrativeBriefing from "@/components/NarrativeBriefing.vue";
+import { listClients, type ClientDef } from "@/services/clients.service";
+
+const clients = ref<ClientDef[]>([]);
+function clientName(id: string | null | undefined): string | null {
+  if (!id) return null;
+  return clients.value.find((c) => c.id === id)?.name ?? null;
+}
 
 const filterKey = ref<string>("");
 const narrativeType = ref<string>("");
@@ -54,6 +61,8 @@ function labelForEntry(entry: any): string {
   if (entry.narrativeType && entry.narrativeType !== "generic") tags.push(entry.narrativeType.replace(/_/g, " "));
   if (entry.campaign) tags.push(`campaign: ${entry.campaign}`);
   if (entry.agent) tags.push(`agent: ${entry.agent}`);
+  const client = clientName(entry.clientId);
+  if (client) tags.push(`client: ${client}`);
   if (tags.length) parts.push(`[${tags.join(" | ")}]`);
 
   return parts.join(" ");
@@ -145,7 +154,15 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  // Non-fatal: a 'client'-role login can't read /uiapi/clients (it's an
+  // internal-staff endpoint) and doesn't need the tag — it only ever sees
+  // its own narratives anyway.
+  listClients()
+    .then((c) => (clients.value = c))
+    .catch(() => {});
+  void load();
+});
 </script>
 
 <template>

@@ -71,7 +71,8 @@
                   <button
                     class="btn btn--primary btn--sm"
                     @click="doStageServer(f.name)"
-                    :disabled="busy"
+                    :disabled="busy || !clientId"
+                    :title="!clientId ? 'Select a client first' : ''"
                   >
                     Stage
                   </button>
@@ -131,7 +132,8 @@
               <button
                 class="btn btn--primary"
                 @click="doStageUpload"
-                :disabled="!file || busy"
+                :disabled="!file || busy || !clientId"
+                :title="!clientId ? 'Select a client first' : ''"
               >
                 Stage
               </button>
@@ -153,6 +155,18 @@
                 {{ s.label }} (v{{ s.version }})
               </option>
             </select>
+
+            <div class="hint" style="margin-top: 10px; margin-bottom: 4px">
+              Client — every interaction this run creates is stamped with it.
+            </div>
+            <select class="select" v-model="clientId">
+              <option value="">Select a client…</option>
+              <option v-for="c in clients" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <div v-if="!clientId" class="hint hint--warn">
+              Required before staging can start.
+            </div>
+
             <div v-if="activeSource" class="kv-block">
               <div class="kv">
                 <span>Conversation key</span>
@@ -360,6 +374,7 @@
                 <th>Started</th>
                 <th>File</th>
                 <th>Source</th>
+                <th>Client</th>
                 <th>In</th>
                 <th>Status</th>
                 <th>Rows</th>
@@ -379,6 +394,7 @@
                   {{ r.originalFilename ?? "—" }}
                 </td>
                 <td>{{ r.sourceKey }}</td>
+                <td>{{ clientName(r.clientId) }}</td>
                 <td>{{ r.intake }}</td>
                 <td>
                   <span :class="runStatusChip(r.status)">{{ r.status }}</span>
@@ -454,9 +470,12 @@ import {
   type ServerFile,
   type SourceInfo,
 } from "../services/data-import.service";
+import { listClients, type ClientDef } from "@/services/clients.service";
 
 const sources = ref<SourceInfo[]>([]);
 const sourceKey = ref<string>("liveperson");
+const clients = ref<ClientDef[]>([]);
+const clientId = ref<string>("");
 const serverFiles = ref<ServerFile[]>([]);
 const serverFilesError = ref("");
 const runs = ref<ImportRunSummary[]>([]);
@@ -546,6 +565,15 @@ async function loadSources() {
   }
 }
 
+async function loadClients() {
+  clients.value = await listClients();
+}
+
+function clientName(id: string | null): string {
+  if (!id) return "—";
+  return clients.value.find((c) => c.id === id)?.name ?? "—";
+}
+
 async function loadServerFiles() {
   serverFilesError.value = "";
   try {
@@ -566,7 +594,7 @@ async function refreshAll() {
   loading.value = true;
   errorMsg.value = "";
   try {
-    await Promise.all([loadSources(), loadServerFiles(), loadRuns()]);
+    await Promise.all([loadSources(), loadClients(), loadServerFiles(), loadRuns()]);
   } catch (e) {
     errorMsg.value = describe(e);
   } finally {
@@ -607,7 +635,7 @@ async function doPreviewServer(name: string) {
 }
 
 async function doStageUpload() {
-  if (!file.value) return;
+  if (!file.value || !clientId.value) return;
   busy.value = true;
   errorMsg.value = "";
   uploadPercent.value = 0;
@@ -615,6 +643,7 @@ async function doStageUpload() {
     const res = await stageUpload(
       file.value,
       sourceKey.value,
+      clientId.value,
       undefined,
       (p) => (uploadPercent.value = p),
     );
@@ -628,10 +657,11 @@ async function doStageUpload() {
 }
 
 async function doStageServer(name: string) {
+  if (!clientId.value) return;
   busy.value = true;
   errorMsg.value = "";
   try {
-    const res = await stageServerFile(name, sourceKey.value);
+    const res = await stageServerFile(name, sourceKey.value, clientId.value);
     afterStage(res.runId, res.duplicateOfRunId);
   } catch (e) {
     errorMsg.value = describe(e);

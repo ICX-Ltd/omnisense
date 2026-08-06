@@ -90,6 +90,20 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_account_client')
     FOREIGN KEY (client_id) REFERENCES app.clients(id);
 GO
 
+-- ── app.import_runs.clientId (stamped onto every interaction the run creates) ─
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('app.import_runs') AND name = 'clientId'
+)
+BEGIN
+  ALTER TABLE app.import_runs ADD clientId uniqueidentifier NULL;
+END;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_import_runs_client')
+  ALTER TABLE app.import_runs ADD CONSTRAINT FK_import_runs_client
+    FOREIGN KEY (clientId) REFERENCES app.clients(id);
+GO
+
 -- =============================================================================
 -- Backfill — CONSERVATIVE ON PURPOSE.
 -- =============================================================================

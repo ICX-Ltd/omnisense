@@ -148,6 +148,7 @@ export class DataImportController {
   @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
   async stageUpload(
     @Query('sourceKey') sourceKey: string,
+    @Query('clientId') clientId: string,
     @Query('naturalKeyColumn') naturalKeyColumn?: string,
     @UploadedFile() file?: Express.Multer.File,
     @Headers('authorization') auth?: string,
@@ -167,6 +168,7 @@ export class DataImportController {
       intake: 'upload',
       naturalKeyColumnOverride: naturalKeyColumn || undefined,
       createdBy: roleId,
+      clientId: requireClientId(clientId),
       deleteFileWhenDone: true,
     });
   }
@@ -179,6 +181,7 @@ export class DataImportController {
   async stageServerFile(
     @Query('sourceKey') sourceKey: string,
     @Query('file') fileName: string,
+    @Query('clientId') clientId: string,
     @Query('naturalKeyColumn') naturalKeyColumn?: string,
     @Headers('authorization') auth?: string,
   ) {
@@ -197,6 +200,7 @@ export class DataImportController {
       serverPath: filePath,
       naturalKeyColumnOverride: naturalKeyColumn || undefined,
       createdBy: roleId,
+      clientId: requireClientId(clientId),
       // The inbox file is the operator's; never delete it.
       deleteFileWhenDone: false,
     });
@@ -418,6 +422,18 @@ function requireSourceKey(value: string | undefined): string {
     throw new BadRequestException('Missing "sourceKey" query parameter');
   }
   return key;
+}
+
+// Every interaction a run promotes is stamped with this client (see
+// import-promote.service.ts), so staging refuses to start without one — the
+// same "safe by default" principle as the clientId backfill: an unassigned
+// interaction is only ever visible to internal staff, never a client login.
+function requireClientId(value: string | undefined): string {
+  const clientId = (value ?? '').trim();
+  if (!clientId) {
+    throw new BadRequestException('Missing "clientId" query parameter');
+  }
+  return clientId;
 }
 
 /**

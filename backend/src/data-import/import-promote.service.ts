@@ -177,7 +177,7 @@ export class ImportPromoteService {
     });
 
     setImmediate(() => {
-      this.runPromoteBackground(runId, job.id, mapping).catch(async (err) => {
+      this.runPromoteBackground(runId, job.id, mapping, run.clientId).catch(async (err) => {
         this.logger.error(
           `[import] promote failed for run ${runId}: ${describeError(err)}`,
         );
@@ -200,6 +200,7 @@ export class ImportPromoteService {
     runId: string,
     jobId: string,
     mapping: SourceMapping,
+    clientId: string | null,
   ): Promise<void> {
     const batchSize = promoteBatchRows();
     const maxScore = csatAssessMaxScore();
@@ -212,7 +213,7 @@ export class ImportPromoteService {
     };
 
     for (;;) {
-      const claimed = await this.promoteChunk(runId, mapping, maxScore, batchSize);
+      const claimed = await this.promoteChunk(runId, mapping, maxScore, batchSize, clientId);
       if (claimed.claimed === 0) break;
 
       totals = {
@@ -260,6 +261,7 @@ export class ImportPromoteService {
     mapping: SourceMapping,
     maxScore: number,
     batchSize: number,
+    clientId: string | null,
   ): Promise<{
     claimed: number;
     interactions: number;
@@ -305,12 +307,14 @@ export class ImportPromoteService {
         `INSERT INTO app.interactions
            (id, provider, status, createdAt, updatedAt, interactionSource,
             interactionType, interactionId, interactionTpsId, campaign, agent,
-            interactionDateTime, outcome, dealer, vehicleMake, vehicleModel, hasCsat)
+            interactionDateTime, outcome, dealer, vehicleMake, vehicleModel, hasCsat,
+            clientId)
          SELECT c.promotedInteractionId, @1, @2, SYSUTCDATETIME(), SYSUTCDATETIME(),
                 c.sourceKey, @3, c.interactionId, c.interactionTpsId, c.campaign,
                 c.agent, c.interactionDateTime, c.outcome, c.dealer,
                 c.vehicleMake, c.vehicleModel,
-                CASE WHEN c.csatScore IS NOT NULL THEN 1 ELSE NULL END
+                CASE WHEN c.csatScore IS NOT NULL THEN 1 ELSE NULL END,
+                @4
            FROM app.import_conversations c
           WHERE c.importRunId = @0
             AND c.promotedInteractionId IS NOT NULL
@@ -319,7 +323,7 @@ export class ImportPromoteService {
                              WHERE i.interactionSource = c.sourceKey
                                AND i.interactionId = c.interactionId);
          SELECT @@ROWCOUNT AS n;`,
-        [runId, defaults.provider, defaults.status, defaults.interactionType],
+        [runId, defaults.provider, defaults.status, defaults.interactionType, clientId],
       );
 
       // ── Step 2: app.interaction_transcripts ───────────────────────────────
