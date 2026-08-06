@@ -2970,12 +2970,12 @@ ${prompt}
   // OPS: SINGLE INTERACTION DETAIL
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async searchInteractions(rawQuery: string, limit = 10) {
+  async searchInteractions(rawQuery: string, limit = 10, clientId?: string) {
     const query = (rawQuery ?? '').trim();
     if (query.length < 3) return [];
 
     const like = `%${query}%`;
-    const rows = await this.recordingsRepo
+    const qb = this.recordingsRepo
       .createQueryBuilder('i')
       .leftJoin(InteractionInsight, 'ins', 'ins.recordingId = i.id')
       .select([
@@ -2991,7 +2991,9 @@ ${prompt}
       ])
       .where('i.interactionId LIKE :q OR i.interactionTpsId LIKE :q', { q: like })
       .orderBy('i.interactionDateTime', 'DESC')
-      .limit(Math.max(1, Math.min(limit, 25)))
+      .limit(Math.max(1, Math.min(limit, 25)));
+    if (clientId) qb.andWhere('i.clientId = :clientId', { clientId });
+    const rows = await qb
       .getRawMany<{
         id: string;
         interactionId: string | null;
@@ -3040,9 +3042,10 @@ ${prompt}
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    clientId?: string,
   ) {
     const { clause: filterClause, extraParams } = this.buildRawFilters(
-      filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels,
+      filterKey, campaign, agent, excludeOutcomes, vehicleMake, vehicleModels, clientId,
     );
     const effDate = 'COALESCE(ia.interactionDateTime, ia.createdAt)';
     const jv = (p: string) => `JSON_VALUE(ii.campaign_answers_json, '${p}')`;
@@ -3104,6 +3107,7 @@ ${prompt}
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    clientId?: string,
   ) {
     const { clause: filterClause, extraParams } = this.buildRawFilters(
       filterKey,
@@ -3112,6 +3116,7 @@ ${prompt}
       excludeOutcomes,
       vehicleMake,
       vehicleModels,
+      clientId,
     );
 
     const baseWhere = `
@@ -3333,6 +3338,7 @@ ${prompt}
     agent?: string,
     excludeOutcomes?: string[],
     vehicleMake?: string, vehicleModels?: string[],
+    clientId?: string,
   ) {
     const { clause: filterClause, extraParams } = this.buildRawFilters(
       filterKey,
@@ -3341,6 +3347,7 @@ ${prompt}
       excludeOutcomes,
       vehicleMake,
       vehicleModels,
+      clientId,
     );
 
     const params: unknown[] = [from, to, ...extraParams];
@@ -3884,6 +3891,7 @@ ${prompt}
     narrativeType?: NarrativeType;
     createdFrom?: Date;
     createdTo?: Date;
+    clientId?: string;
   }) {
     const qb = this.summariesRepo
       .createQueryBuilder('s')
@@ -3892,6 +3900,9 @@ ${prompt}
 
     if (opts.filterKey) {
       qb.andWhere('s.filterKey LIKE :fk', { fk: `${opts.filterKey}%` });
+    }
+    if (opts.clientId) {
+      qb.andWhere('s.clientId = :clientId', { clientId: opts.clientId });
     }
     if (opts.provider) {
       qb.andWhere('s.filterKey LIKE :prov', { prov: `%__${opts.provider}__%` });

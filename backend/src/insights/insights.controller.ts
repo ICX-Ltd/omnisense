@@ -12,6 +12,17 @@ import { IsOptional, IsString } from 'class-validator';
 import { InsightsService } from './insights.service';
 import { InsightsSummaryService, InteractionFilter, NarrativeType, FilterOptions } from './insights-summary.service';
 import { normalizeProvider } from './helpers/provider.helper';
+import { Auth, requireRole } from '../modules/auth/auth-scope.decorator';
+import type { AuthScope } from '../modules/auth/auth-scope.decorator';
+
+// Operations, Client Services, Survey Insights and Narratives are reachable by
+// any authenticated role, including the external 'client' role — client-
+// scoping (not a role allowlist) is the real gate here, same convention as
+// survey-analytics.controller.ts.
+const ANY_AUTHENTICATED_ROLE = ['dev', 'admin', 'supervisor', 'user', 'agent', 'client'];
+// Mutating/maintenance actions reachable from these dashboards that a client
+// must never trigger themselves.
+const INTERNAL_ONLY_ROLES = ['dev', 'admin', 'supervisor', 'user', 'agent'];
 
 class InsightsRequestDto {
   @IsString()
@@ -52,16 +63,19 @@ export class InsightsController {
 
   @Get('summary/filters')
   async summaryFilters(
+    @Auth() scope: AuthScope,
     @Query('filterKey') filterKey?: string,
   ): Promise<FilterOptions> {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const filter = filterKey ? normalizeInteractionFilter(filterKey) : undefined;
-    return this.svcSummary.getFilterOptions(filter);
+    return this.svcSummary.getFilterOptions(filter, scope.effectiveClientId ?? undefined);
   }
 
   // ── Ops endpoints ──────────────────────────────────────────────────────────
 
   @Get('ops/chat-response-time')
   async opsChatResponseTime(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -69,19 +83,23 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getChatResponseTimeMetrics(
       fromDate, toDate, filter, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, scope.effectiveClientId ?? undefined,
     );
   }
 
   // Recompute chat response-time metrics from the transcript text for every
   // chat in the supplied filter window. Always overwrites — backend code is
-  // the canonical source of these numbers.
+  // the canonical source of these numbers. Mutating maintenance action: never
+  // reachable by the 'client' role, even though the read endpoint above is.
   @Post('ops/recompute-chat-response-time')
   async opsRecomputeChatResponseTime(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -89,16 +107,19 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
+    requireRole(scope, INTERNAL_ONLY_ROLES);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.recomputeChatResponseTimeMetrics(
       fromDate, toDate, filter, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/dimensions')
   async opsDimensions(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -107,6 +128,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('excludePartial') excludePartial?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getOpsDimensionComparison(
@@ -114,11 +136,13 @@ export class InsightsController {
       parseExcludeOutcomes(excludeOutcomesRaw),
       undefined, undefined,
       excludePartial === 'true',
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-bucket')
   async opsByBucket(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -129,6 +153,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!bucket) throw new BadRequestException('bucket is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -137,11 +162,13 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-coaching-need')
   async opsByCoachingNeed(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -152,6 +179,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!need) throw new BadRequestException('need is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -160,11 +188,13 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-outcome')
   async opsByOutcome(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -175,6 +205,7 @@ export class InsightsController {
     @Query('agent') agent?: string,
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!outcome) throw new BadRequestException('outcome is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -183,11 +214,13 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined, scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-partial-outcome')
   async opsByPartialOutcome(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -199,6 +232,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('layer') layer?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!outcome) throw new BadRequestException('outcome is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -208,12 +242,15 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined,
       layerKey,
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-low-score-agent')
   async opsByLowScoreAgent(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -225,6 +262,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('layer') layer?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!targetAgent) throw new BadRequestException('agent is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -234,12 +272,15 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, filterAgent, parseExcludeOutcomes(excludeOutcomesRaw),
+      undefined, undefined,
       layerKey,
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-interest-level')
   async opsByInterestLevel(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -252,6 +293,7 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!interestLevel) throw new BadRequestException('interestLevel is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -260,12 +302,13 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, parseCsvParam(vehicleModelsRaw),
+      vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-objection-category')
   async opsByObjectionCategory(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -277,6 +320,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('opportunitiesOnly') opportunitiesOnly?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!category) throw new BadRequestException('category is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -287,11 +331,13 @@ export class InsightsController {
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
       undefined, undefined,
       opportunitiesOnly === 'true',
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-competitor')
   async opsByCompetitor(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -304,6 +350,7 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!competitor) throw new BadRequestException('competitor is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -312,12 +359,13 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, parseCsvParam(vehicleModelsRaw),
+      vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/opportunity')
   async opsOpportunity(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -327,13 +375,15 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
+    return this.svcSummary.getOpportunityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined);
   }
 
   @Get('ops/vulnerability')
   async opsVulnerability(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -343,13 +393,15 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getVulnerabilityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
+    return this.svcSummary.getVulnerabilityMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined);
   }
 
   @Get('ops/vulnerability-interactions')
   async opsVulnerabilityInteractions(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -361,17 +413,19 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     const parsedLimit = Math.min(parseInt(limit ?? '200', 10) || 200, 500);
     return this.svcSummary.getVulnerabilityInteractions(
       fromDate, toDate, filter, answer, parsedLimit, 0,
-      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw),
+      campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interactions-by-opportunity-reason')
   async opsByOpportunityReason(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -384,6 +438,7 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!reason) throw new BadRequestException('reason is required');
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
@@ -392,27 +447,30 @@ export class InsightsController {
       Math.min(parseInt(limit ?? '200', 10) || 200, 500),
       parseInt(offset ?? '0', 10) || 0,
       campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw),
-      vehicleMake, parseCsvParam(vehicleModelsRaw),
+      vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('ops/interaction-detail/:id')
-  async opsInteractionDetail(@Param('id') id: string) {
-    const detail = await this.svcSummary.getInteractionDetail(id);
+  async opsInteractionDetail(@Auth() scope: AuthScope, @Param('id') id: string) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
+    const detail = await this.svcSummary.getInteractionDetail(id, scope.effectiveClientId ?? undefined);
     if (!detail) throw new NotFoundException('Interaction not found');
     return detail;
   }
 
   @Post('ask')
-  async ask(@Body() body: { id?: string; question?: string; provider?: string }) {
+  async ask(@Auth() scope: AuthScope, @Body() body: { id?: string; question?: string; provider?: string }) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     if (!body?.id || !body?.question?.trim()) {
       throw new BadRequestException('id and question are required');
     }
-    return this.svcSummary.askInteraction(String(body.id), body.question, body.provider);
+    return this.svcSummary.askInteraction(String(body.id), body.question, body.provider, scope.effectiveClientId ?? undefined);
   }
 
   @Get('parity/campaign-analysis')
   async parityCampaignAnalysis(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -422,6 +480,7 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getParityCampaignAnalysis(
@@ -433,11 +492,13 @@ export class InsightsController {
       parseExcludeOutcomes(excludeOutcomesRaw),
       vehicleMake,
       parseCsvParam(vehicleModelsRaw),
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('client-services/trends')
   async clientServicesTrends(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -447,16 +508,19 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
     return this.svcSummary.getClientServicesTrends(
       fromDate, toDate, filter, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw),
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('parity/interactions')
   async parityInteractions(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -477,6 +541,7 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
 
@@ -530,12 +595,14 @@ export class InsightsController {
       parseExcludeOutcomes(excludeOutcomesRaw),
       vehicleMake,
       parseCsvParam(vehicleModelsRaw),
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('interactions/search')
-  async searchInteractions(@Query('q') q?: string) {
-    return this.svcSummary.searchInteractions(q ?? '');
+  async searchInteractions(@Auth() scope: AuthScope, @Query('q') q?: string) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
+    return this.svcSummary.searchInteractions(q ?? '', undefined, scope.effectiveClientId ?? undefined);
   }
 
   @Get('summary')
@@ -617,6 +684,7 @@ export class InsightsController {
 
   @Get('summary/client-services')
   async summaryClientServices(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -626,9 +694,10 @@ export class InsightsController {
     @Query('vehicleMake') vehicleMake?: string,
     @Query('vehicleModels') vehicleModelsRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const filter = normalizeInteractionFilter(filterKey);
-    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw));
+    return this.svcSummary.getClientServicesMetrics(fromDate, toDate, filter, campaign, agent, parseExcludeOutcomes(excludeOutcomesRaw), vehicleMake, parseCsvParam(vehicleModelsRaw), scope.effectiveClientId ?? undefined);
   }
 
   @Get('usage')
@@ -692,6 +761,7 @@ export class InsightsController {
 
   @Post('summary/narrative')
   async narrative(
+    @Auth() scope: AuthScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('filterKey') filterKey?: string,
@@ -702,6 +772,7 @@ export class InsightsController {
     @Query('excludeOutcomes') excludeOutcomesRaw?: string,
     @Query('model') model?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const { fromDate, toDate } = parseDateRange(from, to);
     const provider = normalizeProvider(providerRaw);
     const filter = normalizeInteractionFilter(filterKey);
@@ -711,11 +782,13 @@ export class InsightsController {
       fromDate, toDate, filter, provider, narrativeType, campaign, agent,
       parseExcludeOutcomes(excludeOutcomesRaw), undefined, undefined,
       model?.trim() || undefined,
+      scope.effectiveClientId ?? undefined,
     );
   }
 
   @Get('summary/narratives')
   async narratives(
+    @Auth() scope: AuthScope,
     @Query('limit') limit?: string,
     @Query('filterKey') filterKey?: string,
     @Query('provider') providerRaw?: string,
@@ -723,6 +796,7 @@ export class InsightsController {
     @Query('createdFrom') createdFromRaw?: string,
     @Query('createdTo') createdToRaw?: string,
   ) {
+    requireRole(scope, ANY_AUTHENTICATED_ROLE);
     const parsedLimit = parseInt(limit ?? '20', 10);
 
     if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
@@ -756,6 +830,7 @@ export class InsightsController {
       narrativeType,
       createdFrom,
       createdTo,
+      clientId: scope.effectiveClientId ?? undefined,
     });
   }
 }
