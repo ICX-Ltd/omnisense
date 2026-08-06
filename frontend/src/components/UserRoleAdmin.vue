@@ -14,14 +14,17 @@ import {
   type AdminUser,
   type RoleDef,
 } from "@/services/user.service";
+import { listClients, type ClientDef } from "@/services/clients.service";
 import { useAuth } from "@/composables/useAuth";
 
 const { user: currentUser } = useAuth();
 
 const users = ref<AdminUser[]>([]);
 const roles = ref<RoleDef[]>([]);
+const clients = ref<ClientDef[]>([]);
 const selectedId = ref("");
 const nextRole = ref("");
+const nextClientId = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -33,6 +36,7 @@ const selectedUser = computed(
 const selectedRole = computed(
   () => roles.value.find((r) => r.id === nextRole.value) ?? null,
 );
+const isClientRole = computed(() => nextRole.value === "client");
 
 // The server refuses this too — mirrored here so the button explains itself
 // rather than failing on click.
@@ -46,16 +50,18 @@ const canSave = computed(
     !!nextRole.value &&
     nextRole.value !== selectedUser.value.roleId &&
     !isSelf.value &&
-    !saving.value,
+    !saving.value &&
+    (!isClientRole.value || !!nextClientId.value),
 );
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [u, r] = await Promise.all([listUsers(), listRoles()]);
+    const [u, r, c] = await Promise.all([listUsers(), listRoles(), listClients()]);
     users.value = u;
     roles.value = r;
+    clients.value = c;
   } catch (e: any) {
     error.value = e?.response?.data?.message ?? e?.message ?? "Failed to load";
   } finally {
@@ -66,6 +72,7 @@ async function load() {
 function onPickUser() {
   // Preselect the current role so the dropdown shows where they are now.
   nextRole.value = selectedUser.value?.roleId ?? "";
+  nextClientId.value = selectedUser.value?.clientId ?? "";
   error.value = "";
 }
 
@@ -74,7 +81,11 @@ async function save() {
   saving.value = true;
   error.value = "";
   try {
-    await updateUserRole(selectedUser.value.id, nextRole.value);
+    await updateUserRole(
+      selectedUser.value.id,
+      nextRole.value,
+      isClientRole.value ? nextClientId.value : undefined,
+    );
     successMsg.value = `${selectedUser.value.email} is now ${nextRole.value}`;
     setTimeout(() => (successMsg.value = ""), 4000);
     await load();
@@ -145,6 +156,17 @@ onMounted(load);
             You cannot change your own role — a demotion would lock you out of
             reversing it. Ask another admin.
           </div>
+        </div>
+      </div>
+
+      <div v-if="isClientRole" class="field-row">
+        <label class="field-label">Client</label>
+        <div class="input-wrap">
+          <select v-model="nextClientId" class="input" :disabled="saving">
+            <option value="">Select a client…</option>
+            <option v-for="c in clients" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+          <div class="hint">This user will only see this client's data.</div>
         </div>
       </div>
 

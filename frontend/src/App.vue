@@ -21,6 +21,10 @@
 
   <div v-else class="app-shell">
     <div class="app-shell-inner">
+      <div v-if="viewingAs" class="view-as-banner">
+        Viewing as: <strong>{{ viewAsClientName }}</strong> — this preview matches exactly what that client sees.
+        <button class="view-as-exit" @click="setViewAs(null, null)">Exit</button>
+      </div>
       <div class="app-header">
         <div class="app-header-row">
           <div class="app-brand">
@@ -32,7 +36,28 @@
           </div>
           <div class="app-topbar-right">
             <GlobalRecordSearch />
-            <div class="settings-dropdown" ref="setRef">
+            <div v-if="realCanUseViewAs" class="view-as-dropdown" ref="viewAsRef">
+              <button class="settings-btn" :class="{ 'settings-btn--active': viewingAs }" @click="onToggleViewAsMenu" title="View as client">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="tab-chev" :class="{ 'tab-chev--open': viewAsOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div v-if="viewAsOpen" class="tab-dropdown-menu settings-dropdown-menu view-as-menu">
+                <div class="view-as-menu-label">View as client</div>
+                <button
+                  v-for="c in viewAsClients"
+                  :key="c.id"
+                  class="tab-dropdown-item"
+                  :class="{ 'tab-dropdown-item--active': viewAsClientId === c.id }"
+                  @click="setViewAs(c.id, c.name); viewAsOpen = false"
+                >{{ c.name }}</button>
+                <div v-if="!viewAsClients.length" class="view-as-menu-empty">No clients yet</div>
+                <template v-if="viewingAs">
+                  <div class="settings-menu-divider" />
+                  <button class="tab-dropdown-item" @click="setViewAs(null, null); viewAsOpen = false">Exit view-as</button>
+                </template>
+              </div>
+            </div>
+            <div class="settings-dropdown" ref="setRef" v-if="!isClient">
               <button class="settings-btn" :class="{ 'settings-btn--active': isSettingsMenuTab }" @click="setOpen = !setOpen" title="Settings">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                 <svg class="tab-chev" :class="{ 'tab-chev--open': setOpen }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -95,25 +120,32 @@
       </div>
 
       <div class="app-content">
-        <keep-alive>
-          <TestLab v-if="tab === 'test'" />
-          <DataQueue v-else-if="tab === 'data'" />
-          <BatchDashboard v-else-if="tab === 'batch'" />
-          <TranscriptionToolsPage v-else-if="tab === 'transcription'" />
-          <SummaryDashboard v-else-if="tab === 'summary'" />
-          <OperationsDashboard v-else-if="tab === 'ops'" />
-          <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
-          <SurveyDashboard v-else-if="tab === 'survey'" />
-          <CsatDashboard v-else-if="tab === 'csat'" />
-          <NarrativesPage v-else-if="tab === 'narratives'" />
-          <PromptsAdmin v-else-if="tab === 'prompts'" />
-          <SystemHealthPanel v-else-if="tab === 'health'" />
-          <ModelRegistryPage v-else-if="tab === 'models'" />
-          <!-- Role-guarded on the render too, not just the menu item: ?tab=dataimport
-               would otherwise let a supervisor reach a page that 403s. -->
-          <DataImportPage v-else-if="tab === 'dataimport' && canImportData" />
-          <SettingsPanel v-else />
-        </keep-alive>
+        <!-- Render-time guard, not just nav-hiding: a client role (real or
+             view-as previewed) can only ever reach CLIENT_ALLOWED_TABS, even
+             by editing ?tab= directly — matches the server-side scoping in
+             insights.controller.ts / survey-analytics.controller.ts. -->
+        <template v-if="isTabAllowed(tab)">
+          <keep-alive>
+            <TestLab v-if="tab === 'test'" />
+            <DataQueue v-else-if="tab === 'data'" />
+            <BatchDashboard v-else-if="tab === 'batch'" />
+            <TranscriptionToolsPage v-else-if="tab === 'transcription'" />
+            <SummaryDashboard v-else-if="tab === 'summary'" />
+            <OperationsDashboard v-else-if="tab === 'ops'" />
+            <ClientServicesDashboard v-else-if="tab === 'clientservices'" />
+            <SurveyDashboard v-else-if="tab === 'survey'" />
+            <CsatDashboard v-else-if="tab === 'csat'" />
+            <NarrativesPage v-else-if="tab === 'narratives'" />
+            <PromptsAdmin v-else-if="tab === 'prompts'" />
+            <SystemHealthPanel v-else-if="tab === 'health'" />
+            <ModelRegistryPage v-else-if="tab === 'models'" />
+            <!-- Role-guarded on the render too, not just the menu item: ?tab=dataimport
+                 would otherwise let a supervisor reach a page that 403s. -->
+            <DataImportPage v-else-if="tab === 'dataimport' && canImportData" />
+            <SettingsPanel v-else />
+          </keep-alive>
+        </template>
+        <div v-else class="tab-not-allowed">You don't have access to this section.</div>
       </div>
     </div>
   </div>
@@ -141,10 +173,41 @@ import TwoFactorPanel from "./components/auth/TwoFactorPanel.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { useAuth, type User } from "./composables/useAuth";
 import { useAccess } from "./composables/useAccess";
+import { listClients } from "./services/clients.service";
 import logoUrl from "./assets/ai-icon.png";
 
-const { canSeeAdminTools, canSeeDevTools, canImportData } = useAccess();
+const {
+  canSeeAdminTools,
+  canSeeDevTools,
+  canImportData,
+  isClient,
+  allowedTabs,
+  realCanUseViewAs,
+  viewingAs,
+  viewAsClientId,
+  viewAsClientName,
+  setViewAs,
+} = useAccess();
 const canSeeFullUI = computed(() => canSeeDevTools.value || canSeeAdminTools.value);
+function isTabAllowed(t: string) {
+  return !allowedTabs.value || (allowedTabs.value as readonly string[]).includes(t);
+}
+
+type ClientOption = { id: string; name: string };
+const viewAsClients = ref<ClientOption[]>([]);
+const viewAsOpen = ref(false);
+const viewAsRef = ref<HTMLElement | null>(null);
+async function loadViewAsClients() {
+  try {
+    viewAsClients.value = await listClients();
+  } catch {
+    viewAsClients.value = [];
+  }
+}
+function onToggleViewAsMenu() {
+  viewAsOpen.value = !viewAsOpen.value;
+  if (viewAsOpen.value && !viewAsClients.value.length) loadViewAsClients();
+}
 
 const tab = ref<"test" | "data" | "batch" | "transcription" | "summary" | "ops" | "clientservices" | "survey" | "csat" | "narratives" | "prompts" | "health" | "models" | "dataimport" | "settings">("ops");
 const dpOpen = ref(false);
@@ -169,13 +232,21 @@ const isDashboardTab = computed(() => ["ops", "clientservices", "survey", "csat"
 const VALID_TABS = ["test", "data", "batch", "transcription", "summary", "ops", "clientservices", "survey", "csat", "narratives", "prompts", "health", "models", "dataimport", "settings"] as const;
 function initialTab(): typeof tab.value {
   const p = new URLSearchParams(window.location.search).get("tab");
-  if (p && (VALID_TABS as readonly string[]).includes(p)) return p as typeof tab.value;
+  if (p && (VALID_TABS as readonly string[]).includes(p) && isTabAllowed(p)) return p as typeof tab.value;
+  if (allowedTabs.value) return allowedTabs.value[0] as typeof tab.value;
   return canSeeFullUI.value ? "test" : "ops";
 }
 watch(tab, (t) => {
   const url = new URL(window.location.href);
   url.searchParams.set("tab", t);
   window.history.replaceState({}, "", url);
+});
+// Re-clamp if the allowed set changes at runtime — e.g. an admin turns
+// view-as on/off while sitting on a tab that role can't reach.
+watch(allowedTabs, (allowed) => {
+  if (allowed && !allowed.includes(tab.value)) {
+    tab.value = allowed[0] as typeof tab.value;
+  }
 });
 
 function onClickOutsideMenus(e: MouseEvent) {
@@ -188,6 +259,9 @@ function onClickOutsideMenus(e: MouseEvent) {
   }
   if (dashOpen.value && dashRef.value && !dashRef.value.contains(target)) {
     dashOpen.value = false;
+  }
+  if (viewAsOpen.value && viewAsRef.value && !viewAsRef.value.contains(target)) {
+    viewAsOpen.value = false;
   }
 }
 onMounted(() => document.addEventListener("click", onClickOutsideMenus));
@@ -437,6 +511,67 @@ function handleLogout() {
   height: 1px;
   background: #e5e7eb;
   margin: 4px 6px;
+}
+
+/* ── View as banner + picker ──────────────────────────────────────────────── */
+.view-as-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  color: #78350f;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.view-as-exit {
+  margin-left: auto;
+  border: 1px solid #b45309;
+  border-radius: 8px;
+  background: #fff;
+  color: #92400e;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-as-exit:hover {
+  background: #fffbeb;
+}
+
+.view-as-dropdown {
+  position: relative;
+}
+
+.view-as-menu {
+  min-width: 200px;
+}
+
+.view-as-menu-label {
+  padding: 6px 14px 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+}
+
+.view-as-menu-empty {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  color: #9ca3af;
+}
+
+.tab-not-allowed {
+  padding: 40px 20px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.95rem;
 }
 
 /* ── Tab dropdown ─────────────────────────────────────────────────────────── */

@@ -22,6 +22,7 @@
       <!-- Same gate as the password reset: granting a role can hand someone
            full access, so it is not a supervisor-level action. -->
       <UserRoleAdmin v-if="canSeeDevTools || isAdmin" />
+      <ClientsAdmin v-if="canSeeDevTools || isAdmin" />
     </div>
   </div>
 </template>
@@ -32,6 +33,7 @@ import ResetPassword from "./ResetPassword.vue";
 import CreateUserAdmin from "./CreateUserAdmin.vue";
 import ResetUserPasswordAdmin from "./ResetUserPasswordAdmin.vue";
 import UserRoleAdmin from "./UserRoleAdmin.vue";
+import ClientsAdmin from "./ClientsAdmin.vue";
 import { useAccess } from "../composables/useAccess";
 
 // Reset-another-user's-password is dev/admin only — narrower than canSeeAdminTools,

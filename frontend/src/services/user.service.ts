@@ -6,6 +6,7 @@ export type AdminUser = {
   name: string;
   displayName: string | null;
   roleId: string | null;
+  clientId?: string | null;
   active: boolean;
   lastLoggedInDate: string | null;
 };
@@ -31,14 +32,15 @@ export async function createUser(payload: {
   displayName: string;
   password: string;
   roleId?: string;
+  clientId?: string;
 }) {
   const { data } = await api.post("/uiapi/users/create", payload);
   return data;
 }
 
 /** Change a user's role. Rejected by the server if you target yourself. */
-export async function updateUserRole(id: string, roleId: string) {
-  const { data } = await api.patch(`/uiapi/users/${id}/role`, { roleId });
+export async function updateUserRole(id: string, roleId: string, clientId?: string) {
+  const { data } = await api.patch(`/uiapi/users/${id}/role`, { roleId, clientId });
   return data;
 }
 

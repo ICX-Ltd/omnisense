@@ -2,12 +2,14 @@
 import IconChip from "./IconChip.vue";
 import { computed, onMounted, ref } from "vue";
 import { createUser, listRoles, type RoleDef } from "@/services/user.service";
+import { listClients, type ClientDef } from "@/services/clients.service";
 
 const loading = ref(false);
 const error = ref("");
 const successMsg = ref("");
 
 const roles = ref<RoleDef[]>([]);
+const clients = ref<ClientDef[]>([]);
 
 const form = ref({
   email: "",
@@ -17,6 +19,7 @@ const form = ref({
   // rejected it, so every account was created with a null role that needed
   // direct database access to fix.
   roleId: "",
+  clientId: "",
 });
 
 onMounted(async () => {
@@ -25,23 +28,32 @@ onMounted(async () => {
   } catch {
     // Non-fatal: the form still works, the role just has to be set afterwards.
   }
+  try {
+    clients.value = await listClients();
+  } catch {
+    // Non-fatal: only blocks creating a 'client'-role user until retried.
+  }
 });
 
 const selectedRole = computed(
   () => roles.value.find((r) => r.id === form.value.roleId) ?? null,
 );
+// The client role is external-only access and must be scoped to exactly one
+// client — mirrors the server-side requirement in UserService.create.
+const isClientRole = computed(() => form.value.roleId === "client");
 
 const canSubmit = computed(() => {
   return (
     form.value.email.trim().length > 0 &&
     form.value.displayName.trim().length > 0 &&
     form.value.password.trim().length > 0 &&
-    form.value.roleId.trim().length > 0
+    form.value.roleId.trim().length > 0 &&
+    (!isClientRole.value || form.value.clientId.trim().length > 0)
   );
 });
 
 function resetForm() {
-  form.value = { email: "", displayName: "", password: "", roleId: "" };
+  form.value = { email: "", displayName: "", password: "", roleId: "", clientId: "" };
   error.value = "";
 }
 
@@ -61,6 +73,7 @@ async function submit() {
       displayName: form.value.displayName.trim(),
       password: form.value.password,
       roleId: form.value.roleId,
+      clientId: isClientRole.value ? form.value.clientId : undefined,
     });
 
     showSuccess("User created");
@@ -117,6 +130,17 @@ async function submit() {
               </option>
             </select>
             <div v-if="selectedRole" class="hint">{{ selectedRole.description }}</div>
+          </div>
+        </div>
+
+        <div v-if="isClientRole" class="field-row">
+          <label class="field-label">Client</label>
+          <div class="input-wrap">
+            <select v-model="form.clientId" class="input" :disabled="loading">
+              <option value="">Select a client…</option>
+              <option v-for="c in clients" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <div class="hint">This user will only see this client's data.</div>
           </div>
         </div>
 

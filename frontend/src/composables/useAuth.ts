@@ -5,6 +5,7 @@ export type User = {
   name?: string;
   email?: string;
   roleId?: string | null;
+  clientId?: string | null;
   tagList?: Record<string, any> | null;
 };
 
